@@ -1,0 +1,65 @@
+[
+  {
+    "index": 1,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\01_apple.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\01_apple.svg",
+    "width": 530,
+    "height": 682
+  },
+  {
+    "index": 2,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\02_banana.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\02_banana.svg",
+    "width": 682,
+    "height": 682
+  },
+  {
+    "index": 3,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\03_cat.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\03_cat.svg",
+    "width": 543,
+    "height": 603
+  },
+  {
+    "index": 4,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\04_dog.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\04_dog.svg",
+    "width": 682,
+    "height": 682
+  },
+  {
+    "index": 5,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\05_cup.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\05_cup.svg",
+    "width": 682,
+    "height": 682
+  },
+  {
+    "index": 6,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\06_chair.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\06_chair.svg",
+    "width": 684,
+    "height": 682
+  },
+  {
+    "index": 7,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\07_lamp.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\07_lamp.svg",
+    "width": 619,
+    "height": 684
+  },
+  {
+    "index": 8,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\08_book.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\08_book.svg",
+    "width": 682,
+    "height": 684
+  },
+  {
+    "index": 9,
+    "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\09_shoe.png",
+    "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\outputs\\extracted\\09_shoe.svg",
+    "width": 684,
+    "height": 548
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "objects": [
+    "apple",
+    "banana",
+    "cat",
+    "dog",
+    "cup",
+    "chair",
+    "lamp",
+    "book",
+    "shoe"
+  ],
+  "style": "hand-drawn illustration",
+  "extra_prompt": "Make each object easy to isolate from the white background."
+}
