@@ -54,6 +54,22 @@ body {
   letter-spacing: 0.5px;
 }
 
+.home-btn {
+  background: #fffbe8;
+  color: var(--ink);
+  border: 1px solid #ead7bd;
+  width: 36px; height: 36px;
+  padding: 0;
+  font-size: 18px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  margin-right: 10px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.2s ease;
+}
+.home-btn:hover { background: var(--accent-2); transform: scale(1.05); }
+
 /* ---- Timeline ---- */
 .timeline {
   display: flex;
@@ -997,3 +1013,158 @@ button:disabled {
   border-top: 1px solid #f0e3d0;
   background: var(--panel);
 }
+
+.report-card.weak {
+  background: #fff4ec;
+  border-color: #ffd7c0;
+}
+
+/* ---------- Metric bars ---------- */
+.metric-list { display: flex; flex-direction: column; gap: 14px; }
+.metric-row { }
+.metric-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.metric-name { font-size: 14px; font-weight: 600; }
+.metric-val { font-size: 14px; font-weight: 700; }
+.metric-bar {
+  width: 100%;
+  height: 10px;
+  background: #f4e3ca;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.metric-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.8s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.metric-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+  line-height: 1.55;
+  padding-left: 4px;
+}
+.ev-label {
+  display: inline-block;
+  background: #f0e3d0;
+  color: var(--ink);
+  padding: 1px 6px;
+  border-radius: 6px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ev-ref {
+  color: var(--accent);
+  font-weight: 600;
+  background: #fff4ec;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+/* ---------- Share view ---------- */
+.share-view {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 28px 24px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(255, 210, 77, 0.25) 0, transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(255, 138, 91, 0.22) 0, transparent 45%);
+}
+.share-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 12% 18%, var(--accent-2) 3px, transparent 4px),
+    radial-gradient(circle at 88% 22%, var(--accent) 3px, transparent 4px),
+    radial-gradient(circle at 22% 80%, var(--good) 3px, transparent 4px),
+    radial-gradient(circle at 78% 72%, var(--accent) 2px, transparent 3px),
+    radial-gradient(circle at 50% 14%, var(--accent-2) 2px, transparent 3px);
+  opacity: 0.55;
+}
+.share-honor { text-align: center; margin-bottom: 18px; position: relative; }
+.trophy {
+  font-size: 56px;
+  animation: trophy-bounce 1.4s ease-in-out infinite;
+  display: inline-block;
+}
+@keyframes trophy-bounce {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-8px) rotate(3deg); }
+}
+.honor-title {
+  font-size: 32px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin: 10px 0 8px;
+  letter-spacing: 2px;
+}
+.share-summary {
+  font-size: 15px;
+  color: var(--ink);
+  max-width: 520px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+.achievements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
+  margin: 20px auto;
+}
+.achv-card {
+  background: #fffefb;
+  border: 2px solid #f0deaa;
+  border-radius: 16px;
+  padding: 14px 10px;
+  text-align: center;
+  box-shadow: 0 4px 14px rgba(61, 43, 31, 0.08);
+  transition: transform 0.15s ease;
+  animation: pop 0.45s ease;
+}
+.achv-card:hover { transform: translateY(-3px); }
+.achv-icon { font-size: 28px; margin-bottom: 6px; }
+.achv-text { font-size: 13px; color: var(--ink); font-weight: 600; line-height: 1.35; }
+
+.share-qr-wrap {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 16px 0 10px;
+  background: #fffdf8;
+  padding: 12px 18px;
+  border-radius: 16px;
+  border: 1px dashed #ead7bd;
+}
+.share-qr { width: 120px; height: 120px; display: grid; place-items: center; }
+.share-qr svg { width: 120px; height: 120px; }
+.share-qr-hint {
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 600;
+}
+.share-qr-hint span { color: var(--muted); font-size: 12px; font-weight: 400; }
+
+.share-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+.share-actions button { font-size: 15px; padding: 12px 20px; }

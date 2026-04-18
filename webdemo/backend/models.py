@@ -150,5 +150,6 @@ class ReportRequest(BaseModel):
 
 
 class ReportResponse(BaseModel):
-    kid_section: dict            # {title, your_story, original_story, differences:[...], questions:[...]}
-    parent_section: dict          # {title, traits:[...], observations:[...], suggestions:[...]}
+    share: dict                   # {summary, honor_title, achievements:[{icon,text}]}
+    kid_section: dict             # {title, your_story, original_story, differences:[...], questions:[...]}
+    parent_section: dict          # {title, traits:[...], weaknesses:[...], observations:[...], suggestions:[...], metrics:[{name,value,description}]}
