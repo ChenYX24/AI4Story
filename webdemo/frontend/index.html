@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>AI4Story · 互动故事书</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <header id="top-bar">
+    <div class="brand">📖 AI4Story · 互动故事书</div>
+    <nav id="timeline" class="timeline"></nav>
+  </header>
+
+  <main id="app">
+    <section id="stage" class="stage"></section>
+    <aside id="side" class="side"></aside>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <div id="loader" class="loader hidden">
+    <div class="loader-box">
+      <div class="spinner"></div>
+      <div id="loader-text">AI 正在作画…</div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
