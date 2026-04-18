@@ -1,0 +1,84 @@
+{
+  "characters": [
+    {
+      "name": "小红帽",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\characters\\小红帽.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\characters\\小红帽.svg",
+      "width": 1183,
+      "height": 1535
+    },
+    {
+      "name": "大灰狼",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\characters\\大灰狼.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\characters\\大灰狼.svg",
+      "width": 1202,
+      "height": 1517
+    }
+  ],
+  "objects": [
+    {
+      "name": "鲜花",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\鲜花.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\鲜花.svg",
+      "width": 506,
+      "height": 630
+    },
+    {
+      "name": "大树",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\大树.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\大树.svg",
+      "width": 470,
+      "height": 552
+    },
+    {
+      "name": "草地",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\草地.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\草地.svg",
+      "width": 613,
+      "height": 436
+    },
+    {
+      "name": "石头",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\石头.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\石头.svg",
+      "width": 518,
+      "height": 379
+    },
+    {
+      "name": "蘑菇",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\蘑菇.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\蘑菇.svg",
+      "width": 461,
+      "height": 503
+    },
+    {
+      "name": "蝴蝶",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\蝴蝶.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\蝴蝶.svg",
+      "width": 505,
+      "height": 354
+    },
+    {
+      "name": "鸟巢",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\鸟巢.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\鸟巢.svg",
+      "width": 623,
+      "height": 487
+    },
+    {
+      "name": "露珠",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\露珠.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\露珠.svg",
+      "width": 433,
+      "height": 580
+    },
+    {
+      "name": "荆棘",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\荆棘.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\image\\objects\\荆棘.svg",
+      "width": 444,
+      "height": 352
+    }
+  ],
+  "background": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\002\\background\\background.png"
+}

@@ -1,0 +1,51 @@
+{
+  "characters": {
+    "小红帽": {
+      "name": "小红帽",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\小红帽.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\小红帽.svg"
+    },
+    "大灰狼": {
+      "name": "大灰狼",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\大灰狼.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\大灰狼.svg"
+    },
+    "外婆": {
+      "name": "外婆",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\外婆.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\外婆.svg"
+    },
+    "猎人": {
+      "name": "猎人",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\猎人.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\characters\\猎人.svg"
+    }
+  },
+  "objects": {
+    "篮子": {
+      "name": "篮子",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\篮子.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\篮子.svg"
+    },
+    "鲜花": {
+      "name": "鲜花",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\鲜花.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\鲜花.svg"
+    },
+    "床": {
+      "name": "床",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\床.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\床.svg"
+    },
+    "睡帽": {
+      "name": "睡帽",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\睡帽.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\睡帽.svg"
+    },
+    "步枪": {
+      "name": "步枪",
+      "png": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\步枪.png",
+      "svg": "C:\\Users\\huawei\\Desktop\\Lgw_workspace\\CodeWorkSpace\\AI4Story\\scenes\\global\\objects\\步枪.svg"
+    }
+  }
+}

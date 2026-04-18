@@ -1,0 +1,58 @@
+{
+  "scene_index": 5,
+  "scene_type": "叙事场景",
+  "event_summary": "猎人冲进屋子制服了大灰狼，成功救出了外婆和小红帽。",
+  "narration": "幸好一位路过的小猎人听到了呼救声，他冲进屋里，迅速制服了大灰狼，救出了惊魂未定的小红帽和外婆。",
+  "dialogue": [
+    {
+      "speaker": "猎人",
+      "content": "别怕！我来救你们了！",
+      "tone": "坚定有力"
+    }
+  ],
+  "characters": [
+    {
+      "name": "猎人",
+      "pose": "单腿跪地，身体前倾，右手紧握枪械指向前方，左手按压地面保持平衡，表情严肃",
+      "related_objects": []
+    },
+    {
+      "name": "大灰狼",
+      "pose": "四肢乱蹬试图挣扎，面部表情痛苦恐惧，双眼圆睁",
+      "related_objects": []
+    },
+    {
+      "name": "小红帽",
+      "pose": "身体蜷缩，双手紧抓衣角，眼神充满恐惧又带着一丝庆幸",
+      "related_objects": []
+    },
+    {
+      "name": "外婆",
+      "pose": "坐在椅子上，双手捂着胸口，身体微微颤抖，眼神担忧地看着前方",
+      "related_objects": []
+    }
+  ],
+  "objects": [
+    {
+      "name": "床",
+      "appearance_description": "一张铺着白色床单和粉色被子的木制大床，床头有雕花"
+    },
+    {
+      "name": "步枪",
+      "appearance_description": "一支老式的木质枪托金属枪管的猎枪，斜靠在墙上"
+    },
+    {
+      "name": "篮子",
+      "appearance_description": "一个编织精美的藤编篮子，里面的东西散落一地"
+    },
+    {
+      "name": "鲜花",
+      "appearance_description": "一束色彩鲜艳的野花，散落在地板上"
+    },
+    {
+      "name": "睡帽",
+      "appearance_description": "一顶白色的软质圆顶睡帽，掉落在地上"
+    }
+  ],
+  "background_visual_description": "外婆温馨的卧室，光线明亮，气氛紧张但即将平息 一把木制的靠背椅，椅面上铺着红色坐垫 一个陶瓷制成的小碗，里面的药水被打翻在地 一个黄铜材质的烛台，上面的蜡烛被撞倒 一块带有几何图案的红色羊毛地毯，铺在木地板上"
+}

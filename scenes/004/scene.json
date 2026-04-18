@@ -1,0 +1,61 @@
+{
+  "scene_index": 4,
+  "scene_type": "交互场景",
+  "initial_frame": "小红帽站在床边捧着花篮，眉头微皱看着床上的大灰狼；大灰狼坐在床沿突然挺直身体张开双臂准备扑击。",
+  "interaction_goal": "小红帽通过观察特征试探对方是否真的是外婆。",
+  "event_outcome": "大灰狼暴露本性，猛地跳起来扑向小红帽。",
+  "narration": "小红帽提着花来到床边，觉得今天的“外婆”样子很奇怪。她走近几步问道：‘外婆，你的耳朵怎么这么大呀？’",
+  "dialogue": [],
+  "characters": [
+    {
+      "name": "小红帽",
+      "pose": "双腿并拢站立，身体微微前倾，双手捧物置于身前，眉头微皱，眼神看向斜下方",
+      "related_objects": []
+    },
+    {
+      "name": "大灰狼",
+      "pose": "坐姿，身体突然挺直，双臂张开做出扑击的准备姿势，嘴巴张大露出尖牙，眼神凶狠",
+      "related_objects": []
+    }
+  ],
+  "objects": [
+    {
+      "name": "床",
+      "appearance_description": "一张铺着白色床单和粉色被子的木制大床，床头有雕花"
+    },
+    {
+      "name": "睡帽",
+      "appearance_description": "一顶白色的软质圆顶睡帽，边缘有蕾丝花边"
+    },
+    {
+      "name": "枕头",
+      "appearance_description": "一个方形的白色枕头，上面绣着简单的花纹"
+    },
+    {
+      "name": "花瓶",
+      "appearance_description": "一个透明的玻璃花瓶，里面插着几枝刚摘的野花"
+    },
+    {
+      "name": "椅子",
+      "appearance_description": "一把木制的靠背椅，椅面上铺着红色坐垫"
+    },
+    {
+      "name": "烛台",
+      "appearance_description": "一个黄铜材质的烛台，上面插着一根未点燃的白色蜡烛"
+    },
+    {
+      "name": "相框",
+      "appearance_description": "一个木质边框的相框，里面是一张全家福照片"
+    },
+    {
+      "name": "毛毯",
+      "appearance_description": "一条厚实的灰色羊毛毯子，随意堆叠在床尾"
+    },
+    {
+      "name": "药碗",
+      "appearance_description": "一个陶瓷制成的小碗，里面盛着褐色的药水"
+    }
+  ],
+  "background_visual_description": "外婆温馨的卧室，墙壁贴着淡黄色壁纸，窗户透进柔和的光线",
+  "event_summary": "小红帽站在床边捧着花篮，眉头微皱看着床上的大灰狼；大灰狼坐在床沿突然挺直身体张开双臂准备扑击，大灰狼暴露本性，猛地跳起来扑向小红帽。"
+}

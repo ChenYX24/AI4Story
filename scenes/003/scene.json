@@ -1,0 +1,31 @@
+{
+  "scene_index": 3,
+  "scene_type": "叙事场景",
+  "event_summary": "大灰狼抢先到达外婆家，吞掉外婆并换上睡帽躺在床上伪装。",
+  "narration": "大灰狼飞快地跑到了外婆家，它敲开门骗外婆出来，然后趁其不备吞掉了外婆，最后穿上睡帽躺在床上假装生病。",
+  "dialogue": [
+    {
+      "speaker": "大灰狼",
+      "content": "哎呀，我病得好重啊，快进来陪陪我吧。",
+      "tone": "虚弱做作"
+    }
+  ],
+  "characters": [
+    {
+      "name": "大灰狼",
+      "pose": "上半身坐起，双手抓着被褥边缘，头部歪向一侧，眼睛睁大装作惊恐或生病的样子",
+      "related_objects": []
+    }
+  ],
+  "objects": [
+    {
+      "name": "床",
+      "appearance_description": "一张铺着白色床单和粉色被子的木制大床，床头有雕花"
+    },
+    {
+      "name": "睡帽",
+      "appearance_description": "一顶白色的软质圆顶睡帽，边缘有蕾丝花边"
+    }
+  ],
+  "background_visual_description": "外婆温馨的卧室，墙壁贴着淡黄色壁纸，窗户透进柔和的光线"
+}

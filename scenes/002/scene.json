@@ -1,0 +1,61 @@
+{
+  "scene_index": 2,
+  "scene_type": "交互场景",
+  "initial_frame": "小红帽单膝跪地弯腰采摘花朵，大灰狼从树后侧身站立注视着她。",
+  "interaction_goal": "大灰狼试图拖延小红帽的时间。",
+  "event_outcome": "小红帽继续采花，大灰狼趁机跑向外婆家。",
+  "narration": "小红帽被美丽的花朵吸引停下了脚步。这时，一只大灰狼从树后钻了出来，笑着和她搭话。",
+  "dialogue": [],
+  "characters": [
+    {
+      "name": "小红帽",
+      "pose": "单膝跪地，身体前倾弯腰，右手伸向地面，左手扶着膝盖，抬头看向侧上方",
+      "related_objects": []
+    },
+    {
+      "name": "大灰狼",
+      "pose": "侧身站立，身体微微前倾，嘴角上扬露出狡猾的笑容，视线看向侧前方",
+      "related_objects": []
+    }
+  ],
+  "objects": [
+    {
+      "name": "鲜花",
+      "appearance_description": "一束色彩鲜艳的野花，包含雏菊和蒲公英，用丝带捆扎"
+    },
+    {
+      "name": "大树",
+      "appearance_description": "一棵粗壮的老树干，树皮粗糙呈深褐色，树冠茂密"
+    },
+    {
+      "name": "草地",
+      "appearance_description": "一片绿色的草坪，上面点缀着零星的小野花"
+    },
+    {
+      "name": "石头",
+      "appearance_description": "一块灰色的不规则岩石，表面光滑"
+    },
+    {
+      "name": "蘑菇",
+      "appearance_description": "一朵红色的伞状蘑菇，菌盖上带有白色斑点"
+    },
+    {
+      "name": "蝴蝶",
+      "appearance_description": "一只翅膀展开的蓝色蝴蝶，停在半空中"
+    },
+    {
+      "name": "鸟巢",
+      "appearance_description": "一个由枯枝和苔藓编织而成的圆形鸟巢，挂在树枝上"
+    },
+    {
+      "name": "露珠",
+      "appearance_description": "一颗晶莹剔透的水珠，附着在绿色的草叶尖端"
+    },
+    {
+      "name": "荆棘",
+      "appearance_description": "一丛带刺的绿色灌木枝条，尖锐的刺向外伸展"
+    }
+  ],
+  "background_visual_description": "茂密的树林深处，光线较暗，地面覆盖着厚厚的落叶和青苔",
+  "event_summary": "小红帽单膝跪地弯腰采摘花朵，大灰狼从树后侧身站立注视着她，小红帽继续采花，大灰狼趁机跑向外婆家。"
+}
