@@ -1,0 +1,302 @@
+{
+  "valid": false,
+  "issues": [
+    "Scene 1 - 小红帽：pose 中包含'双手提着篮子'，违反了'不能提到任何物体'的规则。应改为描述手部姿态（如'双手自然下垂并微微弯曲'），将篮子移除出 pose 描述。",
+    "Scene 2 - 大灰狼：pose 中'视线看向斜上方'在语义上通常暗示注视天空或高处物体，虽未明说物体，但结合场景'路边'和'采花'，容易产生环境联想。建议改为更中性的'视线平视前方'或'视线看向侧前方'以符合纯棚拍参考标准。",
+    "Scene 3 - 大灰狼：pose 中包含'头部枕在枕头上'，违反了'不能提到任何物体（枕头）'的规则。应改为描述颈部和头部的姿态（如'头部后仰，颈部放松'）。",
+    "Scene 4 - 大灰狼：pose 中'四肢张开'对于狼这种四足动物描述尚可，但'前爪'一词带有强烈的生物解剖特征，若作为通用单人参考图（尤其是拟人化角色生成时）可能产生歧义，建议改为'双臂/前肢向两侧伸展'以更符合人体工学参考图的语境，不过主要问题在于 Scene 3 的枕头和 Scene 1 的篮子是硬性违规。此处'前爪'暂视为可接受的生物特征描述，但需警惕。",
+    "Scene 4 - 小红帽：pose 中'双臂护在胸前'是合格的身体姿态描述，无违规。"
+  ],
+  "fixed_payload": {
+    "story_summary": "小红帽在去外婆家途中被大灰狼欺骗，大灰狼先吃掉外婆并伪装成她，企图吃掉小红帽，最终被路过的猎人解救。",
+    "global_content": {
+      "characters": [
+        {
+          "name": "小红帽",
+          "appearance_description": "一个戴着鲜红色斗篷的小女孩，金色卷发，穿着蓝色连衣裙和白色围裙，背着一个小篮子"
+        },
+        {
+          "name": "大灰狼",
+          "appearance_description": "一只体型高大的灰色狼，毛发蓬松，眼神狡黠，牙齿尖锐"
+        },
+        {
+          "name": "外婆",
+          "appearance_description": "一位头发花白的老奶奶，戴着白色的睡帽，穿着紫色的长睡袍"
+        },
+        {
+          "name": "小猎人",
+          "appearance_description": "一位年轻男性，穿着绿色的狩猎夹克，背着猎枪，腰间挂着刀"
+        }
+      ],
+      "objects": [
+        {
+          "name": "面包果酱篮",
+          "appearance_description": "一个编织精美的柳条篮子，里面装着圆形的黑麦面包和几罐红色的果酱"
+        },
+        {
+          "name": "鲜花束",
+          "appearance_description": "一束色彩鲜艳的野花，包含雏菊、罂粟花和矢车菊，用草绳简单捆绑"
+        },
+        {
+          "name": "外婆的睡帽",
+          "appearance_description": "一顶带有蕾丝花边的白色软布睡帽"
+        }
+      ]
+    },
+    "scenes": [
+      {
+        "scene_index": 1,
+        "scene_type": "叙事场景",
+        "event_summary": "妈妈叮嘱小红帽走大路，小红帽出发并在森林遇到大灰狼。",
+        "narration": "妈妈把装满美食的篮子交给小红帽，叮嘱她走大路去看外婆。小红帽高高兴兴地出发了，却在森林里遇到了大灰狼，并天真地告诉了他外婆家的地址。",
+        "dialogue": [
+          {
+            "speaker": "妈妈",
+            "content": "记住，千万不要离开大路。",
+            "tone": "温柔而严肃"
+          },
+          {
+            "speaker": "小红帽",
+            "content": "好的妈妈，我会听话的。",
+            "tone": "乖巧"
+          },
+          {
+            "speaker": "大灰狼",
+            "content": "你要去哪里呀？",
+            "tone": "假装友善"
+          },
+          {
+            "speaker": "小红帽",
+            "content": "我要去森林另一头的外婆家。",
+            "tone": "毫无防备"
+          }
+        ],
+        "characters": [
+          {
+            "name": "小红帽",
+            "pose": "身体微微前倾，双手在身前自然弯曲呈提握状，面带微笑，视线平视前方",
+            "related_objects": [
+              {
+                "name": "面包果酱篮",
+                "relationship": "小红帽正提着这个篮子，需要作为整体参考图生成"
+              }
+            ]
+          },
+          {
+            "name": "大灰狼",
+            "pose": "侧身站立，身体微微前倾，嘴角上扬露出狡猾的笑容，视线看向侧前方",
+            "related_objects": []
+          }
+        ],
+        "objects": [],
+        "background_visual_description": "阳光透过茂密的树林洒下斑驳的光影，林间小路两旁开满了五颜六色的野花，远处隐约可见蜿蜒的小径"
+      },
+      {
+        "scene_index": 2,
+        "scene_type": "交互场景",
+        "initial_frame": "大灰狼站在路边，目光注视着正在弯腰采摘花朵的小红帽。",
+        "interaction_goal": "大灰狼想要拖延小红帽的时间。",
+        "event_outcome": "小红帽专注于采花，大灰狼趁机离开前往外婆家。",
+        "narration": "大灰狼骗小红帽去采更多漂亮的花送给外婆，自己则飞快地跑向了外婆家。",
+        "dialogue": [],
+        "characters": [
+          {
+            "name": "大灰狼",
+            "pose": "双腿分开站立，身体重心后移，一只手抬起指向远方，眼神专注且充满期待，视线看向侧前方",
+            "related_objects": []
+          },
+          {
+            "name": "小红帽",
+            "pose": "单膝微曲蹲下，身体前倾，双手伸向前方做出采摘动作，脸上带着惊喜的表情，视线向下聚焦",
+            "related_objects": [
+              {
+                "name": "鲜花束",
+                "relationship": "小红帽手中正在采摘并收集这些花，需要作为整体参考图生成"
+              }
+            ]
+          }
+        ],
+        "objects": [
+          {
+            "name": "野花丛",
+            "appearance_description": "一片生长在树根旁的低矮灌木，上面开着各种颜色的花朵"
+          },
+          {
+            "name": "松果",
+            "appearance_description": "几个散落在地上的棕色松果，表面有鳞片状纹理"
+          },
+          {
+            "name": "枯树枝",
+            "appearance_description": "一根断裂的干枯树枝，横躺在草地上"
+          },
+          {
+            "name": "蘑菇",
+            "appearance_description": "几朵红底白点的毒蝇伞蘑菇，生长在潮湿的泥土上"
+          },
+          {
+            "name": "石头",
+            "appearance_description": "一块灰色的圆润鹅卵石，表面光滑"
+          },
+          {
+            "name": "落叶",
+            "appearance_description": "一堆金黄色的干枯树叶，堆积在树根旁"
+          },
+          {
+            "name": "苔藓",
+            "appearance_description": "一片翠绿色的苔藓，覆盖在湿润的地面上"
+          },
+          {
+            "name": "鸟窝",
+            "appearance_description": "一个由细枝搭建的鸟巢，挂在低处的树枝分叉处"
+          },
+          {
+            "name": "蝴蝶",
+            "appearance_description": "一只翅膀上有橙色斑纹的蝴蝶，停在半空中"
+          }
+        ],
+        "background_visual_description": "茂密的森林深处，高大的树木遮天蔽日，地面上铺满了厚厚的落叶和青苔，光线昏暗但局部有光斑",
+        "event_summary": "大灰狼站在路边，目光注视着正在弯腰采摘花朵的小红帽，小红帽专注于采花，大灰狼趁机离开前往外婆家。"
+      },
+      {
+        "scene_index": 3,
+        "scene_type": "叙事场景",
+        "event_summary": "大灰狼伪装成外婆躺在床上，小红帽到达后发现异常并询问。",
+        "narration": "大灰狼到了外婆家，吞掉了外婆，然后穿上她的衣服戴上睡帽躺在床上。小红帽来到床边，觉得外婆的样子很不对劲。",
+        "dialogue": [
+          {
+            "speaker": "小红帽",
+            "content": "外婆，你的耳朵怎么这么大呀？",
+            "tone": "疑惑"
+          },
+          {
+            "speaker": "大灰狼",
+            "content": "为了更好地听你说话呀。",
+            "tone": "低沉沙哑"
+          }
+        ],
+        "characters": [
+          {
+            "name": "小红帽",
+            "pose": "身体直立，头部微微歪向一侧，眉头微皱，眼神充满疑惑地看向斜下方",
+            "related_objects": [
+              {
+                "name": "鲜花束",
+                "relationship": "小红帽手中拿着这束刚采的花，需要作为整体参考图生成"
+              }
+            ]
+          },
+          {
+            "name": "大灰狼",
+            "pose": "仰卧姿势，头部后仰，颈部放松，双眼圆睁，嘴巴微张露出尖牙，视线向上方看去",
+            "related_objects": [
+              {
+                "name": "外婆的睡帽",
+                "relationship": "大灰狼头上戴着这顶睡帽，需要作为整体参考图生成"
+              }
+            ]
+          }
+        ],
+        "objects": [],
+        "background_visual_description": "一间温馨的卧室，墙壁是淡黄色的，窗户透进柔和的光线，床头柜上放着一盏台灯，床上铺着碎花床单"
+      },
+      {
+        "scene_index": 4,
+        "scene_type": "交互场景",
+        "initial_frame": "小红帽站在床边继续询问“外婆”的眼睛和牙齿为什么那么大，大灰狼准备发动攻击。",
+        "interaction_goal": "大灰狼想要吃掉小红帽。",
+        "event_outcome": "大灰狼扑向小红帽，小红帽陷入极度危险之中。",
+        "narration": "当小红帽问到牙齿时，大灰狼不再伪装，猛地从床上跳起来扑向了小红帽。",
+        "dialogue": [],
+        "characters": [
+          {
+            "name": "大灰狼",
+            "pose": "身体腾空跃起，四肢向四周张开，前肢向前伸出，嘴巴大张露出獠牙，表情凶狠，视线直视前方",
+            "related_objects": []
+          },
+          {
+            "name": "小红帽",
+            "pose": "身体向后倾斜，双臂护在胸前，眼睛瞪大，嘴巴张开呈惊恐状，视线向上方看去",
+            "related_objects": []
+          }
+        ],
+        "objects": [
+          {
+            "name": "枕头",
+            "appearance_description": "一个白色的方形软枕头，表面有褶皱"
+          },
+          {
+            "name": "被子",
+            "appearance_description": "一条深蓝色的厚棉被，堆叠在床上"
+          },
+          {
+            "name": "床头柜",
+            "appearance_description": "一个木制的床头柜，上面放着水杯和药瓶"
+          },
+          {
+            "name": "水杯",
+            "appearance_description": "一个透明的玻璃杯，里面装着半杯水"
+          },
+          {
+            "name": "药瓶",
+            "appearance_description": "一个棕色的玻璃药瓶，贴着白色的标签"
+          },
+          {
+            "name": "窗帘",
+            "appearance_description": "一幅米色的布艺窗帘，垂挂在窗户两侧"
+          },
+          {
+            "name": "地毯",
+            "appearance_description": "一块红色的圆形地毯，铺在床边的地板上"
+          },
+          {
+            "name": "镜子",
+            "appearance_description": "一面椭圆形的穿衣镜，靠在墙边"
+          },
+          {
+            "name": "花瓶",
+            "appearance_description": "一个细长的陶瓷花瓶，里面插着枯萎的花朵"
+          }
+        ],
+        "background_visual_description": "卧室内部，光线略显昏暗，家具摆放整齐，墙上挂着风景画，空气中弥漫着紧张的气氛",
+        "event_summary": "小红帽站在床边继续询问“外婆”的眼睛和牙齿为什么那么大，大灰狼准备发动攻击，大灰狼扑向小红帽，小红帽陷入极度危险之中。"
+      },
+      {
+        "scene_index": 5,
+        "scene_type": "叙事场景",
+        "event_summary": "小猎人制服大灰狼救出众人，大家拥抱在一起，小红帽承诺不再轻信陌生人。",
+        "narration": "幸好小猎人及时赶到，制服了大灰狼，救出了她们。小红帽紧紧抱住外婆，答应以后再也不随便和陌生人说话了。",
+        "dialogue": [
+          {
+            "speaker": "小猎人",
+            "content": "别怕，我来救你们了！",
+            "tone": "坚定有力"
+          },
+          {
+            "speaker": "小红帽",
+            "content": "我再也不乱跑了，也不会再跟陌生人说话了。",
+            "tone": "诚恳悔过"
+          }
+        ],
+        "characters": [
+          {
+            "name": "小猎人",
+            "pose": "双腿分开站立，身体挺直，右手按在腰间，左手自然下垂，目光炯炯有神，视线平视前方",
+            "related_objects": []
+          },
+          {
+            "name": "小红帽",
+            "pose": "身体微微前倾，双臂环抱在胸前，脸上带着感激和安心的笑容，视线看向侧前方",
+            "related_objects": []
+          },
+          {
+            "name": "外婆",
+            "pose": "身体坐直，双手轻轻搭在膝盖上，脸上露出慈祥的微笑，视线平视前方",
+            "related_objects": []
+          }
+        ],
+        "objects": [],
+        "background_visual_description": "温暖的卧室里，阳光重新洒满房间，大灰狼被绑在角落，气氛恢复了平静与温馨"
+      }
+    ]
+  }
+}

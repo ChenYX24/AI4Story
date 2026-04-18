@@ -1,14 +1,14 @@
 {
   "objects": [
-    "apple",
-    "banana",
-    "cat",
-    "dog",
-    "cup",
-    "chair",
-    "lamp",
-    "book",
-    "shoe"
+    "狼奶奶",
+    "小红帽",
+    "床",
+    "台灯",
+    "衣架",
+    "椅子",
+    "水果篮",
+    "书本",
+    "鞋子"
   ],
   "style": "hand-drawn illustration",
   "extra_prompt": "Make each object easy to isolate from the white background."
