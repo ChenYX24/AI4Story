@@ -93,14 +93,14 @@ def _collect_reference_paths(
     seen: set[Path] = set()
 
     # background
-    bg = path_for(req.scene_idx, "background")
+    bg = path_for(req.scene_idx, "background", story_id=req.story_id)
     if bg.exists():
         paths.append(bg)
         seen.add(bg)
 
     # global characters (full body, transparent) for all active scene chars
     for name in scene_chars:
-        gc = path_for(req.scene_idx, "global_character", name)
+        gc = path_for(req.scene_idx, "global_character", name, story_id=req.story_id)
         if gc.exists() and gc not in seen:
             paths.append(gc)
             seen.add(gc)
@@ -111,7 +111,7 @@ def _collect_reference_paths(
             if not n or not k:
                 continue
             try:
-                p = resolve_interactive_asset(req.scene_idx, n, k)
+                p = resolve_interactive_asset(req.scene_idx, n, k, story_id=req.story_id)
                 if p not in seen:
                     paths.append(p)
                     seen.add(p)
@@ -169,8 +169,8 @@ def _write_thumb(src: Path, dst: Path) -> None:
 
 
 def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
-    scene = _load_scene_json(req.scene_idx)
-    story = load_story()
+    scene = _load_scene_json(req.scene_idx, req.story_id)
+    story = load_story(req.story_id)
     story_summary = story.get("story_summary", "")
 
     scene_char_names = [c["name"] for c in scene.get("characters", [])]

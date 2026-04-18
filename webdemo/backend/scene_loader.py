@@ -3,24 +3,32 @@ from functools import lru_cache
 from typing import Any
 
 from . import asset_resolver
-from .config import SCENES_DIR, STORY_JSON
+from .story_registry import story_json_path, story_root
 
 NARRATIVE = "叙事场景"
 INTERACTIVE = "交互场景"
 
 
-@lru_cache(maxsize=1)
-def load_story() -> dict[str, Any]:
-    with STORY_JSON.open("r", encoding="utf-8") as f:
+@lru_cache(maxsize=16)
+def _load_story_from_path(story_json: str) -> dict[str, Any]:
+    with open(story_json, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_story(story_id: str | None = None) -> dict[str, Any]:
+    return _load_story_from_path(str(story_json_path(story_id).resolve()))
+
+
+def clear_story_cache(story_id: str | None = None) -> None:
+    _load_story_from_path.cache_clear()
 
 
 def _scene_type_en(zh: str) -> str:
     return "narrative" if zh == NARRATIVE else "interactive"
 
 
-def story_summary_payload() -> dict[str, Any]:
-    story = load_story()
+def story_summary_payload(story_id: str | None = None) -> dict[str, Any]:
+    story = load_story(story_id)
     scenes_meta = []
     for s in story["scenes"]:
         idx = s["scene_index"]
@@ -39,24 +47,24 @@ def story_summary_payload() -> dict[str, Any]:
         "scene_count": len(story["scenes"]),
         "scenes": scenes_meta,
         "global_characters": [
-            {"name": c["name"], "url": asset_resolver.url_for(0, "global_character", c["name"])}
+            {"name": c["name"], "url": asset_resolver.url_for(0, "global_character", c["name"], story_id=story_id)}
             for c in g.get("characters", [])
         ],
         "global_objects": [
-            {"name": o["name"], "url": asset_resolver.url_for(0, "global_object", o["name"])}
+            {"name": o["name"], "url": asset_resolver.url_for(0, "global_object", o["name"], story_id=story_id)}
             for o in g.get("objects", [])
         ],
     }
 
 
-def _load_scene_json(idx: int) -> dict[str, Any]:
-    p = SCENES_DIR / f"{idx:03d}" / "scene.json"
+def _load_scene_json(idx: int, story_id: str | None = None) -> dict[str, Any]:
+    p = story_root(story_id) / f"{idx:03d}" / "scene.json"
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def scene_payload(idx: int) -> dict[str, Any]:
-    scene = _load_scene_json(idx)
+def scene_payload(idx: int, story_id: str | None = None) -> dict[str, Any]:
+    scene = _load_scene_json(idx, story_id)
     t = _scene_type_en(scene["scene_type"])
     if t == "narrative":
         storyboard = _build_storyboard(scene)
@@ -65,7 +73,7 @@ def scene_payload(idx: int) -> dict[str, Any]:
             "type": "narrative",
             "summary": scene.get("event_summary", ""),
             "narration": scene.get("narration", ""),
-            "comic_url": asset_resolver.url_for(idx, "comic"),
+            "comic_url": asset_resolver.url_for(idx, "comic", story_id=story_id),
             "storyboard": storyboard,
         }
     # interactive
@@ -78,11 +86,11 @@ def scene_payload(idx: int) -> dict[str, Any]:
         "initial_frame": scene.get("initial_frame", ""),
         "event_outcome": scene.get("event_outcome", ""),
         "narration": scene.get("narration", ""),
-        "background_url": asset_resolver.url_for(idx, "background"),
+        "background_url": asset_resolver.url_for(idx, "background", story_id=story_id),
         "characters": [
             {
                 "name": c["name"],
-                "url": asset_resolver.url_for(idx, "scene_character", c["name"]),
+                "url": asset_resolver.url_for(idx, "scene_character", c["name"], story_id=story_id),
                 "default_x": default_x,
                 "default_y": 0.70,
             }
@@ -91,7 +99,7 @@ def scene_payload(idx: int) -> dict[str, Any]:
         "props": [
             {
                 "name": o["name"],
-                "url": asset_resolver.url_for(idx, "scene_object", o["name"]),
+                "url": asset_resolver.url_for(idx, "scene_object", o["name"], story_id=story_id),
                 "description": o.get("appearance_description", ""),
             }
             for o in props

@@ -919,6 +919,9 @@ def run_workflow(args: argparse.Namespace) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     validate_seedream_size(args.asset_size, "Asset")
     validate_seedream_size(args.background_size, "Background")
+
+    progress_callback = getattr(args, "progress_callback", None)
+
     if args.use_existing_scenes:
         parsed = load_json(args.scenes_json)
     else:
@@ -936,6 +939,8 @@ def run_workflow(args: argparse.Namespace) -> Path:
 
     if not args.use_existing_scenes:
         overall_progress.set_postfix_str("splitting story")
+        if progress_callback:
+            progress_callback(10, "拆分场景中")
         parsed, _, _ = call_bailian_chat(
             api_key=args.dashscope_api_key,
             model=args.qwen_model,
@@ -958,12 +963,16 @@ def run_workflow(args: argparse.Namespace) -> Path:
         overall_progress.total = max(1, total_steps)
         overall_progress.refresh()
         overall_progress.update(1)
+        if progress_callback:
+            progress_callback(20, "场景拆分完成")
     else:
         overall_progress.set_postfix_str("loading existing scenes")
 
     if args.use_existing_global:
         global_manifest = load_existing_global_manifest(output_root)
     else:
+        if progress_callback:
+            progress_callback(25, "生成全局角色资源")
         global_manifest = build_global_assets(
             story_payload=parsed,
             output_root=output_root,
@@ -975,12 +984,19 @@ def run_workflow(args: argparse.Namespace) -> Path:
             show_progress=not args.no_progress,
             scene_asset_workers=args.asset_workers,
         )
+        if progress_callback:
+            progress_callback(40, "全局资源生成完成")
 
     scenes = list(parsed.get("scenes", []))
     if args.interactive_only:
         scenes = [scene for scene in scenes if is_interactive_scene(scene.get("scene_type"))]
     elif args.narrative_only:
         scenes = [scene for scene in scenes if is_narrative_scene(scene.get("scene_type"))]
+
+    total_scenes = max(1, len(scenes))
+    completed_scenes = 0
+    scenes_lock = Lock()
+
     iterator = tqdm(total=len(scenes), desc="Building chapter assets", unit="scene", disable=args.no_progress)
     with ThreadPoolExecutor(max_workers=min(args.max_workers, max(1, len(scenes)))) as executor:
         future_map = {
@@ -1009,6 +1025,11 @@ def run_workflow(args: argparse.Namespace) -> Path:
             future.result()
             iterator.set_postfix_str(f"scene {scene.get('scene_index')}")
             iterator.update(1)
+            if progress_callback:
+                with scenes_lock:
+                    completed_scenes += 1
+                    pct = 40 + int(completed_scenes / total_scenes * 50)
+                    progress_callback(pct, f"生成场景 {completed_scenes}/{total_scenes}")
     overall_progress.close()
     return output_root
 

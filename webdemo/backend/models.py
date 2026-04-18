@@ -27,6 +27,7 @@ class Operation(BaseModel):
 
 
 class InteractRequest(BaseModel):
+    story_id: str | None = None
     session_id: str
     scene_idx: int
     placements: list[Transform] = Field(default_factory=list)
@@ -59,6 +60,7 @@ class InteractResponse(BaseModel):
 
 
 class PlacementRequest(BaseModel):
+    story_id: str | None = None
     scene_idx: int
 
 
@@ -114,6 +116,7 @@ class SmartCreatePropsResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    story_id: str | None = None
     scene_idx: int
     user_text: str
 
@@ -129,10 +132,19 @@ class StoryCard(BaseModel):
     cover_url: str
     scene_count: int
     available: bool = True
+    status: Literal["ready", "generating", "locked", "failed"] = "ready"
+    is_custom: bool = False
+    error_message: str | None = None
+    progress: int = 0
+    progress_label: str = ""
 
 
 class StoriesResponse(BaseModel):
     stories: list[StoryCard]
+
+
+class CustomStoryCreateRequest(BaseModel):
+    text: str
 
 
 class ReportInteraction(BaseModel):

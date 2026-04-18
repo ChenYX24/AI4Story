@@ -13,6 +13,8 @@ def report(req: ReportRequest) -> ReportResponse:
         raise HTTPException(status_code=424, detail="服务器未配置 DASHSCOPE_API_KEY")
     try:
         payload = build_report(req)
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"story {req.story_id!r} not found")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
     return ReportResponse(**payload)

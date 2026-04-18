@@ -54,7 +54,7 @@ def _clamp_pct(v: Any) -> int:
 
 
 def build_report(req: ReportRequest) -> dict[str, Any]:
-    story = load_story()
+    story = load_story(req.story_id)
     story_summary = story.get("story_summary", "")
 
     ops_summary = _format_ops(req.interactions)

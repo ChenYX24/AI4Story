@@ -11,6 +11,8 @@ STORY_JSON = SCENES_DIR / "story_scenes.json"
 FRONTEND_DIR = WEBDEMO_DIR / "frontend"
 OUTPUTS_ROOT = WEBDEMO_DIR / "outputs" / "webdemo"
 OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
+CUSTOM_STORIES_ROOT = OUTPUTS_ROOT / "stories"
+CUSTOM_STORIES_ROOT.mkdir(parents=True, exist_ok=True)
 
 ARK_API_KEY = os.getenv("ARK_API_KEY", "")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")

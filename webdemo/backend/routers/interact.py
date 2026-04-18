@@ -17,6 +17,8 @@ def interact(req: InteractRequest) -> InteractResponse:
         raise HTTPException(status_code=424, detail="服务器未配置 DASHSCOPE_API_KEY（叙事生成需要）")
     try:
         payload = generate_dynamic_node(req)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"story {req.story_id!r} not found")
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
     except RuntimeError as e:

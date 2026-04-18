@@ -17,6 +17,7 @@ __pycache__/
 .env
 .venv/
 venv/
+start_webdemo.keys.cmd
 
 # Per-session webdemo outputs (transient user-generated images)
 webdemo/outputs/webdemo/

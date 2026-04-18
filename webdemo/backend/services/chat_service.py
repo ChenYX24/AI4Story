@@ -8,13 +8,13 @@ def _fallback_reply(user_text: str) -> str:
     return f"你说：「{user_text}」，真棒！我们继续讲故事吧～"
 
 
-def reply_to(scene_idx: int, user_text: str) -> str:
+def reply_to(scene_idx: int, user_text: str, story_id: str | None = None) -> str:
     if not DASHSCOPE_API_KEY:
         return _fallback_reply(user_text)
     try:
         import dashscope  # type: ignore
 
-        story = load_story()
+        story = load_story(story_id)
         system = (
             "你是一个亲切、耐心的绘本故事讲述者，面对的是 4-6 岁的小朋友。"
             "请使用简单、温暖、有画面感的中文，回答要短（1-2 句），不要跳出故事世界。"

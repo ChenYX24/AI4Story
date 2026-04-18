@@ -75,9 +75,9 @@ def _build_prompt(scene: dict[str, Any]) -> str:
     )
 
 
-@lru_cache(maxsize=32)
-def plan_layout(scene_idx: int) -> tuple:
-    scene = _load_scene_json(scene_idx)
+@lru_cache(maxsize=64)
+def plan_layout(scene_idx: int, story_id: str | None = None) -> tuple:
+    scene = _load_scene_json(scene_idx, story_id)
     try:
         result = call_json(_build_prompt(scene), temperature=0.3, timeout=30)
         raw = result.get("placements") or []
@@ -113,5 +113,9 @@ def plan_layout(scene_idx: int) -> tuple:
         return tuple(tuple(sorted(p.items())) for p in _fallback_layout(scene))
 
 
-def get_placements(scene_idx: int) -> list[dict[str, Any]]:
-    return [dict(p) for p in plan_layout(scene_idx)]
+def get_placements(scene_idx: int, story_id: str | None = None) -> list[dict[str, Any]]:
+    return [dict(p) for p in plan_layout(scene_idx, story_id)]
+
+
+def clear_layout_cache(story_id: str | None = None) -> None:
+    plan_layout.cache_clear()
