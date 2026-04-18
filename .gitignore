@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Environments
+.env
+.venv/
+venv/
+
+# Per-session webdemo outputs (transient user-generated images)
+webdemo/outputs/webdemo/
+
+# TLS certs (user-specific, regenerate per host)
+webdemo/certs/*.pem
+
+# Intermediate grid artifacts (raw grids before cell extraction)
+scenes/*/_object_grids/
+scenes/*/_refs/
+scenes/global/_object_grids/
+scenes/global/_character_grids/
+
+# Scheduler tasks
+.claude/scheduled_tasks.json

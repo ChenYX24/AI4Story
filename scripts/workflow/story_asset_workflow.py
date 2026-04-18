@@ -95,7 +95,8 @@ def create_reference_board(image_paths: list[Path], output_path: Path, cell_size
     canvas = Image.new("RGBA", (cols * cell_size, rows * cell_size), (255, 255, 255, 255))
 
     for index, path in enumerate(valid_paths):
-        image = Image.open(path).convert("RGBA")
+        with Image.open(path) as source:
+            image = source.convert("RGBA")
         image.thumbnail((cell_size - 64, cell_size - 64))
         col = index % cols
         row = index // cols
@@ -198,16 +199,17 @@ def generate_object_grid_assets(
             provider=provider,
         )
 
-        transparent = remove_background_dispatch(
-            image=Image.open(raw_grid_path),
-            method="rembg",
-            rembg_model="u2net",
-            rembg_alpha_matting=True,
-            white_tolerance=42,
-            white_min_channel=235,
-            soften_edge=18,
-            show_progress=False,
-        )
+        with Image.open(raw_grid_path) as raw_grid_image:
+            transparent = remove_background_dispatch(
+                image=raw_grid_image,
+                method="rembg",
+                rembg_model="u2net",
+                rembg_alpha_matting=True,
+                white_tolerance=42,
+                white_min_channel=235,
+                soften_edge=18,
+                show_progress=False,
+            )
         transparent.save(transparent_grid_path)
 
         manifest = export_cells(
@@ -585,14 +587,14 @@ def build_narrative_storyboard_prompt(scene: dict[str, Any]) -> str:
 要求：
 1. 整体风格为彩铅手绘风格，童趣可爱，四格漫画分镜构图，适用于儿童绘本。
 2. 必须严格输出以下结构，不要输出 JSON，不要输出解释：
-根据当前的event summary设计一组漫画，整体风格为彩铅手绘风格，童趣可爱，四格漫画分镜构图，适用于儿童绘本。
-画面一：
+根据当前的event summary设计一组漫画，整体风格为彩铅手绘风格，童趣可爱，按照田字格分隔四格漫画分镜构图，适用于儿童绘本。
+画面一（左上）：
 画面描述：
-画面二：
+画面二（右上）：
 画面描述：
-画面三：
+画面三（左下）：
 画面描述：
-画面四：
+画面四（右下）：
 画面描述：
 3. 四个画面必须是同一个叙事场景内部的连续推进，分别体现起始、发展、过渡、结果。
 4. 你可以使用 scene 中的 narration、dialogue、event_summary 来帮助拆分四格，但不要照抄成图片中的文字。

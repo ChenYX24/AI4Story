@@ -1,8 +1,10 @@
 import argparse
 import json
+import math
 from collections import deque
 from io import BytesIO
 from pathlib import Path
+from threading import Semaphore
 from typing import Iterable
 
 from PIL import Image, ImageChops, ImageFilter
@@ -21,6 +23,10 @@ except ImportError:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+REMBG_MAX_CONCURRENCY = 1
+REMBG_ALPHA_MATTING_MAX_PIXELS = 1024 * 1024
+REMBG_ALPHA_MATTING_MAX_SIDE = 1280
+REMBG_SEMAPHORE = Semaphore(REMBG_MAX_CONCURRENCY)
 
 
 def whiteness_distance(r: int, g: int, b: int) -> int:
@@ -142,12 +148,11 @@ def remove_background_with_rembg(
 
     for box in iterator:
         cell = rgba.crop(box)
-        output = remove(
-            cell,
+        processed = remove_background_with_rembg_core(
+            image=cell,
             session=session,
             alpha_matting=alpha_matting,
         )
-        processed = output if isinstance(output, Image.Image) else Image.open(BytesIO(output)).convert("RGBA")
         result.paste(processed, box)
 
     return result
@@ -165,12 +170,89 @@ def remove_background_with_rembg_single(
         )
 
     session = new_session(model_name)
-    output = remove(
-        image.convert("RGBA"),
+    return remove_background_with_rembg_core(
+        image=image,
         session=session,
         alpha_matting=alpha_matting,
     )
-    return output if isinstance(output, Image.Image) else Image.open(BytesIO(output)).convert("RGBA")
+
+
+def decode_rembg_output(output: Image.Image | bytes) -> Image.Image:
+    if isinstance(output, Image.Image):
+        return output.convert("RGBA")
+    with Image.open(BytesIO(output)) as image:
+        return image.convert("RGBA")
+
+
+def is_probable_memory_error(exc: Exception) -> bool:
+    if isinstance(exc, MemoryError):
+        return True
+    message = str(exc).lower()
+    return "unable to allocate" in message or "out of memory" in message
+
+
+def resize_for_alpha_matting(image: Image.Image) -> tuple[Image.Image, bool]:
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixel_count = width * height
+    scale = 1.0
+    if pixel_count > REMBG_ALPHA_MATTING_MAX_PIXELS:
+        scale = min(scale, math.sqrt(REMBG_ALPHA_MATTING_MAX_PIXELS / pixel_count))
+    longest_side = max(width, height)
+    if longest_side > REMBG_ALPHA_MATTING_MAX_SIDE:
+        scale = min(scale, REMBG_ALPHA_MATTING_MAX_SIDE / longest_side)
+    if scale >= 1.0:
+        return rgba, False
+    resized = rgba.resize(
+        (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        ),
+        Image.LANCZOS,
+    )
+    return resized, True
+
+
+def restore_alpha_to_original(original: Image.Image, processed: Image.Image) -> Image.Image:
+    original_rgba = original.convert("RGBA")
+    processed_rgba = processed.convert("RGBA")
+    alpha = processed_rgba.getchannel("A").resize(original_rgba.size, Image.LANCZOS)
+    restored = original_rgba.copy()
+    restored.putalpha(alpha)
+    return restored
+
+
+def run_rembg_remove(image: Image.Image, session: object, alpha_matting: bool) -> Image.Image:
+    with REMBG_SEMAPHORE:
+        output = remove(
+            image,
+            session=session,
+            alpha_matting=alpha_matting,
+        )
+    return decode_rembg_output(output)
+
+
+def remove_background_with_rembg_core(
+    image: Image.Image,
+    session: object,
+    alpha_matting: bool,
+) -> Image.Image:
+    original = image.convert("RGBA")
+    working = original
+    was_resized = False
+    if alpha_matting:
+        working, was_resized = resize_for_alpha_matting(original)
+
+    try:
+        processed = run_rembg_remove(working, session=session, alpha_matting=alpha_matting)
+    except Exception as exc:
+        if not alpha_matting or not is_probable_memory_error(exc):
+            raise
+        processed = run_rembg_remove(working, session=session, alpha_matting=False)
+
+    if was_resized:
+        return restore_alpha_to_original(original, processed)
+    return processed
 
 
 def cell_boxes(width: int, height: int) -> list[tuple[int, int, int, int]]:
@@ -355,18 +437,18 @@ def postprocess_single_asset(
     svg_hierarchical: str = "stacked",
     svg_mode: str = "spline",
 ) -> dict[str, str | int]:
-    image = Image.open(Path(input_path).resolve())
-    transparent = remove_background_dispatch(
-        image=image,
-        method=bg_removal_method,
-        rembg_model=rembg_model,
-        rembg_alpha_matting=rembg_alpha_matting,
-        white_tolerance=white_tolerance,
-        white_min_channel=white_min_channel,
-        soften_edge=soften_edge,
-        show_progress=False,
-        split_grid=False,
-    )
+    with Image.open(Path(input_path).resolve()) as image:
+        transparent = remove_background_dispatch(
+            image=image,
+            method=bg_removal_method,
+            rembg_model=rembg_model,
+            rembg_alpha_matting=rembg_alpha_matting,
+            white_tolerance=white_tolerance,
+            white_min_channel=white_min_channel,
+            soften_edge=soften_edge,
+            show_progress=False,
+            split_grid=False,
+        )
     if transparent_output_path is not None:
         transparent_path = Path(transparent_output_path).resolve()
         transparent_path.parent.mkdir(parents=True, exist_ok=True)
