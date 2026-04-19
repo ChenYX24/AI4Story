@@ -11,10 +11,11 @@ router = APIRouter()
 
 @router.get("/stories", response_model=StoriesResponse)
 def stories() -> StoriesResponse:
+    custom_cards = _build_custom_story_cards()
+    if custom_cards:
+        return StoriesResponse(stories=custom_cards)
     default_story = load_story()
-    cards = [_build_default_story_card(default_story)]
-    cards.extend(_build_custom_story_cards())
-    return StoriesResponse(stories=cards)
+    return StoriesResponse(stories=[_build_default_story_card(default_story)])
 
 
 @router.post("/stories/custom", response_model=StoryCard)
