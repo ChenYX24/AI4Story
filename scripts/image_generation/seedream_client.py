@@ -1,9 +1,12 @@
 import base64
+import logging
 import mimetypes
 from pathlib import Path
 from typing import Any
 
 import requests
+
+log = logging.getLogger(__name__)
 
 
 ARK_API_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
@@ -100,10 +103,16 @@ def generate_image_bytes(
     if extra_payload:
         payload.update(extra_payload)
 
+    ref_size_kb = sum(len(r) for r in normalized_refs) / 1024 if normalized_refs else 0
+    log.info("[seedream] POST %s  model=%s size=%s refs=%d ref_data≈%.0fKB timeout=%ds",
+             url, model, size, len(normalized_refs), ref_size_kb, timeout)
+
     response = requests.post(url, headers=headers, json=payload, timeout=timeout)
     if response.status_code == 404 and fallback_url:
+        log.info("[seedream] got 404, retrying with fallback URL")
         response = requests.post(fallback_url, headers=headers, json=payload, timeout=timeout)
     if response.status_code >= 400:
+        print(f"[seedream] HTTP {response.status_code} — {response.text[:1000]}", flush=True)
         raise RuntimeError(
             f"Image generation failed with HTTP {response.status_code} at {response.url}\n"
             f"Response body:\n{response.text[:3000]}"

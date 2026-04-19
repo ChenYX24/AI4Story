@@ -1,11 +1,15 @@
 import io
 import json
+import logging
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 from PIL import Image
+
+log = logging.getLogger(__name__)
 
 from ..asset_resolver import path_for, resolve_interactive_asset
 from ..config import (
@@ -50,37 +54,78 @@ def _build_qwen_prompt(
     active_characters: list[str],
     active_objects: list[str],
     custom_props: list[CustomProp],
+    all_characters: list[dict[str, Any]] | None = None,
+    next_scene: dict[str, Any] | None = None,
 ) -> str:
     op_lines = "\n".join(_format_ops(ops)) or "（没有具体操作，只是场景的自然发展）"
-    custom_str = (
-        "、".join(p.name for p in custom_props) or "（无）"
-    )
+    custom_str = "、".join(p.name for p in custom_props) or "（无）"
+
+    char_notes = "\n".join(
+        f"  - {c.get('name', '')}：{c.get('appearance_description', '')}"
+        for c in (all_characters or [])
+    ) or "  （无额外角色信息）"
+
+    next_scene_hint = ""
+    if next_scene:
+        ns = (next_scene.get("event_summary") or next_scene.get("narration") or "").strip()
+        if ns:
+            next_scene_hint = (
+                f"\n【下一幕故事走向】{ns[:80]}\n"
+                "（第4格画面必须为这个转变做自然铺垫，让两幕之间丝滑衔接）"
+            )
+
     return (
         "你是一位儿童绘本的故事编剧，正在根据孩子的互动实时扩展故事。\n"
         "请生成一个新的叙事场景，内容要紧贴孩子安排的互动，风格温暖友善，适合 5 岁儿童。\n\n"
         f"【整本故事大纲】{story_summary}\n"
         f"【上一幕交互目标】{scene.get('interaction_goal', '')}\n"
         f"【上一幕初始画面】{scene.get('initial_frame', '')}\n"
-        f"【已出现的角色】{'、'.join(active_characters) or '（无）'}\n"
+        f"【已出现的角色及造型】\n{char_notes}\n"
         f"【已出现的物品】{'、'.join(active_objects) or '（无）'}\n"
         f"【小朋友新创造的物品】{custom_str}\n\n"
-        f"【小朋友安排的互动序列】\n{op_lines}\n\n"
+        f"【小朋友安排的互动序列】\n{op_lines}"
+        f"{next_scene_hint}\n\n"
+        "⚠️ 角色立场约束（必须严格遵守）：\n"
+        "- 每个角色都有自己的立场和性格，绝对不能随意改变\n"
+        "- 反派角色（如大灰狼）永远不会主动保护或帮助主角，始终维持其阴谋动机\n"
+        "- 角色的对话和行为必须与其在故事中的身份、动机一致\n"
+        "- 不是所有角色都会顺着孩子的想法——保持故事张力\n\n"
         "请严格输出 JSON（不要包含任何解释或代码块标记），结构如下：\n"
         "{\n"
         '  "summary": "1 句话总结这一幕发生了什么（30 字内）",\n'
-        '  "narration": "2-3 句旁白（100 字内），口语化、有画面感",\n'
-        '  "dialogue": [{"speaker":"角色名","content":"对话","tone":"语气"}],  // 1-4 条，可以为空数组\n'
+        '  "narration": "2-3 句整体旁白（100 字内），口语化、有画面感",\n'
+        '  "dialogue": [\n'
+        '    {"speaker":"角色名","content":"对话内容","tone":"语气"}\n'
+        '  ],\n'
         '  "storyboard_panels": [\n'
-        '    {"panel":1, "description":"左上画面描述，明确谁在哪里做什么，以及表情姿态"},\n'
-        '    {"panel":2, "description":"右上画面描述"},\n'
-        '    {"panel":3, "description":"左下画面描述"},\n'
-        '    {"panel":4, "description":"右下画面描述"}\n'
+        '    {\n'
+        '      "panel": 1,\n'
+        '      "description": "左上画面视觉描述：明确谁在哪里做什么、表情姿态（50字内）",\n'
+        '      "caption": "此格旁白（15字内，口语化）",\n'
+        '      "dialogue": [{"speaker":"角色名","content":"台词（10字内）","tone":"语气"}]\n'
+        '    },\n'
+        '    {\n'
+        '      "panel": 2, "description": "右上画面描述（50字内）",\n'
+        '      "caption": "旁白（15字内）", "dialogue": []\n'
+        '    },\n'
+        '    {\n'
+        '      "panel": 3, "description": "左下画面描述（50字内）",\n'
+        '      "caption": "旁白（15字内）", "dialogue": []\n'
+        '    },\n'
+        '    {\n'
+        '      "panel": 4,\n'
+        '      "description": "右下画面：展示这幕结果，并为下一幕做视觉衔接（50字内）",\n'
+        '      "caption": "旁白（15字内，带入下一段故事氛围）",\n'
+        '      "dialogue": []\n'
+        '    }\n'
         "  ]\n"
         "}\n"
         "要求：\n"
-        "- 四个画面是同一幕内部的连续推进：起始、发展、转折、结果\n"
-        "- 紧贴孩子安排的互动，让孩子的选择真正改变故事\n"
-        "- 不要生硬地返回到原作剧情，也不要出现危险/负面内容"
+        "- 四格漫画按时间顺序：起因→发展→转折→结果/衔接\n"
+        "- 每格画面和旁白必须紧扣孩子的选择，让孩子的决定真正改变故事走向\n"
+        "- 第4格必须自然过渡到下一幕，不要突兀跳跃\n"
+        "- 角色对话控制在每格0-2句，且符合角色性格立场\n"
+        "- 不要出现危险/恐怖/暴力等不适合儿童的内容"
     )
 
 
@@ -136,27 +181,48 @@ def _storyboard_from_panels(panels: list[dict[str, Any]]) -> str:
     for idx, label in enumerate(labels):
         panel = panels[idx] if idx < len(panels) else {}
         desc = str(panel.get("description", "")).strip()
+        caption = str(panel.get("caption", "")).strip()
+        dlg = panel.get("dialogue") or []
         lines.append(f"{label}：")
         lines.append(f"画面描述：{desc}")
+        if caption:
+            lines.append(f"旁白文字：{caption}")
+        for d in dlg:
+            spk = str(d.get("speaker", "")).strip()
+            txt = str(d.get("content", "")).strip()
+            if spk and txt:
+                lines.append(f"对话：{spk}说「{txt}」")
     return "\n".join(lines)
 
 
-def _build_storyboard_lines(narration: str, dialogue: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_storyboard_lines(panels: list[dict[str, Any]], narration: str) -> list[dict[str, Any]]:
     lines: list[dict[str, Any]] = []
-    if narration.strip():
-        lines.append({"speaker": "旁白", "text": narration.strip(), "kind": "narration", "tone": ""})
-    for d in dialogue or []:
-        content = str(d.get("content", "")).strip()
-        if not content:
-            continue
-        lines.append(
-            {
+
+    has_panel_content = any(
+        str(p.get("caption", "")).strip() or p.get("dialogue")
+        for p in panels
+    )
+
+    if not has_panel_content:
+        if narration.strip():
+            lines.append({"speaker": "旁白", "text": narration.strip(), "kind": "narration", "tone": ""})
+        return lines
+
+    for panel in panels[:4]:
+        caption = str(panel.get("caption", "")).strip()
+        dlg = panel.get("dialogue") or []
+        if caption:
+            lines.append({"speaker": "旁白", "text": caption, "kind": "narration", "tone": ""})
+        for d in dlg:
+            content = str(d.get("content", "")).strip()
+            if not content:
+                continue
+            lines.append({
                 "speaker": str(d.get("speaker", "")).strip() or "角色",
                 "text": content,
                 "kind": "dialogue",
                 "tone": str(d.get("tone", "")),
-            }
-        )
+            })
     return lines
 
 
@@ -169,6 +235,7 @@ def _write_thumb(src: Path, dst: Path) -> None:
 
 
 def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
+    t0 = time.time()
     scene = _load_scene_json(req.scene_idx, req.story_id)
     story = load_story(req.story_id)
     story_summary = story.get("story_summary", "")
@@ -176,7 +243,14 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
     scene_char_names = [c["name"] for c in scene.get("characters", [])]
     scene_obj_names = [o["name"] for o in scene.get("objects", [])]
 
+    all_characters = story.get("global_content", {}).get("characters", [])
+    all_scenes = story.get("scenes", [])
+    next_scene = next(
+        (s for s in all_scenes if s.get("scene_index") == req.scene_idx + 1), None
+    )
+
     # 1) Qwen: narrative content
+    log.info("[interact] step 1/3: calling Qwen for narrative text …")
     qwen_prompt = _build_qwen_prompt(
         scene=scene,
         story_summary=story_summary,
@@ -184,20 +258,33 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
         active_characters=scene_char_names,
         active_objects=scene_obj_names,
         custom_props=req.custom_props,
+        all_characters=all_characters,
+        next_scene=next_scene,
     )
     try:
-        result = call_json(qwen_prompt, temperature=0.6, timeout=45)
+        result = call_json(qwen_prompt, temperature=0.6, timeout=120)
     except QwenError as e:
+        log.error("[interact] Qwen failed after %.1fs: %s", time.time() - t0, e)
         raise RuntimeError(f"故事文本生成失败：{e}") from e
+    t1 = time.time()
+    log.info("[interact] step 1 done in %.1fs", t1 - t0)
 
     summary = str(result.get("summary", "")).strip() or "小朋友继续推进了故事。"
     narration = str(result.get("narration", "")).strip() or summary
-    dialogue = result.get("dialogue") or []
     panels = result.get("storyboard_panels") or []
+    # prefer top-level dialogue; fall back to aggregating from panels
+    top_dialogue = result.get("dialogue") or []
+    dialogue: list[dict[str, Any]] = list(top_dialogue) if isinstance(top_dialogue, list) else []
+    if not dialogue:
+        for p in panels:
+            for d in (p.get("dialogue") or []):
+                if d.get("content"):
+                    dialogue.append(d)
 
     # 2) Seedream: 4-panel comic
     storyboard_text = _storyboard_from_panels(panels)
     ref_paths = _collect_reference_paths(req, scene_char_names)
+    log.info("[interact] step 2/3: building reference board from %d images …", len(ref_paths))
 
     node_id = f"dyn-{uuid.uuid4().hex[:10]}"
     out_dir = OUTPUTS_ROOT / req.session_id / "dynamic" / node_id
@@ -220,7 +307,11 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
         "dialogue": dialogue if isinstance(dialogue, list) else [],
     }
     seed_prompt = build_narrative_comic_prompt(pseudo_scene, storyboard_text)
+    t2 = time.time()
+    log.info("[interact] step 2 done in %.1fs, prompt length=%d chars", t2 - t1, len(seed_prompt))
 
+    log.info("[interact] step 3/3: calling Seedream (model=%s, size=%s, ref_board=%s) …",
+             SEEDREAM_MODEL, SEEDREAM_SIZE, "yes" if ref_board else "no")
     try:
         img_bytes = generate_image_bytes(
             api_key=ARK_API_KEY,
@@ -232,7 +323,14 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
             timeout=SEEDREAM_TIMEOUT,
         )
     except Exception as e:
+        import traceback
+        print(f"[interact] Seedream FAILED after {time.time() - t2:.1f}s", flush=True)
+        print(f"[interact] error type: {type(e).__name__}", flush=True)
+        print(f"[interact] error detail: {e}", flush=True)
+        traceback.print_exc()
         raise RuntimeError(f"四格漫画生成失败：{e}") from e
+    t3 = time.time()
+    log.info("[interact] step 3 done in %.1fs, image size=%d bytes", t3 - t2, len(img_bytes))
 
     panel_path = out_dir / "panel.png"
     panel_path.write_bytes(img_bytes)
@@ -263,7 +361,8 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
         encoding="utf-8",
     )
 
-    storyboard_lines = _build_storyboard_lines(narration, dialogue)
+    storyboard_lines = _build_storyboard_lines(panels, narration)
+    log.info("[interact] total %.1fs — done, node_id=%s", time.time() - t0, node_id)
 
     return {
         "node_id": node_id,

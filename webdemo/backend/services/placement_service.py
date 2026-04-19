@@ -1,9 +1,37 @@
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from ..scene_loader import _load_scene_json
+from ..story_registry import story_root
 from .qwen_service import QwenError, call_json
+
+
+def _placements_json_path(scene_idx: int, story_id: str | None = None) -> Path:
+    return story_root(story_id) / f"{scene_idx:03d}" / "placements.json"
+
+
+def _load_precomputed(scene_idx: int, story_id: str | None = None) -> list[dict[str, Any]] | None:
+    p = _placements_json_path(scene_idx, story_id)
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        items = data.get("placements")
+        if items and isinstance(items, list):
+            return items
+    except Exception:
+        pass
+    return None
+
+
+def _save_placements(scene_idx: int, story_id: str | None, placements: list[dict[str, Any]]) -> None:
+    try:
+        p = _placements_json_path(scene_idx, story_id)
+        p.write_text(json.dumps({"placements": placements}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[placement_service] failed to save placements.json: {e}")
 
 
 def _fallback_layout(scene: dict[str, Any]) -> list[dict[str, Any]]:
@@ -77,6 +105,9 @@ def _build_prompt(scene: dict[str, Any]) -> str:
 
 @lru_cache(maxsize=64)
 def plan_layout(scene_idx: int, story_id: str | None = None) -> tuple:
+    precomputed = _load_precomputed(scene_idx, story_id)
+    if precomputed is not None:
+        return tuple(tuple(sorted(p.items())) for p in precomputed)
     scene = _load_scene_json(scene_idx, story_id)
     try:
         result = call_json(_build_prompt(scene), temperature=0.3, timeout=30)
@@ -107,10 +138,13 @@ def plan_layout(scene_idx: int, story_id: str | None = None) -> tuple:
         for fb in _fallback_layout(scene):
             if fb["name"] not in seen:
                 placements.append(fb)
+        _save_placements(scene_idx, story_id, placements)
         return tuple(tuple(sorted(p.items())) for p in placements)
     except (QwenError, Exception) as e:
         print(f"[placement_service] fallback due to: {e}")
-        return tuple(tuple(sorted(p.items())) for p in _fallback_layout(scene))
+        fb = _fallback_layout(scene)
+        _save_placements(scene_idx, story_id, fb)
+        return tuple(tuple(sorted(p.items())) for p in fb)
 
 
 def get_placements(scene_idx: int, story_id: str | None = None) -> list[dict[str, Any]]:

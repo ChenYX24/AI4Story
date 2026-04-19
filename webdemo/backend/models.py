@@ -145,6 +145,7 @@ class StoriesResponse(BaseModel):
 
 class CustomStoryCreateRequest(BaseModel):
     text: str
+    title: str = ""
 
 
 class ReportInteraction(BaseModel):

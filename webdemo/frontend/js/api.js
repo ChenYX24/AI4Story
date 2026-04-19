@@ -140,3 +140,23 @@ export async function deleteCustomStory(storyId) {
     throw new Error(detail);
   }
 }
+
+export async function patchCustomStory(storyId, payload) {
+  return jsonOrThrow(
+    await fetch(`/api/stories/custom/${encodeURIComponent(storyId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  );
+}
+
+export async function postShare(payload) {
+  return jsonOrThrow(
+    await fetch("/api/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  );
+}

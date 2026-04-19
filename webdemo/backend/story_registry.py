@@ -64,13 +64,13 @@ def get_custom_story_record(story_id: str) -> dict[str, Any] | None:
     return load_registry().get(story_id)
 
 
-def create_custom_story_record(text: str) -> dict[str, Any]:
+def create_custom_story_record(text: str, title: str = "") -> dict[str, Any]:
     clean = " ".join((text or "").split())
     story_id = f"custom-{uuid.uuid4().hex[:10]}"
     now = _utc_now()
     record = {
         "id": story_id,
-        "title": _derive_title(clean),
+        "title": title.strip() if title.strip() else _derive_title(clean),
         "summary": _excerpt(clean, 88),
         "input_text": clean,
         "scene_count": 0,

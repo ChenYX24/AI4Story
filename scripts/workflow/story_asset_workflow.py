@@ -1,8 +1,11 @@
 import argparse
+import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import io
 import json
 import math
 import os
+import re
 import shutil
 import sys
 from threading import Lock
@@ -34,10 +37,149 @@ from scripts.story.story_scene_splitter import (
     normalize_name,
 )
 
-DEFAULT_QWEN_MODEL = "qwen3.5-omni-flash"
+DEFAULT_QWEN_MODEL = "qwen3.6-plus"
+PLACEMENT_VISION_MODEL = "qwen-vl-max"
 MIN_SEEDREAM_PIXELS = 3686400
 DEFAULT_MAX_WORKERS = min(8, max(4, (os.cpu_count() or 4)))
 PROGRESS_LOCK = Lock()
+
+
+def _encode_image_b64_resized(path: Path, max_size: int = 768) -> str:
+    img = Image.open(path).convert("RGBA")
+    w, h = img.size
+    if max(w, h) > max_size:
+        scale = max_size / max(w, h)
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def request_vision_json(
+    api_key: str,
+    model: str,
+    images: list[tuple[str, str]],
+    text_prompt: str,
+    base_url: str,
+    timeout: int,
+) -> dict[str, Any]:
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    content: list[dict] = [
+        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+        for mime, b64 in images
+    ]
+    content.append({"type": "text", "text": text_prompt})
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "temperature": 0.3,
+        "stream": False,
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Vision API HTTP {resp.status_code}: {resp.text[:400]}")
+    raw = resp.json()["choices"][0]["message"]["content"]
+    if isinstance(raw, str):
+        m = re.search(r"\{[\s\S]*\}", raw)
+        return json.loads(m.group(0) if m else raw)
+    return raw
+
+
+def _fallback_placements(scene: dict[str, Any]) -> list[dict[str, Any]]:
+    chars = scene.get("characters", []) or []
+    objs = scene.get("objects", []) or []
+    result = []
+    if chars:
+        xs = [0.5] if len(chars) == 1 else [0.2 + 0.6 * i / (len(chars) - 1) for i in range(len(chars))]
+        for c, x in zip(chars, xs):
+            result.append({"name": c["name"], "kind": "character", "x": x, "y": 0.72, "scale": 1.0, "rotation": 0.0})
+    for i, o in enumerate(objs):
+        row, col = divmod(i, 3)
+        result.append({"name": o["name"], "kind": "object", "x": 0.2 + 0.3 * col, "y": 0.25 + 0.18 * row, "scale": 0.9, "rotation": 0.0})
+    return result
+
+
+def precompute_scene_placements(
+    scene: dict[str, Any],
+    scene_root: Path,
+    dashscope_api_key: str,
+    base_url: str,
+    timeout: int,
+) -> None:
+    images: list[tuple[str, str]] = []
+    bg_png = scene_root / "background" / "background.png"
+    if bg_png.exists():
+        images.append(("image/png", _encode_image_b64_resized(bg_png, max_size=768)))
+    for character in scene.get("characters", []):
+        stem = safe_stem(character["name"])
+        char_png = scene_root / "image" / "characters" / f"{stem}_transparent.png"
+        if not char_png.exists():
+            char_png = scene_root / "image" / "characters" / f"{stem}.png"
+        if char_png.exists():
+            images.append(("image/png", _encode_image_b64_resized(char_png, max_size=512)))
+
+    scene_info = {
+        "interaction_goal": scene.get("interaction_goal", ""),
+        "initial_frame": scene.get("initial_frame", ""),
+        "background": scene.get("background_visual_description", ""),
+        "characters": [{"name": c["name"], "pose": c.get("pose", "")} for c in scene.get("characters", [])],
+        "objects": [{"name": o["name"], "description": o.get("appearance_description", "")} for o in scene.get("objects", [])],
+    }
+    prompt = (
+        "你是儿童互动故事书的美术布局师。图片依次是：背景图、各角色参考图。\n"
+        "请根据图像内容和场景描述，为每个角色与物品规划合理的起始位置。\n\n"
+        "坐标系：x 从 0（最左）到 1（最右）；y 从 0（最上）到 1（最下）。\n"
+        "规则：\n"
+        "- 角色通常站在画面下半部分 (y 在 0.55-0.85)，不要重叠。\n"
+        "- 大型物品（如树、床）放在背景中后景，可稍靠上 (y 在 0.35-0.60)。\n"
+        "- 小道具（如鲜花、蘑菇、蝴蝶）分散在前景和中景，避免堆叠。\n"
+        "- 任何 x、y 都要在 0.05-0.95 之间，不能超出画面。\n"
+        "- 飞行/悬浮类物品（蝴蝶、鸟巢）y 可以较小。\n\n"
+        '输出严格 JSON：{"placements":[{"name":"名字","kind":"character"或"object","x":0.xx,"y":0.xx,"scale":0.6-1.3,"rotation":-15到15}]}\n'
+        "不要输出任何其他文字。\n\n"
+        f"场景信息：\n{json.dumps(scene_info, ensure_ascii=False, indent=2)}"
+    )
+
+    valid_names = {c["name"] for c in scene.get("characters", [])} | {o["name"] for o in scene.get("objects", [])}
+    raw_placements: list[dict] = []
+    if images:
+        try:
+            result = request_vision_json(
+                api_key=dashscope_api_key,
+                model=PLACEMENT_VISION_MODEL,
+                images=images,
+                text_prompt=prompt,
+                base_url=base_url,
+                timeout=timeout,
+            )
+            raw_placements = result.get("placements") or []
+        except Exception as e:
+            print(f"[placements] vision model failed for scene {scene.get('scene_index')}: {e}")
+
+    placements: list[dict] = []
+    seen: set[str] = set()
+    for item in raw_placements:
+        name = item.get("name")
+        if name not in valid_names:
+            continue
+        kind = item.get("kind")
+        if kind not in ("character", "object"):
+            kind = "character" if any(c["name"] == name for c in scene.get("characters", [])) else "object"
+        placements.append({
+            "name": name,
+            "kind": kind,
+            "x": max(0.02, min(0.98, float(item.get("x", 0.5)))),
+            "y": max(0.02, min(0.98, float(item.get("y", 0.5)))),
+            "scale": max(0.4, min(1.5, float(item.get("scale", 1.0)))),
+            "rotation": max(-30.0, min(30.0, float(item.get("rotation", 0.0)))),
+        })
+        seen.add(name)
+    for fb in _fallback_placements(scene):
+        if fb["name"] not in seen:
+            placements.append(fb)
+
+    save_json(scene_root / "placements.json", {"placements": placements})
 
 
 def update_progress(progress: tqdm | None, message: str, steps: int = 1) -> None:
@@ -877,6 +1019,13 @@ def process_scene(
         scene_manifest["objects"].append(result)
 
     save_json(scene_root / "manifest.json", scene_manifest)
+
+    if dashscope_api_key:
+        try:
+            precompute_scene_placements(scene, scene_root, dashscope_api_key, base_url, timeout)
+            update_progress(overall_progress, f"scene {scene_index}: placements")
+        except Exception as e:
+            print(f"[placements] precompute failed for scene {scene_index}: {e}")
 
 
 def scene_work_units(scene: dict[str, Any], narrative_only: bool) -> int:

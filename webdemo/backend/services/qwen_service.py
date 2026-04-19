@@ -7,7 +7,7 @@ import requests
 from ..config import DASHSCOPE_API_KEY
 
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_MODEL = "qwen-turbo"
+DEFAULT_MODEL = "qwen3.5-122b-a10b"
 
 
 class QwenError(RuntimeError):

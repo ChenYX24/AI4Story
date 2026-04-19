@@ -34,7 +34,7 @@ _FUTURES: dict[str, Future] = {}
 _FUTURES_LOCK = Lock()
 
 
-def submit_custom_story(text: str) -> dict:
+def submit_custom_story(text: str, title: str = "") -> dict:
     clean = (text or "").strip()
     if not clean:
         raise ValueError("请先输入故事内容。")
@@ -43,7 +43,7 @@ def submit_custom_story(text: str) -> dict:
     if not DASHSCOPE_API_KEY:
         raise RuntimeError("服务器未配置 DASHSCOPE_API_KEY，暂时不能生成自定义故事。")
 
-    record = create_custom_story_record(clean)
+    record = create_custom_story_record(clean, title=title)
     future = _EXECUTOR.submit(_build_story_assets, record["id"], clean)
     with _FUTURES_LOCK:
         _FUTURES[record["id"]] = future

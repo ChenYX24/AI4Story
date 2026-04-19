@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import FRONTEND_DIR, OUTPUTS_ROOT, SCENES_DIR
-from .routers import chat, create_prop, interact, placements, report, stories, story, tts
+from .routers import chat, create_prop, interact, placements, report, share, stories, story, tts
 
 
 def create_app() -> FastAPI:
@@ -25,6 +25,13 @@ def create_app() -> FastAPI:
     app.include_router(create_prop.router, prefix="/api")
     app.include_router(stories.router, prefix="/api")
     app.include_router(report.router, prefix="/api")
+    app.include_router(share.router, prefix="/api")
+
+    @app.get("/view/{share_id}")
+    def share_view_page(share_id: str) -> HTMLResponse:
+        result = share.share_page(share_id)
+        # share_page returns an HTMLResponse object; pass it through directly
+        return result
 
     app.mount("/assets/scenes", StaticFiles(directory=SCENES_DIR), name="scenes")
     app.mount("/outputs", StaticFiles(directory=OUTPUTS_ROOT), name="outputs")

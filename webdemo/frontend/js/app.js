@@ -1,4 +1,4 @@
-import { mountStoryPicker } from "./story_picker.js";
+import { mountStoryPicker, mountStoryPickerAtStories } from "./story_picker.js";
 import { state, clearInteractive } from "./state.js";
 import { stopTTS } from "./tts.js";
 
@@ -8,7 +8,6 @@ document.getElementById("home-btn")?.addEventListener("click", async () => {
   if (state.stage === "picking") return;
   const ok = await confirmHome();
   if (!ok) return;
-  // hard reset
   stopTTS();
   state.stage = "picking";
   state.flow = [];
@@ -18,9 +17,8 @@ document.getElementById("home-btn")?.addEventListener("click", async () => {
   state.storyId = null;
   clearInteractive();
   state.storyLog = { interactions: [] };
-  // remove any existing picker layer
   document.getElementById("story-picker")?.remove();
-  mountStoryPicker();
+  mountStoryPickerAtStories();
 });
 
 function confirmHome() {

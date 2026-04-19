@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(node *)",
+      "Bash(read f *)",
+      "Bash(chcp 65001)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('scene_type'\\)\\); print\\([c['name'] for c in d.get\\('characters',[]\\)]\\)\")",
+      "Bash(python3 *)",
+      "Bash(awk '{print $5}')"
+    ]
+  }
+}

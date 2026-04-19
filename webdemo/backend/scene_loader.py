@@ -90,7 +90,7 @@ def scene_payload(idx: int, story_id: str | None = None) -> dict[str, Any]:
         "characters": [
             {
                 "name": c["name"],
-                "url": asset_resolver.url_for(idx, "scene_character", c["name"], story_id=story_id),
+                "url": _resolve_character_url(idx, c["name"], story_id),
                 "default_x": default_x,
                 "default_y": 0.70,
             }
@@ -99,7 +99,7 @@ def scene_payload(idx: int, story_id: str | None = None) -> dict[str, Any]:
         "props": [
             {
                 "name": o["name"],
-                "url": asset_resolver.url_for(idx, "scene_object", o["name"], story_id=story_id),
+                "url": _resolve_object_url(idx, o["name"], story_id),
                 "description": o.get("appearance_description", ""),
             }
             for o in props
@@ -113,6 +113,26 @@ def _evenly_spaced_x(n: int) -> list[float]:
     if n == 1:
         return [0.5]
     return [0.2 + 0.6 * i / (n - 1) for i in range(n)]
+
+
+def _resolve_character_url(scene_idx: int, name: str, story_id: str | None) -> str:
+    scene_path = asset_resolver.path_for(scene_idx, "scene_character", name, story_id=story_id)
+    if scene_path.exists():
+        return asset_resolver.url_for(scene_idx, "scene_character", name, story_id=story_id)
+    global_path = asset_resolver.path_for(0, "global_character", name, story_id=story_id)
+    if global_path.exists():
+        return asset_resolver.url_for(0, "global_character", name, story_id=story_id)
+    return asset_resolver.url_for(scene_idx, "scene_character", name, story_id=story_id)
+
+
+def _resolve_object_url(scene_idx: int, name: str, story_id: str | None) -> str:
+    scene_path = asset_resolver.path_for(scene_idx, "scene_object", name, story_id=story_id)
+    if scene_path.exists():
+        return asset_resolver.url_for(scene_idx, "scene_object", name, story_id=story_id)
+    global_path = asset_resolver.path_for(0, "global_object", name, story_id=story_id)
+    if global_path.exists():
+        return asset_resolver.url_for(0, "global_object", name, story_id=story_id)
+    return asset_resolver.url_for(scene_idx, "scene_object", name, story_id=story_id)
 
 
 def _build_storyboard(scene: dict[str, Any]) -> list[dict[str, str]]:

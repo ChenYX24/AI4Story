@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_MODEL = "qwen3.5-122b-a10b"
+DEFAULT_MODEL = "qwen3.6-plus"
 NARRATIVE_SCENE = "叙事场景"
 INTERACTIVE_SCENE = "交互场景"
 

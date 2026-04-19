@@ -71,22 +71,46 @@ export function unmountInteractive() {
 
 // ---- character placement via Qwen ----
 
+function preloadImage(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+
 async function loadAndPlaceCharacters() {
+  const currentScene = scene;
+  const chars = currentScene?.characters;
+  if (!chars || !chars.length) return;
+
   let llm = null;
   try {
-    const resp = await postPlacements(scene.index);
+    const resp = await postPlacements(currentScene.index);
+    if (scene !== currentScene) return;
     llm = Object.fromEntries(resp.placements.map((p) => [p.name, p]));
   } catch (e) {
     console.warn("placement failed, fallback:", e.message);
+    if (scene !== currentScene) return;
   }
+
   const fallback = {};
-  scene.characters.forEach((c, i) => {
+  chars.forEach((c, i) => {
     fallback[c.name] = {
-      x: c.default_x ?? (0.2 + 0.6 * i / Math.max(1, scene.characters.length - 1)),
+      x: c.default_x ?? (0.2 + 0.6 * i / Math.max(1, chars.length - 1)),
       y: 0.72, scale: 1.0, rotation: 0,
     };
   });
-  scene.characters.forEach((c) => {
+
+  // Preload all character images in parallel
+  const preloads = await Promise.all(chars.map((c) => preloadImage(c.url)));
+  if (scene !== currentScene) return;
+
+  chars.forEach((c, i) => {
+    if (!preloads[i]) {
+      console.warn(`character image not loaded: ${c.name} (${c.url})`);
+    }
     const pos = (llm && llm[c.name]) || fallback[c.name];
     const item = {
       name: c.name, kind: "character", url: c.url,
@@ -177,6 +201,7 @@ function wireBgDropZone() {
 
 function renderItem(item) {
   const bg = document.getElementById("bg-stage");
+  if (!bg) return;
   const img = document.createElement("img");
   img.src = item.custom_url || item.url;
   img.alt = item.name;
@@ -184,6 +209,12 @@ function renderItem(item) {
   img.className = "stage-item";
   img.dataset.name = item.name;
   img.dataset.kind = item.kind;
+  img.onerror = () => {
+    console.warn(`Failed to load image for "${item.name}": ${img.src}`);
+    img.style.opacity = "0.3";
+    img.style.filter = "grayscale(100%)";
+    img.onerror = null;
+  };
   applyTransform(img, item);
   img.addEventListener("pointerdown", onItemPointerDown);
   img.addEventListener("click", onItemClick);
