@@ -10,6 +10,20 @@ const stage = () => document.getElementById("stage");
 const side = () => document.getElementById("side");
 let currentType = null;
 
+function prefetchNode(idx) {
+  if (idx < 0 || idx >= state.flow.length) return;
+  const node = state.flow[idx];
+  if (!node.sceneIdx) return;
+  fetchScene(node.sceneIdx).then((scene) => {
+    const urls = [];
+    if (scene.comic_url) urls.push(scene.comic_url);
+    if (scene.background_url) urls.push(scene.background_url);
+    (scene.characters || []).forEach((c) => c.url && urls.push(c.url));
+    (scene.props || []).forEach((p) => p.url && urls.push(p.url));
+    urls.forEach((u) => { const img = new Image(); img.src = u; });
+  }).catch(() => {});
+}
+
 function unmountCurrent() {
   if (currentType === "narrative") unmountNarrative();
   else if (currentType === "interactive") unmountInteractive();
@@ -51,6 +65,7 @@ export async function goToNode(idx) {
     state.highestUnlocked = Math.max(state.highestUnlocked, idx);
     node.visited = true;
     renderTimeline();
+    prefetchNode(idx + 1);
   } catch (e) {
     toast(`加载失败：${e.message}`);
     console.error(e);
