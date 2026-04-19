@@ -865,6 +865,127 @@ button:disabled {
   .side { max-height: 40vh; }
 }
 
+/* =============================================
+   Mobile: ≤ 640px — phone portrait layout
+   ============================================= */
+@media (max-width: 640px) {
+  /* Allow body to scroll on mobile so content isn't cut off */
+  html, body { overflow: auto; }
+
+  /* Compact top bar */
+  #top-bar {
+    height: 52px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+  .brand { font-size: 15px; }
+  .home-btn { width: 30px; height: 30px; font-size: 15px; margin-right: 6px; }
+
+  /* Compress timeline */
+  .timeline { max-width: 58%; gap: 4px; }
+  .tl-node { width: 40px; }
+  .tl-thumb { width: 36px; height: 36px; border-radius: 9px; }
+  .tl-label { font-size: 9px; }
+
+  /* Main layout: single column, stage top / side bottom */
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    gap: 8px;
+    padding: 8px;
+    overflow-y: auto;
+    /* allow content to overflow body scroll */
+    min-height: calc(100vh - 52px);
+    height: auto;
+  }
+
+  /* Stage: square-ish, full width */
+  .stage {
+    min-height: 56vw;
+    max-height: 65vw;
+    border-radius: 14px;
+  }
+
+  /* Comic image: fill stage */
+  .comic-img { border-radius: 10px; }
+
+  /* Side panel: auto height, scrollable */
+  .side {
+    max-height: none;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    border-radius: 14px;
+    padding: 14px;
+  }
+
+  /* Narrative controls */
+  .comic-controls {
+    padding: 8px 10px;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .comic-controls button { font-size: 13px; padding: 7px 12px; }
+
+  /* Story log bubbles */
+  .story-log { max-height: 30vh; }
+  .bubble { font-size: 14px; padding: 8px 12px; }
+
+  /* Chat row */
+  .chat-row { gap: 6px; }
+  .chat-row input { font-size: 15px; }
+  .chat-row button { padding: 8px 12px; font-size: 13px; }
+
+  /* Interactive stage */
+  .stage-canvas-wrap { min-height: 52vw; }
+
+  /* Action input row */
+  .input-row { grid-template-columns: 1fr auto; gap: 6px; }
+  .input-row > textarea { min-height: 52px; font-size: 14px; }
+
+  /* Prop/character shelf */
+  .prop-shelf, .char-shelf { gap: 8px; }
+  .prop-item, .char-item { width: 56px; }
+  .prop-item img, .char-item img { width: 52px; height: 52px; }
+  .prop-item span, .char-item span { font-size: 10px; }
+
+  /* Goal banner */
+  .goal-banner { padding: 8px 12px; font-size: 14px; }
+
+  /* Submit / next buttons */
+  .submit-btn, button#btn-next-scene, button#btn-submit {
+    min-height: 46px; font-size: 15px;
+  }
+
+  /* Picker: scrollable on mobile */
+  .picker { padding: 20px 14px 40px; overflow-y: auto; }
+  .picker-landing {
+    align-items: flex-start;
+    padding: 0 8px;
+    min-height: 100%;
+  }
+  .landing-shell { padding-top: 8px; }
+
+  /* Story grid on picker */
+  .picker-grid { gap: 10px; }
+  .story-card { border-radius: 14px; }
+  .story-card .story-title { font-size: 14px; }
+
+  /* Report */
+  .report-body { padding: 12px; }
+  .report-tabs { gap: 6px; padding: 10px 12px 0; }
+  .report-tab { padding: 6px 12px; font-size: 13px; }
+  .share-view { padding: 16px 12px; }
+  .share-qr-wrap { flex-direction: column; align-items: center; gap: 8px; }
+  .achievements-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .share-actions { flex-direction: column; }
+  .share-actions button { width: 100%; }
+
+  /* Metric bars */
+  .rec-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* ---------- Story picker ---------- */
 .picker {
   position: fixed;
@@ -882,7 +1003,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden !important;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 0 32px;
 }
 
