@@ -62,12 +62,19 @@ async function renderShare(data) {
       story_title: state.story?.story_summary?.slice(0, 30) || "",
       comics,
     });
-    // Use LAN IP so mobile devices on the same network can scan the QR code
+    // For LAN access (localhost/127.0.0.1), fetch the real LAN IP from server
+    // so mobile on the same network can scan the QR code.
+    // For cloud/public servers, location.hostname is already the public IP.
     let lanIp = location.hostname;
-    try {
-      const infoResp = await fetch("/api/server-info").then((r) => r.json());
-      if (infoResp.lan_ip) lanIp = infoResp.lan_ip;
-    } catch (_) {}
+    const isLocalhost = lanIp === "localhost" || lanIp === "127.0.0.1";
+    if (isLocalhost) {
+      try {
+        const infoResp = await fetch("/api/server-info").then((r) => r.json());
+        const serverIp = infoResp.lan_ip || "";
+        // Only use if it's a non-loopback IP
+        if (serverIp && serverIp !== "127.0.0.1") lanIp = serverIp;
+      } catch (_) {}
+    }
     const port = location.port ? `:${location.port}` : "";
     shareUrl = `http://${lanIp}${port}/view/${shareResp.share_id}`;
     const qrSrc = `/api/share/${shareResp.share_id}/qr.svg?url=${encodeURIComponent(shareUrl)}`;
