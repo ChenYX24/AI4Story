@@ -166,7 +166,7 @@ def _collect_reference_paths(
     # custom props (user-generated, absolute path under outputs)
     for cp in req.custom_props:
         rel = cp.url.lstrip("/")
-        candidate = (PROJECT_ROOT / "webdemo" / rel).resolve()
+        candidate = (PROJECT_ROOT / rel).resolve()
         if candidate.exists() and candidate not in seen:
             paths.append(candidate)
             seen.add(candidate)

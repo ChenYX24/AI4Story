@@ -11,34 +11,35 @@
 ## 运行
 
 ```bash
-cd /Users/cyx/projects/AI4Story
+cd /path/to/AI4Story
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate ai4story
 pip install -r requirements.txt
 
 export ARK_API_KEY=sk-...            # 必须：Seedream
 export DASHSCOPE_API_KEY=sk-...      # 可选：叙事聊天用 Qwen
 
-uvicorn webdemo.backend.main:app --reload --port 8000
+uvicorn apps.api.main:app --reload --port 8000
 open http://localhost:8000           # 推荐 Chrome / Edge（语音识别支持）
 ```
 
-## 目录
+## 目录（monorepo）
 
 ```
-webdemo/
-├── backend/
+apps/
+├── api/                                 # 后端
 │   ├── main.py                          # FastAPI 入口，挂载静态
 │   ├── config.py                        # env / 路径常量
 │   ├── scene_loader.py                  # 读 story_scenes.json + scene.json
 │   ├── asset_resolver.py                # 统一路径解析（忽略 Windows manifest）
 │   ├── models.py                        # Pydantic 请求体
-│   ├── routers/{story,tts,interact,chat}.py
-│   └── services/{tts,interact,chat}_service.py
-├── frontend/
-│   ├── index.html
-│   ├── css/app.css
-│   └── js/{app,router,state,api,tts,asr,toast,narrative_view,interactive_view}.js
-└── outputs/webdemo/{session_id}/        # 生成的参考板 + 结果图
+│   ├── routers/{story,tts,interact,chat,...}.py
+│   └── services/{tts,interact,chat,...}_service.py
+└── web/                                 # 前端
+    ├── index.html
+    ├── css/app.css
+    └── js/{app,router,state,api,tts,asr,toast,narrative_view,interactive_view}.js
+
+outputs/webdemo/{session_id}/            # 运行时：生成的参考板 + 结果图（.gitignore）
 ```
 
 ## API

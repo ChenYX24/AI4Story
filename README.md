@@ -1,25 +1,30 @@
 # AI4Story
 
-## Structure
+面向学龄前儿童的 AI 互动故事剧场：文本 / 视频 / 音频 / 手绘 → 生成互动场景 → 小孩参与 → 自动生成成长报告。
+
+Web demo 速启：`bash start_webdemo.sh`（macOS/Linux）或 `start_webdemo.cmd`（Windows）。Web demo 详细说明见 [apps/README.md](apps/README.md)。
+
+## Monorepo 结构
 
 ```text
+apps/
+  api/          # 后端 (FastAPI)
+  web/          # 前端 (原生 JS，阶段 1 引 StPageFlip)
+packages/
+  shared/       # 预留：TS 类型/常量
+contracts/
+  openapi/      # SSOT — OpenAPI spec
 scripts/
   image_generation/
   image_processing/
   story/
   workflow/
-examples/
-  image_generation/
-  story/
-outputs/
-  images/
-  story_scenes/
-scenes/
-  story_scenes.json
-  global/
-  001/
-  002/
+examples/       # 输入示例 (*.txt / *.json)
+scenes/         # 剧本数据 (*.json / *.txt)；图片资源本地保存，.gitignore
+outputs/        # 运行时产物；.gitignore
 ```
+
+图片/音视频资源全部 .gitignore — 仓库只存代码与元数据。
 
 ## Install
 

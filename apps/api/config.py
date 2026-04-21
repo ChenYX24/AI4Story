@@ -1,15 +1,15 @@
 import os
 from pathlib import Path
 
-BACKEND_DIR = Path(__file__).resolve().parent
-WEBDEMO_DIR = BACKEND_DIR.parent
-PROJECT_ROOT = WEBDEMO_DIR.parent
+API_DIR = Path(__file__).resolve().parent
+APPS_DIR = API_DIR.parent
+PROJECT_ROOT = APPS_DIR.parent
 
 SCENES_DIR = PROJECT_ROOT / "scenes"
 STORY_JSON = SCENES_DIR / "story_scenes.json"
 
-FRONTEND_DIR = WEBDEMO_DIR / "frontend"
-OUTPUTS_ROOT = WEBDEMO_DIR / "outputs" / "webdemo"
+FRONTEND_DIR = APPS_DIR / "web"
+OUTPUTS_ROOT = PROJECT_ROOT / "outputs" / "webdemo"
 OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
 CUSTOM_STORIES_ROOT = OUTPUTS_ROOT / "stories"
 CUSTOM_STORIES_ROOT.mkdir(parents=True, exist_ok=True)

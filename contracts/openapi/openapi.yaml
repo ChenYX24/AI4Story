@@ -1,0 +1,84 @@
+openapi: 3.1.0
+info:
+  title: AI4Story API
+  version: 0.2.0-draft
+  description: |
+    AI4Story backend API. This file is the Single Source of Truth (SSOT)
+    for API contracts. Never patch the server without updating this file.
+
+    v2 migration in progress — endpoints will be expanded as per
+    agent-docs/plan/AI4Story_v2_主计划_*.md and ADR-002/004.
+servers:
+  - url: http://localhost:8000
+    description: Local development
+tags:
+  - name: story
+    description: Story data (scenes, panels)
+  - name: interact
+    description: User interaction primitives (placements, ops)
+  - name: tts
+    description: Text-to-speech streaming
+  - name: chat
+    description: LLM chat (Qwen / Doubao)
+  - name: share
+    description: Shareable story / report / asset codes
+  - name: report
+    description: Session reports (overall / child / parent)
+  - name: asset
+    description: Character / prop / background / scene_pack assets
+  - name: user
+    description: Account & auth
+paths:
+  /healthz:
+    get:
+      tags: [story]
+      operationId: healthz
+      summary: Liveness probe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                example: { ok: true }
+  # --- existing endpoints will be documented as part of阶段 1 基建 ---
+  # GET  /api/story
+  # GET  /api/scene/{idx}
+  # GET  /api/tts
+  # POST /api/interact
+  # POST /api/chat
+  # POST /api/stories/custom
+  # POST /api/share
+  # GET  /api/share/{code}
+  # GET  /api/report/{session_id}           (existing non-streaming)
+  #
+  # --- v2 new endpoints (see ADR-002/004) ---
+  # GET  /report/stream?session_id=...      (SSE, ADR-004)
+  # POST /auth/login
+  # CRUD /users, /stories, /scenes, /assets, /sessions, /reports, /share_codes, /asset_bundles
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Stable machine-readable error code
+          example: invalid_input
+        message:
+          type: string
+          description: Human-readable explanation
+        details:
+          type: object
+          additionalProperties: true
+  responses:
+    Error:
+      description: Standard error envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

@@ -88,7 +88,7 @@ if not errorlevel 1 (
 )
 
 echo Starting AI4Story on %URL%
-start "AI4Story Web Demo" /D "%ROOT%" "%PYTHON_EXE%" -m uvicorn webdemo.backend.main:app --host %HOST% --port %PORT%
+start "AI4Story Web Demo" /D "%ROOT%" "%PYTHON_EXE%" -m uvicorn apps.api.main:app --host %HOST% --port %PORT%
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$url='%URL%/healthz'; $deadline=(Get-Date).AddSeconds(60); while((Get-Date) -lt $deadline){ try { $r = Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 1 }; exit 1"
 if errorlevel 1 (
