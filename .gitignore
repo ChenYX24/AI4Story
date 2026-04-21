@@ -6,6 +6,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
+# Node / frontend build
+node_modules/
+dist/
+.vite/
+
 # macOS
 .DS_Store
 
@@ -15,22 +20,56 @@ __pycache__/
 
 # Environments
 .env
+.env.*
 .venv/
 venv/
 start_webdemo.keys.cmd
 start_webdemo.keys.sh
 
-# Per-session webdemo outputs (transient user-generated images)
-webdemo/outputs/webdemo/
+# Claude Code / agent-docs (local work notes, never push)
+.claude/
+agent-docs/
+ACTIVE_CONTEXT.md
+MEMORY.md
 
-# TLS certs (user-specific, regenerate per host)
+# Image / audio / video resources — 代码仓只 push 代码，不 push 资源
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.ico
+*.svg
+*.mp4
+*.mp3
+*.wav
+*.ogg
+*.webm
+*.mov
+
+# Runtime outputs
+outputs/
+webdemo/outputs/
 webdemo/certs/*.pem
 
-# Intermediate grid artifacts (raw grids before cell extraction)
+# Intermediate scene artifacts
 scenes/*/_object_grids/
 scenes/*/_refs/
 scenes/global/_object_grids/
 scenes/global/_character_grids/
 
-# Scheduler tasks
-.claude/scheduled_tasks.json
+# Databases / caches
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+webdemo/backend.err.log
+webdemo/backend.out.log
+
+# TEMP
+*.tmp
+.tmp/
