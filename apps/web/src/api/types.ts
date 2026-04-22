@@ -27,34 +27,45 @@ export interface StoryboardLine {
 }
 
 export interface SceneCharacter {
-  id: string;
   name: string;
   url: string;
+  default_x?: number;
+  default_y?: number;
+  default_scale?: number;
 }
 export interface SceneProp {
-  id: string;
   name: string;
   url: string;
+  description?: string;
 }
 export interface Scene {
   index: number;
-  kind: "narrative" | "interactive";
+  /** 后端字段名是 type；narrative / interactive */
+  type: "narrative" | "interactive";
   title?: string;
   summary?: string;
   narration?: string;
+  // narrative-only
   comic_url?: string;
   storyboard?: StoryboardLine[];
+  // interactive-only
+  interaction_goal?: string;
+  initial_frame?: string;
+  event_outcome?: string;
   background_url?: string;
   characters?: SceneCharacter[];
   props?: SceneProp[];
 }
 
 export interface StoryDetail {
-  id: string;
-  title: string;
+  /** 后端 /api/story 不返回 id（路径已经知道）；前端在 store 里手工补上 */
+  id?: string;
+  title?: string;
   story_summary?: string;
   scene_count: number;
-  scenes: Array<{ index: number; kind: "narrative" | "interactive"; title?: string }>;
+  scenes: Array<{ index: number; type: "narrative" | "interactive"; title?: string; interaction_goal?: string | null }>;
+  global_characters?: SceneCharacter[];
+  global_objects?: SceneProp[];
 }
 
 export interface OpItem {

@@ -51,7 +51,14 @@ const sessionId = computed(() => {
   return "s_" + Date.now().toString(36);
 });
 
-// 预置 placements (从后端读上次保存或默认)
+// 预置 placements (从后端读默认布局)；placement 不带 url，从 scene.characters / .props 里按 name 查
+function findUrlByName(name: string, kind: "character" | "object"): string | undefined {
+  if (kind === "character") {
+    return props.scene.characters?.find((c) => c.name === name)?.url;
+  }
+  return props.scene.props?.find((p) => p.name === name)?.url;
+}
+
 async function loadInitialPlacements() {
   try {
     const r = await fetchPlacements(props.storyId, props.scene.index);
@@ -60,7 +67,7 @@ async function loadInitialPlacements() {
         id: `${p.kind}-${p.name}-${Math.random().toString(36).slice(2, 6)}`,
         name: p.name,
         kind: p.kind,
-        url: p.url,
+        url: p.url || findUrlByName(p.name, p.kind),
         x: p.x, y: p.y,
         scale: p.scale ?? 1,
         rotation: p.rotation ?? 0,
@@ -293,7 +300,7 @@ const sidebarProps = computed(() => props.scene.props || []);
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
             v-for="c in sidebarChars"
-            :key="c.id"
+            :key="c.name"
             draggable="true"
             class="bg-paper-deep rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing"
             @dragstart="(e) => onSidebarDragStart(e, c, 'character')"
@@ -306,7 +313,7 @@ const sidebarProps = computed(() => props.scene.props || []);
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
             v-for="p in sidebarProps"
-            :key="p.id"
+            :key="p.name"
             draggable="true"
             class="bg-gold-mute/40 rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing"
             @dragstart="(e) => onSidebarDragStart(e, p, 'object')"

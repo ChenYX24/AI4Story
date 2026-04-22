@@ -9,7 +9,7 @@ export const useStoryStore = defineStore("story", () => {
   const sceneCache = ref<Map<number, Scene>>(new Map());
 
   // 节点流：narrative + interactive 穿插
-  const flow = ref<Array<{ kind: "narrative" | "interactive"; sceneIdx: number; visited: boolean }>>([]);
+  const flow = ref<Array<{ type: "narrative" | "interactive"; sceneIdx: number; visited: boolean }>>([]);
   const cursor = ref(0);
   const highestUnlocked = ref(0);
 
@@ -21,10 +21,15 @@ export const useStoryStore = defineStore("story", () => {
 
   async function loadStory(id: string) {
     const s = await fetchStory(id);
+    // 后端不回 id，前端手工补上以便后续判断 current.id === routeId
+    s.id = id;
+    if (!s.title) {
+      const card = list.value.find((x) => x.id === id);
+      if (card) s.title = card.title;
+    }
     current.value = s;
-    // 按 scene.kind 展开 flow（backend scenes 已包含顺序）
     flow.value = (s.scenes || []).map((sc) => ({
-      kind: sc.kind,
+      type: sc.type,
       sceneIdx: sc.index,
       visited: false,
     }));

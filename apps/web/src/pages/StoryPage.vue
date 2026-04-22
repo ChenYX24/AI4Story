@@ -221,7 +221,7 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
             <div class="p-6 sm:p-10 min-h-[420px] sm:min-h-[520px] flex flex-col">
               <div class="flex items-center justify-between mb-4">
                 <div class="text-xs tracking-wider text-ink-mute">
-                  第 {{ (node?.sceneIdx ?? 0) }} 页 · {{ node?.kind === "narrative" ? "叙事" : "互动" }}
+                  第 {{ (node?.sceneIdx ?? 0) }} 页 · {{ node?.type === "narrative" ? "叙事" : "互动" }}
                 </div>
                 <div class="text-xs text-ink-mute">{{ store.cursor + 1 }} / {{ store.flow.length }}</div>
               </div>
@@ -246,7 +246,7 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
               </template>
 
               <!-- 叙事：显示 comic + 逐句 -->
-              <template v-else-if="node?.kind === 'narrative'">
+              <template v-else-if="node?.type === 'narrative'">
                 <div class="flex-1 grid place-items-center rounded-xl overflow-hidden bg-paper">
                   <img
                     v-if="scene.comic_url"
@@ -280,13 +280,13 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
 
               <!-- 底部操作条 — interactive 场景时由 InteractiveView 自带按钮，外层不再重复 -->
               <div
-                v-if="dynamicNode || node?.kind === 'narrative'"
+                v-if="dynamicNode || node?.type === 'narrative'"
                 class="mt-6 flex flex-wrap gap-2 justify-between items-center pt-4 border-t border-dashed border-paper-edge"
               >
                 <div class="flex gap-2">
                   <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0 && !dynamicNode" @click="turnPage('prev')">⬅ 上一页</BaseButton>
                   <BaseButton
-                    v-if="!dynamicNode && node?.kind === 'narrative'"
+                    v-if="!dynamicNode && node?.type === 'narrative'"
                     variant="ghost"
                     size="sm"
                     pill
