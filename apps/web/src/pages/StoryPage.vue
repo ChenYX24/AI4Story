@@ -56,7 +56,7 @@ async function turnPage(direction: "next" | "prev") {
   if (dynamicNode.value && direction === "next") {
     dynamicNode.value = null;
     flipping.value = "next";
-    setTimeout(() => loadCursor(store.cursor + 1 < store.flow.length ? store.cursor + 1 : store.cursor), 420);
+    setTimeout(() => loadCursor(Math.min(store.cursor + 1, store.flow.length - 1)), 420);
     return;
   }
   if (dynamicNode.value && direction === "prev") {
@@ -69,7 +69,7 @@ async function turnPage(direction: "next" | "prev") {
     router.push({ name: "report", params: { id: props.id } });
     return;
   }
-  if (to > store.highestUnlocked) { toast.push("还没解锁哦～", "warn"); return; }
+  // 顺序推进永远允许；跳转（timeline）才检查 highestUnlocked
   stopAudio();
   flipping.value = direction;
   setTimeout(() => loadCursor(to), 420);
@@ -189,9 +189,10 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
   <div class="min-h-screen">
     <TopBar
       :cursor="store.cursor"
-      :total="store.flow.length"
+      :highest-unlocked="store.highestUnlocked"
+      :flow-items="store.flow"
       @home="() => router.push('/library')"
-      @jump="(idx: number) => idx <= store.highestUnlocked && loadCursor(idx)"
+      @jump="(idx: number) => loadCursor(idx)"
     />
 
     <div class="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -231,21 +232,12 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
                 <div class="flex-1 grid place-items-center rounded-xl overflow-hidden bg-paper">
                   <img :src="dynamicNode.comic_url" class="w-full h-full object-contain" alt="新段落" />
                 </div>
-                <div class="mt-4 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30">
+                <div class="mt-3 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30">
                   ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
-                </div>
-                <div v-if="dynamicNode.storyboard?.length" class="mt-3 space-y-2 max-h-48 overflow-auto">
-                  <div
-                    v-for="(ln, i) in dynamicNode.storyboard"
-                    :key="i"
-                    class="bg-paper-deep rounded-xl px-4 py-2 text-sm"
-                  >
-                    <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
-                  </div>
                 </div>
               </template>
 
-              <!-- 叙事：显示 comic + 逐句 -->
+              <!-- 叙事：只显示 comic，旁白在右侧 aside -->
               <template v-else-if="node?.type === 'narrative'">
                 <div class="flex-1 grid place-items-center rounded-xl overflow-hidden bg-paper">
                   <img
@@ -255,17 +247,6 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
                     class="w-full h-full object-contain"
                   />
                   <div v-else class="py-20 text-ink-mute">（此幕无图）</div>
-                </div>
-
-                <!-- 旁白气泡流 -->
-                <div v-if="visibleLines.length" class="mt-4 space-y-2">
-                  <div
-                    v-for="(ln, i) in visibleLines"
-                    :key="i"
-                    class="fade-in bg-paper-deep rounded-xl px-4 py-2 text-sm"
-                  >
-                    <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
-                  </div>
                 </div>
               </template>
 
@@ -302,13 +283,49 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
         </Transition>
       </div>
 
-      <!-- 右侧：摘要 + 聊天 -->
-      <aside class="space-y-4">
+      <!-- 右侧：摘要 + 旁白流 + 聊天 -->
+      <aside class="space-y-4 lg:max-h-[calc(100vh-6rem)] lg:sticky lg:top-20 lg:overflow-y-auto no-scrollbar">
         <BaseCard class="p-5">
           <h2 class="font-display text-lg font-bold m-0 mb-1">{{ scene?.title || store.current?.title || "故事" }}</h2>
           <p class="text-sm text-ink-soft leading-relaxed m-0">
             {{ scene?.summary || scene?.narration || store.current?.story_summary || "" }}
           </p>
+        </BaseCard>
+
+        <!-- 旁白流（narrative / dynamic 时才显示） -->
+        <BaseCard
+          v-if="(node?.type === 'narrative' || dynamicNode) && (visibleLines.length || (dynamicNode?.storyboard?.length ?? 0) > 0)"
+          class="p-5"
+        >
+          <div class="text-sm font-semibold mb-3 flex items-center gap-2">
+            <span>📖 旁白</span>
+            <span v-if="node?.type === 'narrative' && !dynamicNode" class="text-xs text-ink-mute font-normal">
+              {{ lineCursor }} / {{ (scene?.storyboard || []).length }}
+            </span>
+          </div>
+          <div class="space-y-2">
+            <!-- 动态段落的所有 storyboard 一次性显示 -->
+            <template v-if="dynamicNode">
+              <div
+                v-for="(ln, i) in (dynamicNode.storyboard || [])"
+                :key="'d-' + i"
+                class="fade-in bg-paper-deep rounded-xl px-3 py-2 text-sm leading-relaxed"
+              >
+                <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
+              </div>
+            </template>
+            <!-- 预置叙事：点"下一句"逐条展开 -->
+            <template v-else>
+              <div
+                v-for="(ln, i) in visibleLines"
+                :key="'v-' + i"
+                class="fade-in bg-paper-deep rounded-xl px-3 py-2 text-sm leading-relaxed"
+                :class="i === visibleLines.length - 1 && 'ring-1 ring-gold/40'"
+              >
+                <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
+              </div>
+            </template>
+          </div>
         </BaseCard>
         <BaseCard class="p-5 flex flex-col" style="min-height: 280px;">
           <div class="text-sm font-semibold mb-3 flex items-center justify-between">
