@@ -24,21 +24,40 @@
 ## 3. 快速开始
 
 ```bash
-# 1) Python env（已有 conda env 'ai4story'，requirements 里东西齐）
-source ~/miniconda3/etc/profile.d/conda.sh && conda activate ai4story
+# 0) 克隆
+git clone https://github.com/ChenYX24/AI4Story.git
+cd AI4Story
 
-# 2) 三个 API key（必须）— 写到 start_webdemo.keys.sh 或直接 export
+# 1) 拉预置图片资产 (scenes/ 下 128M, 不在 git 里)
+bash scripts/fetch_assets.sh \
+  --from-url https://github.com/ChenYX24/AI4Story/releases/download/assets-2026-04-22/scenes-assets-2026-04-22.tar.gz
+
+# 2) Python env（conda 'ai4story' 已就绪）
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate ai4story
+pip install -r requirements.txt
+
+# 3) 三个 API key（必须）— 写到 start_webdemo.keys.sh 或直接 export
 export ARK_API_KEY=ark-xxx              # Volcengine Seedream
 export DASHSCOPE_API_KEY=sk-xxx         # Qwen 文本
 export XIAOMI_TTS_API_KEY=sk-xxx        # 小米 MiMo v2 TTS
 
-# 3) 一键启动（会自动 pnpm install + vite build 前端 → uvicorn 起后端）
-cd /Users/cyx/projects/AI4Story_v2
+# 4) 一键启动（会自动 pnpm install + vite build 前端 → uvicorn 起后端）
 bash start_webdemo.sh
 
-# 4) 开发模式前端（用 Vite dev server 实时热更）
+# 5) 开发模式前端（Vite dev server 实时热更）
 cd apps/web && pnpm dev   # http://127.0.0.1:5173  — 代理 /api /outputs 到 :8000
 ```
+
+### 资产分发机制
+
+- **图片永不入 git** — 45 PNG + 31 SVG + 128M 太大，历史会爆炸
+- **GitHub Release** 作为分发点：每次更新 `scenes/` 后用 `scripts/pack_assets.sh` 打包，`gh release create assets-YYYY-MM-DD` 发布
+- **协作者** 用 `scripts/fetch_assets.sh` 三选一恢复：
+  - `--from <tar>`：本地 tar.gz（U 盘 / IM 收到的）
+  - `--from-url <url>`：GitHub Release 下载
+  - `--from-dir <path>`：rsync 自另一台机器
+  - `MINDSHOW_ASSETS_URL` env 作为 `--from-url` 默认
+- **当前 Release**：`assets-2026-04-22` — 116 条目，128M
 
 ## 4. 架构地图
 

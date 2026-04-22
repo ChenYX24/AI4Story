@@ -14,26 +14,38 @@
 
 ## 快速开始
 
-**1. 装依赖**
+> ⚠️ **重要**：图片资产（`scenes/` 下约 128M 的 PNG/SVG）不进 git（太大且会污染历史）。  
+> 克隆后必须额外跑一步 `fetch_assets.sh` 才能看到角色/道具/连环画。
+
+**1. 克隆 + 拉资产**
 ```bash
-# 后端 (conda env 'ai4story')
+git clone https://github.com/ChenYX24/AI4Story.git
+cd AI4Story
+
+# 拉预置图片资产（小红帽角色/道具/连环画，约 128M，GitHub Release）
+bash scripts/fetch_assets.sh \
+  --from-url https://github.com/ChenYX24/AI4Story/releases/download/assets-2026-04-22/scenes-assets-2026-04-22.tar.gz
+```
+
+**2. 装依赖**
+```bash
+# 后端
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate ai4story
 pip install -r requirements.txt
 
-# 前端（Node 20+）
-cd apps/web && pnpm install
+# 前端（Node 20+ 推荐 pnpm）
+cd apps/web && pnpm install && cd -
 ```
 
-**2. 三个必须的 API key**
+**3. 填三个 API key**
 ```bash
-cp start_webdemo.keys.sh.example start_webdemo.keys.sh  # (如无此文件，首次跑脚本自动生成)
-# 编辑文件填入：
-#   ARK_API_KEY           — Volcengine Seedream (出图)
-#   DASHSCOPE_API_KEY     — 阿里云 Qwen (讲故事/报告)
-#   XIAOMI_TTS_API_KEY    — 小米 MiMo v2 TTS (朗读)
+# 首次运行 start_webdemo.sh 会自动生成模板 start_webdemo.keys.sh，编辑填入：
+#   ARK_API_KEY           — Volcengine Seedream (出图，必须)
+#   DASHSCOPE_API_KEY     — 阿里云 Qwen (讲故事/报告，必须)
+#   XIAOMI_TTS_API_KEY    — 小米 MiMo v2 TTS (朗读，必须)
 ```
 
-**3. 一键启动**
+**4. 一键启动**
 ```bash
 bash start_webdemo.sh       # macOS/Linux — 自动 pnpm build + uvicorn
 # 或 Windows：
@@ -46,6 +58,31 @@ start_webdemo.cmd
 ```bash
 cd apps/web && pnpm dev     # http://127.0.0.1:5173
 # 后端独立跑 (另一个终端)：bash start_webdemo.sh
+```
+
+### 资产分发（维护者）
+
+如果你是项目维护者，本地改了 `scenes/` 或新加了图片资产，发布新版本给协作者：
+
+```bash
+# 1. 打包
+bash scripts/pack_assets.sh
+# → 生成 outputs/releases/scenes-assets-YYYY-MM-DD.tar.gz
+
+# 2. 发到 GitHub Release
+gh release create assets-YYYY-MM-DD outputs/releases/scenes-assets-YYYY-MM-DD.tar.gz \
+  --title "Assets YYYY-MM-DD" \
+  --notes "场景图片资产"
+```
+
+协作者只需改一下下载 URL 里的日期。也支持三种导入方式：
+```bash
+# 本地 tarball
+bash scripts/fetch_assets.sh --from ~/Downloads/scenes-assets-*.tar.gz
+# GitHub Release URL
+bash scripts/fetch_assets.sh --from-url https://github.com/ChenYX24/AI4Story/releases/download/assets-XXX/scenes-assets-XXX.tar.gz
+# rsync 自另一台有完整资产的机器
+bash scripts/fetch_assets.sh --from-dir /path/to/AI4Story_backup
 ```
 
 ## Monorepo 结构
