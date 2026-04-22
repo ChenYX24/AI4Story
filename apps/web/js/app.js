@@ -1,8 +1,11 @@
 import { mountStoryPicker, mountStoryPickerAtStories } from "./story_picker.js";
 import { state, clearInteractive } from "./state.js";
 import { stopTTS } from "./tts.js";
+import { openProfile } from "./profile_view.js";
 
 mountStoryPicker();
+
+document.getElementById("me-btn")?.addEventListener("click", () => openProfile());
 
 document.getElementById("home-btn")?.addEventListener("click", async () => {
   if (state.stage === "picking") return;

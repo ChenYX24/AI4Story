@@ -34,16 +34,23 @@ export function mountNarrative(arg) {
 
   const stage = document.getElementById("stage");
   stage.innerHTML = `
-    <div class="comic-wrap">
-      <img class="comic-img" src="${comic}" alt="连环画" />
-    </div>
-    <div class="comic-controls">
-      <button class="secondary" id="btn-prev">⬅ 上一幕</button>
-      <button id="btn-replay">🔊 重播</button>
-      <button id="btn-next-line">下一句 ▶</button>
-      <button id="btn-next-scene">进入下一幕 ⏭</button>
+    <div class="book-wrap flip-in">
+      <div class="book-page">
+        <div class="comic-wrap">
+          <img class="comic-img" src="${comic}" alt="连环画" />
+        </div>
+        <div class="comic-controls">
+          <button class="secondary" id="btn-prev">⬅ 上一页</button>
+          <button id="btn-replay">🔊 重播</button>
+          <button id="btn-next-line">下一句 ▶</button>
+          <button id="btn-next-scene">翻下一页 ⏭</button>
+        </div>
+      </div>
     </div>
   `;
+  // clean up the flip-in class after animation so subsequent flips work
+  const book = stage.querySelector(".book-wrap");
+  if (book) setTimeout(() => book.classList.remove("flip-in"), 750);
 
   const side = document.getElementById("side");
   side.innerHTML = `

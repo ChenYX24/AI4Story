@@ -39,9 +39,17 @@ export async function goToNode(idx) {
     return;
   }
   const st = stage();
-  st.classList.add("fading");
+  // 书本翻页方向：点"下一幕" = 正向翻，"上一幕" = 反向翻
+  const direction = idx >= (state.cursor ?? 0) ? "next" : "prev";
+  const existingBook = st.querySelector(".book-wrap");
+  if (existingBook) {
+    existingBook.classList.add(direction === "next" ? "flip-next" : "flip-prev");
+  } else {
+    st.classList.add("fading");
+  }
   stopTTS();
-  await new Promise((r) => setTimeout(r, 380));
+  // 翻页动画时长 ≈ 700ms，其间发网络请求同时进行，DOM 替换在最后
+  await new Promise((r) => setTimeout(r, existingBook ? 560 : 380));
 
   const node = state.flow[idx];
   try {

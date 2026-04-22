@@ -59,41 +59,103 @@ function renderLanding(host) {
   host.className = "picker picker-landing";
   setTopBarVisible(false);
   host.innerHTML = `
-    <div class="landing-shell">
+    <!-- Hero: 电影院胶卷开场 -->
+    <section class="cinema-hero" id="cinema-hero">
+      <button type="button" class="cinema-fab-me" id="cinema-fab-me" title="我的资产 / 故事 / 会话">👤 我的</button>
+      <div class="cinema-stars"></div>
+      <div class="cinema-reel cinema-reel--top"></div>
+      <div class="cinema-reel cinema-reel--bottom"></div>
+      <div class="cinema-filmstrip" aria-hidden="true">
+        <div class="cinema-filmstrip-track">
+          <div class="film-frame film-frame--side">🦊</div>
+          <div class="film-frame film-frame--center">
+            <div class="mindshow-logo">
+              <div class="mindshow-glow"></div>
+              <div class="mindshow-zh">漫秀</div>
+              <div class="mindshow-en">Mind<span>Show</span></div>
+              <div class="mindshow-tag">AI 互动绘本剧场</div>
+            </div>
+          </div>
+          <div class="film-frame film-frame--side">🌙</div>
+        </div>
+      </div>
+      <div class="cinema-cta">
+        <button type="button" class="cinema-scroll-btn" id="cinema-scroll-btn">向下探索 ↓</button>
+      </div>
+    </section>
+
+    <div class="landing-shell landing-shell--compact">
       <div class="landing-deco landing-deco--star">✦</div>
       <div class="landing-deco landing-deco--cloud">☁</div>
       <div class="landing-deco landing-deco--cloud-right">☁</div>
       <div class="landing-deco landing-deco--rainbow">🌈</div>
-      <div class="landing-badge">✨ AI 绘本创作伙伴</div>
-      <div class="landing-hero">
-        <h1 class="landing-title">漫秀<span>Mind Show</span></h1>
-        <p class="landing-subtitle">把一点点灵感，变成属于你的绘本故事</p>
-      </div>
+      <div class="landing-badge">✨ 选一个方式开始</div>
 
       <section class="landing-card">
         <div class="landing-tabs" role="tablist" aria-label="创作方式">
-          <button type="button" class="landing-tab is-disabled" data-mode="douyin">🎬 抖音链接</button>
+          <button type="button" class="landing-tab is-disabled" data-mode="video">🎬 视频导入</button>
           <button type="button" class="landing-tab active" data-mode="text">✍️ 文字描述</button>
           <button type="button" class="landing-tab is-disabled" data-mode="voice">🎙️ 语音讲述</button>
+          <button type="button" class="landing-tab is-disabled" data-mode="sketch">🎨 手绘上传</button>
         </div>
 
         <div class="landing-panel active" data-panel="text">
           <p class="landing-panel-copy">写下你脑海里的角色、场景或冒险灵感，漫秀会把它变成一则可体验的绘本故事。</p>
           <input id="landing-story-title" class="landing-title-input" type="text" placeholder="给故事取个名字（选填）" maxlength="32" />
           <textarea id="landing-story-text" class="landing-textarea" rows="3" placeholder="比如：有一只怕黑的小狐狸，为了找回掉进夜空里的画笔，和一群会发光的萤火虫一起穿过森林。"></textarea>
-          <div class=”landing-panel-footer”>
-            <button type=”button” id=”landing-story-submit” class=”landing-submit”>开始创作 <span aria-hidden=”true”>→</span></button>
-            <div class=”landing-hint”>创作过程大约 1 分钟，请保持网络畅通</div>
+          <div class="landing-panel-footer">
+            <button type="button" id="landing-story-submit" class="landing-submit">开始创作 <span aria-hidden="true">→</span></button>
+            <div class="landing-hint">创作过程大约 1 分钟，请保持网络畅通</div>
           </div>
         </div>
       </section>
 
       <button type="button" id="landing-view-stories" class="landing-link">查看现有故事 <span aria-hidden="true">→</span></button>
     </div>
+
+    <!-- 公共平台（mock 数据；阶段 2 接入 F1 公共库） -->
+    <section class="plaza" id="plaza">
+      <div class="plaza-head">
+        <h2>公共平台</h2>
+        <p class="plaza-sub">来看看大家分享的故事和资产</p>
+        <div class="plaza-tabs">
+          <button class="plaza-tab active" data-tab="stories">📚 热门故事</button>
+          <button class="plaza-tab" data-tab="assets">🎨 精选资产</button>
+          <button class="plaza-tab" data-tab="official">✨ 官方精选</button>
+        </div>
+      </div>
+      <div class="plaza-grid" id="plaza-grid"></div>
+      <div class="plaza-foot">
+        <button type="button" class="plaza-more" id="plaza-more-btn">看更多 →</button>
+      </div>
+    </section>
   `;
 
   host.querySelectorAll(".landing-tab.is-disabled").forEach((button) => {
-    button.addEventListener("click", () => toast("这个入口暂未开放。"));
+    button.addEventListener("click", () => toast("这个入口正在开发中，敬请期待。"));
+  });
+
+  // 胶片 hero 向下滚动按钮
+  host.querySelector("#cinema-scroll-btn")?.addEventListener("click", () => {
+    host.querySelector(".landing-shell")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  // 胶片 hero 右上角 "我的" FAB（landing 期顶栏是隐藏的）
+  host.querySelector("#cinema-fab-me")?.addEventListener("click", async () => {
+    const mod = await import("./profile_view.js");
+    mod.openProfile();
+  });
+
+  // 公共平台 mock 渲染 + tab 切换
+  renderPlaza(host, "stories");
+  host.querySelectorAll(".plaza-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      host.querySelectorAll(".plaza-tab").forEach((x) => x.classList.toggle("active", x === btn));
+      renderPlaza(host, btn.dataset.tab);
+    });
+  });
+  host.querySelector("#plaza-more-btn")?.addEventListener("click", () => {
+    toast("完整社区功能在阶段 2 的账户 + 资产系统里开放。");
   });
 
   const titleInput = host.querySelector("#landing-story-title");
@@ -516,4 +578,57 @@ function escapeHtml(s) {
     '"': "&quot;",
     "'": "&#39;",
   }[c]));
+}
+
+// ---- 公共平台 mock 数据 ----
+const PLAZA_MOCK = {
+  stories: [
+    { cover: "🦊", title: "月亮画板上的小狐狸", author: "小朋友 ZY", likes: 312, scenes: 6 },
+    { cover: "🐰", title: "会发光的萝卜田", author: "小朋友 MM", likes: 248, scenes: 5 },
+    { cover: "🦕", title: "恐龙蛋奇遇记", author: "小朋友 KK", likes: 197, scenes: 7 },
+    { cover: "🌊", title: "海底邮局的秘密", author: "小朋友 LL", likes: 156, scenes: 6 },
+    { cover: "🚀", title: "去星星上摘糖果", author: "小朋友 AA", likes: 134, scenes: 8 },
+    { cover: "🐻", title: "会说话的蜂蜜罐", author: "小朋友 BB", likes: 121, scenes: 5 },
+  ],
+  assets: [
+    { cover: "🎭", title: "童话角色包（20 款）", author: "imagineer", likes: 521, kind: "人物" },
+    { cover: "🏰", title: "魔法城堡背景 × 12", author: "artlover", likes: 389, kind: "背景" },
+    { cover: "🗝️", title: "魔法道具套装", author: "wizard", likes: 267, kind: "道具" },
+    { cover: "🌲", title: "森林四季背景", author: "painter", likes: 214, kind: "背景" },
+  ],
+  official: [
+    { cover: "📖", title: "经典童话 · 白雪公主", author: "漫秀官方", likes: 1024, scenes: 8, official: true },
+    { cover: "📖", title: "经典童话 · 三只小猪", author: "漫秀官方", likes: 876, scenes: 6, official: true },
+    { cover: "🎨", title: "官方角色资产包（初级）", author: "漫秀官方", likes: 702, kind: "资产", official: true },
+  ],
+};
+
+function renderPlaza(host, tab) {
+  const grid = host.querySelector("#plaza-grid");
+  if (!grid) return;
+  const items = PLAZA_MOCK[tab] || [];
+  if (!items.length) {
+    grid.innerHTML = `<div class="plaza-empty">敬请期待</div>`;
+    return;
+  }
+  grid.innerHTML = items.map((item) => `
+    <div class="plaza-card${item.official ? " is-official" : ""}">
+      <div class="plaza-cover">${escapeHtml(item.cover)}</div>
+      <div class="plaza-meta">
+        <div class="plaza-title">${escapeHtml(item.title)}</div>
+        <div class="plaza-sub2">
+          <span class="plaza-author">@${escapeHtml(item.author)}</span>
+          <span class="plaza-likes">❤ ${item.likes}</span>
+        </div>
+        <div class="plaza-tags">
+          ${item.scenes ? `<span class="plaza-tag">${item.scenes} 幕</span>` : ""}
+          ${item.kind ? `<span class="plaza-tag">${escapeHtml(item.kind)}</span>` : ""}
+          ${item.official ? `<span class="plaza-tag plaza-tag--official">官方</span>` : ""}
+        </div>
+      </div>
+    </div>
+  `).join("");
+  grid.querySelectorAll(".plaza-card").forEach((card) => {
+    card.addEventListener("click", () => toast("社区详情页在下一版开放。"));
+  });
 }

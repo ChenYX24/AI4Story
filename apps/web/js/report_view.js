@@ -8,25 +8,203 @@ export async function showReport() {
   state.stage = "report";
   const stage = document.getElementById("stage");
   const side = document.getElementById("side");
-  stage.innerHTML = `<div class="report-loading">正在为你整理这场旅程...</div>`;
   side.innerHTML = "";
 
-  showLoader("AI 正在整理报告…");
-  startHintRotation();
+  // 先试 SSE 流式报告，失败回退到老的 POST /api/report
+  const body = {
+    session_id: state.sessionId,
+    story_id: state.storyId || "little_red_riding_hood",
+    interactions: state.storyLog.interactions,
+  };
+
+  // F8 SSE 容器 + 阶段指示器 — 立即给用户反馈
+  stage.innerHTML = `
+    <div class="report-stream" id="rs">
+      <div class="report-stream-stages">
+        <div class="rs-stage running" id="rs-stage-analyze"><span class="rs-dot"></span>分析互动记录</div>
+        <div class="rs-stage" id="rs-stage-compose"><span class="rs-dot"></span>撰写三份报告</div>
+        <div class="rs-stage" id="rs-stage-render"><span class="rs-dot"></span>渲染结果</div>
+      </div>
+      <div class="rs-hint" id="rs-hint">正在准备为你写报告…</div>
+      <div id="rs-chunks"></div>
+    </div>
+  `;
+  startReportHintRotation();
+
   try {
-    const resp = await postReport({
-      session_id: state.sessionId,
-      story_id: state.storyId || "little_red_riding_hood",
-      interactions: state.storyLog.interactions,
-    });
+    const resp = await streamReport(body, stage);
+    stopReportHintRotation();
+    // 淡出 SSE 面板，过渡到 share 页
+    const rs = stage.querySelector("#rs");
+    if (rs) {
+      rs.classList.add("is-fading");
+      await new Promise((r) => setTimeout(r, 260));
+    }
     await renderShare(resp);
-  } catch (e) {
-    stage.innerHTML = `<div class="report-loading error">报告生成失败：${escapeHtml(e.message)}</div>`;
-    toast("报告生成失败，稍后再试");
-  } finally {
-    stopHintRotation();
-    hideLoader();
+  } catch (streamErr) {
+    stopReportHintRotation();
+    console.warn("SSE stream failed, falling back to POST:", streamErr);
+    stage.innerHTML = `<div class="report-loading">AI 正在整理报告…</div>`;
+    showLoader("AI 正在整理报告…");
+    startHintRotation();
+    try {
+      const resp = await postReport(body);
+      await renderShare(resp);
+    } catch (e) {
+      stage.innerHTML = `<div class="report-loading error">报告生成失败：${escapeHtml(e.message)}</div>`;
+      toast("报告生成失败，稍后再试");
+    } finally {
+      stopHintRotation();
+      hideLoader();
+    }
   }
+}
+
+// ---- F8: streamReport via SSE (fetch + ReadableStream) ----
+async function streamReport(body, stage) {
+  const resp = await fetch("/api/report/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok || !resp.body) {
+    throw new Error(`SSE HTTP ${resp.status}`);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalPayload = null;
+  let streamError = null;
+  const chunks = stage.querySelector("#rs-chunks");
+
+  const onEvent = (eventName, dataStr) => {
+    let data;
+    try { data = JSON.parse(dataStr); } catch { return; }
+    if (eventName === "stage") markStage(stage, data);
+    else if (eventName === "per_scene") updatePerScene(stage, data);
+    else if (eventName === "chunk") appendChunk(chunks, data);
+    else if (eventName === "error") streamError = new Error(data.detail || "stream error");
+    else if (eventName === "all_done") finalPayload = data.payload;
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // 每个 SSE event 以空行分隔
+    let sep;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      let eventName = "message";
+      let dataLines = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      }
+      onEvent(eventName, dataLines.join("\n"));
+    }
+    if (streamError) break;
+  }
+
+  if (streamError) throw streamError;
+
+  // 最后 render 阶段标 done
+  const renderStage = stage.querySelector("#rs-stage-render");
+  if (renderStage) { renderStage.classList.remove("running"); renderStage.classList.add("done"); }
+
+  if (!finalPayload) throw new Error("stream ended without final payload");
+  return finalPayload;
+}
+
+// ---- SSE 期间 hint 轮播 ----
+const REPORT_HINTS = [
+  "正在仔细读孩子的每次操作…",
+  "挑出最可爱的瞬间…",
+  "给孩子写一份鼓励的话…",
+  "给家长写一些观察建议…",
+  "马上就好啦～",
+];
+let reportHintTimer = null;
+function startReportHintRotation() {
+  stopReportHintRotation();
+  let i = 0;
+  const el = document.getElementById("rs-hint");
+  if (!el) return;
+  el.textContent = REPORT_HINTS[0];
+  reportHintTimer = setInterval(() => {
+    i = (i + 1) % REPORT_HINTS.length;
+    const t = document.getElementById("rs-hint");
+    if (t) t.textContent = REPORT_HINTS[i];
+  }, 3000);
+}
+function stopReportHintRotation() {
+  if (reportHintTimer) {
+    clearInterval(reportHintTimer);
+    reportHintTimer = null;
+  }
+}
+
+function markStage(stage, data) {
+  const el = stage.querySelector(`#rs-stage-${data.name}`);
+  if (!el) return;
+  el.classList.remove("running", "done");
+  if (data.state === "done") el.classList.add("done");
+  else if (data.state === "running") el.classList.add("running");
+  if (data.label) el.innerHTML = `<span class="rs-dot"></span>${escapeHtml(data.label)}`;
+  // 如果 compose 完成，标 render running
+  if (data.name === "compose" && data.state === "done") {
+    const r = stage.querySelector("#rs-stage-render");
+    if (r) r.classList.add("running");
+  }
+}
+
+function updatePerScene(stage, data) {
+  const analyze = stage.querySelector("#rs-stage-analyze");
+  if (!analyze) return;
+  // 确保 analyze 已展开细粒度进度条
+  let bar = analyze.querySelector(".rs-scene-bar");
+  if (!bar) {
+    const wrap = document.createElement("div");
+    wrap.className = "rs-scene-progress";
+    wrap.innerHTML = `
+      <div class="rs-scene-bar"><div class="rs-scene-fill" style="width:0%"></div></div>
+      <div class="rs-scene-meta"></div>
+    `;
+    analyze.appendChild(wrap);
+    bar = wrap.querySelector(".rs-scene-bar");
+  }
+  const total = Math.max(1, data.total || 1);
+  const idx = Math.max(0, data.index || 0);
+  const pct = Math.min(100, Math.round((idx / total) * 100));
+  const fill = bar.querySelector(".rs-scene-fill");
+  if (fill) fill.style.width = `${pct}%`;
+  const meta = analyze.querySelector(".rs-scene-meta");
+  if (meta) meta.textContent = data.label || `${idx}/${total}`;
+}
+
+function appendChunk(host, { kind, data }) {
+  if (!host) return;
+  const d = document.createElement("div");
+  d.className = `rs-chunk ${kind.startsWith("parent") ? "parent" : kind.startsWith("kid") ? "kid" : "overall"}`;
+  if (kind === "share") {
+    d.innerHTML = `<b>🏆 ${escapeHtml(data.honor_title || "故事小主人")}</b><br>${escapeHtml(data.summary || "")}`;
+  } else if (kind === "kid_header") {
+    d.innerHTML = `<b>${escapeHtml(data.title || "给你的故事报告")}</b><br>🌟 你的故事：${escapeHtml(data.your_story || "")}`;
+  } else if (kind === "kid_list") {
+    const diffs = (data.differences || []).map(escapeHtml).map((x) => `· ${x}`).join("<br>");
+    const qs = (data.questions || []).map(escapeHtml).map((x, i) => `${i + 1}. ${x}`).join("<br>");
+    d.innerHTML = `🔍 不同点：<br>${diffs || "（无）"}<br><br>💭 思考题：<br>${qs || "（无）"}`;
+  } else if (kind === "parent_metrics") {
+    const ms = (data.metrics || []).map((m) => `${escapeHtml(m.name)} ${m.value}%`).join(" · ");
+    d.innerHTML = `<b>${escapeHtml(data.title || "给家长看的观察报告")}</b><br>📊 ${ms || "（无指标）"}`;
+  } else if (kind === "parent_lists") {
+    const t = (data.traits || []).map((x) => `· ${escapeHtml(x)}`).join("<br>");
+    const s = (data.suggestions || []).map((x, i) => `${i + 1}. ${escapeHtml(x)}`).join("<br>");
+    d.innerHTML = `🧩 亮点：<br>${t}<br><br>🌱 建议：<br>${s}`;
+  }
+  host.appendChild(d);
+  host.scrollTop = host.scrollHeight;
 }
 
 async function collectComicUrls() {
