@@ -123,7 +123,13 @@ async function loadInitialPlacements() {
   }
 }
 
-onMounted(loadInitialPlacements);
+onMounted(() => {
+  void loadInitialPlacements();
+  document.addEventListener("keydown", onStageKey);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", onStageKey);
+});
 
 // ---- Drag from sidebar onto stage ----
 const stageRef = ref<HTMLDivElement | null>(null);
@@ -219,6 +225,68 @@ function removePlaced(id: string) {
   placed.value = placed.value.filter((p) => p.id !== id);
   if (selA.value?.id === id) selA.value = null;
   if (selB.value?.id === id) selB.value = null;
+}
+
+// ---- 选中后对物体做变换 ----
+const MIN_SCALE = 0.3;
+const MAX_SCALE = 3.0;
+const ROT_STEP = 15;
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function scaleItem(item: PlacedItem, factor: number) {
+  item.scale = clamp(Number((item.scale * factor).toFixed(3)), MIN_SCALE, MAX_SCALE);
+}
+function rotateItem(item: PlacedItem, deg: number) {
+  let r = (item.rotation + deg) % 360;
+  if (r > 180) r -= 360;
+  if (r < -180) r += 360;
+  item.rotation = r;
+}
+function resetItem(item: PlacedItem) {
+  item.scale = 1;
+  item.rotation = 0;
+}
+
+// 当只有 A 选中（没有 B）时认为在单选编辑态，显示工具条
+const editingItem = computed<PlacedItem | null>(() => {
+  if (selA.value && !selB.value) return selA.value;
+  return null;
+});
+
+// 舞台空白处点击 → 取消选中
+function onStageBackgroundClick() {
+  selA.value = null;
+  selB.value = null;
+}
+
+// 键盘：Delete 删 / =+缩放 / -缩小 / r/R 旋转
+function onStageKey(e: KeyboardEvent) {
+  const target = e.target as HTMLElement | null;
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+  const item = editingItem.value;
+  if (!item) return;
+  switch (e.key) {
+    case "Delete":
+    case "Backspace":
+      removePlaced(item.id);
+      e.preventDefault();
+      break;
+    case "=":
+    case "+":
+      scaleItem(item, 1.1); e.preventDefault(); break;
+    case "-":
+    case "_":
+      scaleItem(item, 1 / 1.1); e.preventDefault(); break;
+    case "r":
+      rotateItem(item, ROT_STEP); e.preventDefault(); break;
+    case "R":
+      rotateItem(item, -ROT_STEP); e.preventDefault(); break;
+    case "0":
+      resetItem(item); e.preventDefault(); break;
+  }
 }
 
 // ---- 创建自定义道具 ----
@@ -399,6 +467,7 @@ const sidebarProps = computed(() => props.scene.props || []);
         @pointermove="onStagePointerMove"
         @pointerup="onStagePointerUp"
         @pointerleave="onStagePointerUp"
+        @click.self="onStageBackgroundClick"
         style="touch-action: none;"
       >
         <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="背景" />
@@ -407,38 +476,68 @@ const sidebarProps = computed(() => props.scene.props || []);
         <div
           v-for="item in placed"
           :key="item.id"
-          class="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing"
+          class="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing transition-shadow"
           :class="[
-            selA?.id === item.id && 'ring-4 ring-accent rounded-full',
-            selB?.id === item.id && 'ring-4 ring-good rounded-full',
+            selA?.id === item.id && 'z-10',
+            selB?.id === item.id && 'z-10',
           ]"
           :style="{
             left: `${item.x * 100}%`,
             top: `${item.y * 100}%`,
             width: `${72 * item.scale}px`,
-            transform: `translate(-50%, -50%) rotate(${item.rotation}deg)`,
           }"
           @pointerdown="(e) => onItemPointerDown(e, item)"
           @click.stop="selectItem(item)"
         >
-          <img v-if="item.url" :src="item.url" :alt="item.name" class="w-full h-auto pointer-events-none drop-shadow-md" />
-          <div v-else class="w-full aspect-square grid place-items-center text-3xl bg-white/80 rounded-full">
-            {{ item.kind === "character" ? "🧑" : "🎁" }}
+          <!-- 选中外框（不随 rotate 翻转）-->
+          <div
+            v-if="selA?.id === item.id || selB?.id === item.id"
+            class="absolute -inset-2 rounded-xl pointer-events-none"
+            :class="selA?.id === item.id ? 'ring-[3px] ring-accent shadow-[0_0_16px_rgba(255,122,61,0.4)]' : 'ring-[3px] ring-good shadow-[0_0_16px_rgba(91,191,130,0.4)]'"
+          ></div>
+
+          <!-- 本体：旋转只作用到图片 / 标签，不动外框/工具条 -->
+          <div :style="{ transform: `rotate(${item.rotation}deg)` }">
+            <img v-if="item.url" :src="item.url" :alt="item.name" class="w-full h-auto pointer-events-none drop-shadow-md" />
+            <div v-else class="w-full aspect-square grid place-items-center text-3xl bg-white/80 rounded-full">
+              {{ item.kind === "character" ? "🧑" : "🎁" }}
+            </div>
           </div>
-          <div class="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-warn/90 text-white grid place-items-center text-xs opacity-0 group-hover:opacity-100 hover:opacity-100 cursor-pointer"
-            @click.stop="removePlaced(item.id)"
-          >×</div>
-          <div class="text-[10px] text-center text-ink-soft mt-0.5 px-1 bg-white/70 rounded">{{ item.name }}</div>
+
+          <div class="text-[10px] text-center text-ink-soft mt-0.5 px-1 bg-white/70 rounded pointer-events-none">{{ item.name }}</div>
+
+          <!-- 选中工具条 — 单选（A 且无 B）时显示 -->
+          <div
+            v-if="editingItem?.id === item.id"
+            class="absolute left-1/2 -translate-x-1/2 -top-11 flex gap-0.5 items-center bg-white/95 rounded-full border border-paper-edge shadow-[0_4px_14px_rgba(122,90,54,0.2)] px-1 py-0.5 fade-in"
+            @click.stop
+          >
+            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="缩小" @click="scaleItem(item, 1/1.15)">−</button>
+            <span class="text-[10px] text-ink-mute w-8 text-center">{{ Math.round(item.scale * 100) }}%</span>
+            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="放大" @click="scaleItem(item, 1.15)">+</button>
+            <span class="w-px h-4 bg-paper-edge mx-0.5"></span>
+            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="逆时针旋转 15°" @click="rotateItem(item, -ROT_STEP)">↺</button>
+            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="顺时针旋转 15°" @click="rotateItem(item, ROT_STEP)">↻</button>
+            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep text-[11px]" title="复位" @click="resetItem(item)">⟳</button>
+            <span class="w-px h-4 bg-paper-edge mx-0.5"></span>
+            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-warn/15 text-warn" title="删除（Del）" @click="removePlaced(item.id)">✕</button>
+          </div>
         </div>
 
         <!-- 选中提示 -->
         <div
           v-if="selA || selB"
-          class="absolute top-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/90 text-xs text-ink-soft shadow"
+          class="absolute top-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/95 text-xs text-ink-soft shadow pointer-events-none"
         >
-          已选：
-          <span v-if="selA" class="text-accent-deep font-semibold">{{ selA.name }}</span>
-          <span v-if="selB"> + <span class="text-good font-semibold">{{ selB.name }}</span></span>
+          <template v-if="selA && selB">
+            已选：<span class="text-accent-deep font-semibold">{{ selA.name }}</span>
+            + <span class="text-good font-semibold">{{ selB.name }}</span>
+            <span class="ml-2 text-ink-mute">下方写"做什么"</span>
+          </template>
+          <template v-else-if="selA">
+            已选 <span class="text-accent-deep font-semibold">{{ selA.name }}</span>
+            <span class="ml-2 text-ink-mute">上方工具条可缩放/旋转/删除 · 再点一个对象可以组合动作</span>
+          </template>
         </div>
       </div>
 
