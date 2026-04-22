@@ -70,6 +70,19 @@ if ! "${PYTHON_EXE}" -c "import fastapi,uvicorn,requests,PIL,dashscope" >/dev/nu
   exit 1
 fi
 
+# 前端 (v2 Vite/Vue) — dist 不存在则自动 build
+WEB_DIR="${ROOT}/apps/web"
+if [[ -f "${WEB_DIR}/package.json" && ! -f "${WEB_DIR}/dist/index.html" ]]; then
+  echo "[info] frontend dist 不存在，开始 build..."
+  if command -v pnpm >/dev/null 2>&1; then
+    (cd "${WEB_DIR}" && pnpm install --silent && pnpm build) || { echo "[ERROR] frontend build failed"; exit 1; }
+  elif command -v npm >/dev/null 2>&1; then
+    (cd "${WEB_DIR}" && npm install --silent && npm run build) || { echo "[ERROR] frontend build failed"; exit 1; }
+  else
+    echo "[WARN] 没找到 pnpm 或 npm，将退回到 web-legacy 静态版本"
+  fi
+fi
+
 if curl -sf --max-time 2 "${URL}/healthz" >/dev/null 2>&1; then
   echo "AI4Story is already running. Opening ${URL}"
   if command -v open >/dev/null 2>&1; then

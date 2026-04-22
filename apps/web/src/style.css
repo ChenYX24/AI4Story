@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/*
+  Design tokens — 温暖童话主调 + 胶片金色点缀
+  Tailwind v4: @theme 注入的变量自动生成 bg-paper / text-ink 等 utility
+*/
+@theme {
+  /* 色板 */
+  --color-paper:       #fff6e8;
+  --color-paper-deep:  #f7e7c9;
+  --color-paper-edge:  #ecd4a7;
+  --color-ink:         #3a2515;
+  --color-ink-soft:    #7a5f40;
+  --color-ink-mute:    #b39a7a;
+  --color-accent:      #ff7a3d;
+  --color-accent-soft: #ffa952;
+  --color-accent-deep: #e35a1f;
+  --color-gold:        #ffcb63;
+  --color-gold-deep:   #d59339;
+  --color-gold-mute:   #f6dba1;
+  --color-cinema:      #0f0a05;
+  --color-cinema-soft: #221509;
+  --color-good:        #5bbf82;
+  --color-warn:        #e4605b;
+
+  /* 阴影 */
+  --shadow-card:       0 6px 20px rgba(122, 90, 54, 0.14);
+  --shadow-card-lg:    0 18px 40px rgba(122, 90, 54, 0.22);
+  --shadow-book:       inset 14px 0 20px -10px rgba(122, 90, 54, 0.35), 0 18px 40px rgba(122, 90, 54, 0.22);
+  --shadow-gold-glow:  0 0 30px rgba(255, 203, 99, 0.45);
+
+  /* 圆角 */
+  --radius-card: 14px;
+  --radius-book: 8px;
+  --radius-pill: 999px;
+
+  /* 字体 */
+  --font-display: "Noto Serif SC", "Songti SC", ui-serif, Georgia, serif;
+  --font-sans:    "PingFang SC", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ---------- 全局基底 ---------- */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+body {
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* 隐藏滚动条 */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* ---------- 共享动画 ---------- */
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+@keyframes glow-pulse {
+  0%   { opacity: 0.5; transform: scale(0.96); }
+  100% { opacity: 1;   transform: scale(1.04); }
+}
+@keyframes soft-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-floaty     { animation: floaty 2.8s ease-in-out infinite; }
+.animate-glow-pulse { animation: glow-pulse 3s ease-in-out infinite alternate; }
+.fade-in            { animation: soft-fade-in 0.45s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-floaty, .animate-glow-pulse, .fade-in { animation: none !important; }
+}

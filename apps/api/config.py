@@ -8,7 +8,9 @@ PROJECT_ROOT = APPS_DIR.parent
 SCENES_DIR = PROJECT_ROOT / "scenes"
 STORY_JSON = SCENES_DIR / "story_scenes.json"
 
-FRONTEND_DIR = APPS_DIR / "web"
+# 前端：v2 是 Vite 工程，build 产物在 apps/web/dist/；
+# main.py 会优先用 dist/index.html，否则退回 web-legacy（原生 JS 版）
+FRONTEND_DIR = APPS_DIR / "web"  # 保留兼容；main.py 内有更细判断
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs" / "webdemo"
 OUTPUTS_ROOT.mkdir(parents=True, exist_ok=True)
 CUSTOM_STORIES_ROOT = OUTPUTS_ROOT / "stories"

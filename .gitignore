@@ -58,6 +58,8 @@ scenes/*/_object_grids/
 scenes/*/_refs/
 scenes/global/_object_grids/
 scenes/global/_character_grids/
+# Per-session placements written by interactive view
+scenes/*/placements.json
 
 # Databases / caches
 *.db
