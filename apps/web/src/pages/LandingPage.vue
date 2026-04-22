@@ -305,7 +305,7 @@ async function submitSketch() {
         <BaseCard
           v-for="s in (plazaTab === 'official'
             ? plazaStories.filter((x) => x.official)
-            : plazaStories.filter((x) => !x.official))"
+            : [...plazaStories].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0)))"
           :key="s.id"
           hover
           :glow="!!s.official"
