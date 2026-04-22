@@ -63,7 +63,8 @@ export interface OpItem {
   action: string;
 }
 export interface CustomProp {
-  id: string;
+  // 后端 model 只有 name + url；id 仅前端 UI 自己生成，可选
+  id?: string;
   name: string;
   url: string;
 }
@@ -115,4 +116,70 @@ export interface ShareInit {
 }
 export interface ShareResponse {
   share_id: string;
+}
+
+// ---- 互动 ----
+export interface Transform {
+  name: string;
+  kind: "character" | "object";
+  x: number;
+  y: number;
+  scale?: number;
+  rotation?: number;
+  custom_url?: string;
+}
+export interface Operation {
+  subject?: string;
+  subject_kind?: "character" | "object";
+  target?: string;
+  target_kind?: "character" | "object";
+  action: string;
+}
+export interface InteractRequest {
+  story_id?: string;
+  session_id: string;
+  scene_idx: number;
+  placements: Transform[];
+  ops: Operation[];
+  custom_props: CustomProp[];
+}
+export interface DialogueLine { speaker: string; content: string; tone?: string; }
+export interface InteractResponse {
+  node_id: string;
+  type: "narrative";
+  summary: string;
+  narration: string;
+  dialogue: DialogueLine[];
+  storyboard: StoryboardLine[];
+  comic_url: string;
+  thumbnail_url: string;
+}
+
+export interface PlacementItem {
+  name: string;
+  kind: "character" | "object";
+  x: number;
+  y: number;
+  scale?: number;
+  rotation?: number;
+  url?: string;
+}
+export interface PlacementResponse { placements: PlacementItem[]; }
+
+export interface ChatRequest {
+  story_id?: string;
+  scene_idx: number;
+  user_text: string;
+}
+export interface ChatResponse { reply: string; }
+
+export interface CreatePropRequest {
+  session_id: string;
+  scene_idx: number;
+  name: string;
+  description?: string;
+}
+export interface CreatePropResponse {
+  name: string;
+  url: string;
 }

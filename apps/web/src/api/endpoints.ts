@@ -27,3 +27,19 @@ export const fetchServerInfo = () =>
 
 // SSE — 用 fetch + ReadableStream 手工解析（见 composables/useReportStream）
 export const reportStreamUrl = "/api/report/stream";
+
+import type {
+  InteractRequest, InteractResponse,
+  PlacementResponse,
+  ChatRequest, ChatResponse,
+  CreatePropRequest, CreatePropResponse,
+} from "./types";
+
+export const fetchPlacements = (storyId: string | undefined, sceneIdx: number) =>
+  apiPost<PlacementResponse>("/api/placements", { story_id: storyId, scene_idx: sceneIdx });
+export const postInteract = (req: InteractRequest) =>
+  apiPost<InteractResponse>("/api/interact", req);
+export const postChat = (req: ChatRequest) =>
+  apiPost<ChatResponse>("/api/chat", req);
+export const createProp = (req: CreatePropRequest) =>
+  apiPost<CreatePropResponse>("/api/create_prop", req);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import TopBar from "@/components/TopBar.vue";
 import BaseCard from "@/components/BaseCard.vue";
@@ -7,12 +7,14 @@ import BaseButton from "@/components/BaseButton.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
 import { useReportStream } from "@/composables/useReportStream";
 import { useStoryStore } from "@/stores/story";
+import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toast";
 import type { ReportResponse } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
 const store = useStoryStore();
+const session = useSessionStore();
 const toast = useToastStore();
 
 const stream = useReportStream();
@@ -20,9 +22,16 @@ const payload = ref<ReportResponse | null>(null);
 const tab = ref("share");
 const failed = ref(false);
 
+// 在 stream 期间根据 chunks 渐进显示（chunk.kind 决定渲染哪块）
+type ChunkAny = { kind: string; data: any };
+const chunkByKind = computed(() => {
+  const map: Record<string, any> = {};
+  for (const c of stream.chunks.value as ChunkAny[]) map[c.kind] = c.data;
+  return map;
+});
+
 async function runStream() {
-  // 构建一个最小 session — 本地没跟踪 interactions 时走空数组
-  const sessionId = "s_" + Date.now().toString(36);
+  const sessionId = session.start(props.id, store.current?.title || props.id);
   try {
     const resp = await stream.run({
       session_id: sessionId,
@@ -30,6 +39,7 @@ async function runStream() {
       interactions: [],
     });
     payload.value = resp;
+    session.markReportReady(sessionId);
   } catch (e: any) {
     failed.value = true;
     toast.push(`报告生成失败：${e.message}`, "error");
@@ -37,9 +47,6 @@ async function runStream() {
 }
 
 onMounted(() => {
-  if (!store.current || store.current.id !== props.id) {
-    // 没走过故事流，直接请求看报告也可以 —— 后端能应付空 interactions
-  }
   runStream();
 });
 
@@ -90,16 +97,84 @@ const reportTabs = [
         <div class="mt-5 text-sm text-ink-soft bg-gold/10 rounded-xl px-4 py-3 border border-gold/30 animate-pulse">
           正在仔细读孩子的每次操作…
         </div>
-        <div v-if="stream.chunks.value.length" class="mt-5 space-y-2">
-          <div
-            v-for="(c, i) in stream.chunks.value"
-            :key="i"
-            class="fade-in rounded-xl px-4 py-3 text-sm border"
-            :class="c.kind.startsWith('parent') ? 'bg-[#eef6ff] border-[#c5daf0]' : c.kind.startsWith('kid') ? 'bg-paper-deep border-paper-edge' : 'bg-[#fffaef] border-gold/40'"
-          >
-            <span class="text-xs uppercase tracking-wider text-ink-mute mr-2">{{ c.kind }}</span>
-            {{ JSON.stringify(c.data).slice(0, 200) }}…
-          </div>
+        <!-- 流式渐进卡片 -->
+        <div class="mt-5 space-y-3">
+          <BaseCard v-if="chunkByKind.share" class="p-5 fade-in">
+            <div class="flex items-center gap-3">
+              <div class="text-3xl">🏆</div>
+              <div>
+                <div class="font-bold text-ink">{{ chunkByKind.share.honor_title || "故事小主人" }}</div>
+                <div class="text-sm text-ink-soft">{{ chunkByKind.share.summary }}</div>
+              </div>
+            </div>
+            <div v-if="chunkByKind.share.achievements?.length" class="grid grid-cols-3 gap-2 mt-3">
+              <div
+                v-for="(a, i) in chunkByKind.share.achievements"
+                :key="i"
+                class="bg-gold/10 rounded-lg p-2 text-center text-xs"
+              >
+                <div class="text-xl">{{ a.icon }}</div>
+                <div class="mt-1 text-ink-soft">{{ a.text }}</div>
+              </div>
+            </div>
+          </BaseCard>
+
+          <BaseCard v-if="chunkByKind.kid_header" class="p-5 fade-in">
+            <div class="text-xs tracking-wider text-ink-mute mb-1">🧒 给孩子</div>
+            <div class="font-bold mb-1">🌟 你创造的故事</div>
+            <p class="text-sm text-ink-soft m-0">{{ chunkByKind.kid_header.your_story }}</p>
+          </BaseCard>
+          <BaseCard v-if="chunkByKind.kid_list" class="p-5 fade-in">
+            <div class="text-xs tracking-wider text-ink-mute mb-2">🧒 给孩子</div>
+            <div v-if="chunkByKind.kid_list.differences?.length" class="mb-3">
+              <div class="font-bold mb-1">🔍 你的故事和原著有什么不同</div>
+              <ul class="list-disc pl-5 space-y-0.5 text-sm text-ink-soft">
+                <li v-for="(d, i) in chunkByKind.kid_list.differences" :key="i">{{ d }}</li>
+              </ul>
+            </div>
+            <div v-if="chunkByKind.kid_list.questions?.length">
+              <div class="font-bold mb-1">💭 思考一下</div>
+              <ol class="list-decimal pl-5 space-y-0.5 text-sm text-ink-soft">
+                <li v-for="(q, i) in chunkByKind.kid_list.questions" :key="i">{{ q }}</li>
+              </ol>
+            </div>
+          </BaseCard>
+
+          <BaseCard v-if="chunkByKind.parent_metrics" class="p-5 fade-in">
+            <div class="text-xs tracking-wider text-ink-mute mb-2">👨‍👩‍👧 给家长</div>
+            <div class="font-bold mb-2">📊 能力维度画像</div>
+            <div
+              v-for="(m, i) in (chunkByKind.parent_metrics.metrics || [])"
+              :key="i"
+              class="mb-2"
+            >
+              <div class="flex justify-between text-sm">
+                <span>{{ m.name }}</span>
+                <span class="font-medium">{{ m.value }}%</span>
+              </div>
+              <div class="h-1.5 bg-paper-deep rounded-full overflow-hidden">
+                <div
+                  class="h-full transition-all"
+                  :style="{ width: `${m.value}%`, background: 'linear-gradient(90deg, #ffa952, #ff7a3d)' }"
+                ></div>
+              </div>
+            </div>
+          </BaseCard>
+          <BaseCard v-if="chunkByKind.parent_lists" class="p-5 fade-in">
+            <div class="text-xs tracking-wider text-ink-mute mb-2">👨‍👩‍👧 给家长</div>
+            <div v-if="chunkByKind.parent_lists.traits?.length" class="mb-3">
+              <div class="font-bold mb-1">🧩 行为亮点</div>
+              <ul class="list-disc pl-5 space-y-0.5 text-sm text-ink-soft">
+                <li v-for="(t, i) in chunkByKind.parent_lists.traits" :key="i">{{ t }}</li>
+              </ul>
+            </div>
+            <div v-if="chunkByKind.parent_lists.suggestions?.length">
+              <div class="font-bold mb-1">🌱 教育建议</div>
+              <ol class="list-decimal pl-5 space-y-0.5 text-sm text-ink-soft">
+                <li v-for="(s, i) in chunkByKind.parent_lists.suggestions" :key="i">{{ s }}</li>
+              </ol>
+            </div>
+          </BaseCard>
         </div>
         <div v-if="failed" class="mt-6 text-center">
           <BaseButton variant="soft" pill @click="router.back()">返回</BaseButton>
