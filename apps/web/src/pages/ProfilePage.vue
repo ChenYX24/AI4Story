@@ -9,12 +9,14 @@ import BaseModal from "@/components/BaseModal.vue";
 import { useUserStore } from "@/stores/user";
 import { useStoryStore } from "@/stores/story";
 import { useSessionStore } from "@/stores/session";
+import { useShelfStore } from "@/stores/shelf";
 import { useToastStore } from "@/stores/toast";
 
 const router = useRouter();
 const user = useUserStore();
 const store = useStoryStore();
 const sess = useSessionStore();
+const shelf = useShelfStore();
 const toast = useToastStore();
 
 const showLogin = ref(!user.isAuthed);
@@ -74,14 +76,42 @@ const MOCK_OFFICIAL = [
   { name: "节日场景包", cover: "🎉", kind: "场景" },
 ];
 
-// 真数据：自定义故事 = stories.list 里 is_custom=true
+// 真数据：自定义故事 = stories.list 里 is_custom=true；书架 = shelf ids 在 store.list 中的
 const myStories = computed(() => store.list.filter((s) => s.is_custom));
+const shelfStories = computed(() => store.list.filter((s) => shelf.has(s.id)));
 // 历史会话按 story 分组
 const sessionsByStory = computed(() => {
   const g: Record<string, typeof sess.list> = {};
   for (const s of sess.list) (g[s.story_title] ??= []).push(s);
   return g;
 });
+
+async function onDeleteCustom(id: string, e: MouseEvent) {
+  e.stopPropagation();
+  if (!confirm("确定删除这个故事吗？")) return;
+  try {
+    const { deleteCustomStory } = await import("@/api/endpoints");
+    await deleteCustomStory(id);
+    store.list = store.list.filter((s) => s.id !== id);
+    shelf.remove(id);
+    toast.push("已删除", "success");
+  } catch (e: any) {
+    toast.push(`删除失败：${e?.message || e}`, "error");
+  }
+}
+
+function onRemoveFromShelf(id: string, e: MouseEvent) {
+  e.stopPropagation();
+  shelf.remove(id);
+  toast.push("已从书架移除", "success");
+}
+
+function onRemoveSession(id: string, e: MouseEvent) {
+  e.stopPropagation();
+  if (!confirm("删除这次会话记录？")) return;
+  sess.remove(id);
+  toast.push("已删除", "success");
+}
 
 onMounted(() => {
   if (store.list.length === 0) { void store.loadList().catch(() => {}); }
@@ -119,42 +149,93 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
 
       <!-- 内容 -->
       <div v-if="tab === 'stories'">
-        <template v-if="myStories.length === 0">
-          <div class="text-center py-16 bg-white rounded-[var(--radius-card)] shadow-[var(--shadow-card)] border border-paper-edge">
-            <div class="text-5xl mb-3">📖</div>
-            <div class="font-bold text-ink">还没有创建过故事</div>
-            <div class="text-sm text-ink-soft mt-1">去首页输入一段描述 / 视频 / 音频，或手绘上传开始创作</div>
-            <div class="mt-4"><BaseButton pill @click="backHome">返回首页创作 →</BaseButton></div>
+        <!-- 🔖 我的书架 -->
+        <section class="mb-6">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-bold text-ink flex items-center gap-2">
+              <span>🔖 我的书架</span>
+              <span class="text-xs text-ink-mute font-normal">{{ shelfStories.length }} 本</span>
+            </div>
           </div>
-        </template>
-        <template v-else>
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+          <template v-if="shelfStories.length === 0">
+            <div class="text-center py-10 bg-white rounded-[var(--radius-card)] border border-paper-edge text-sm text-ink-soft">
+              书架还是空的 · 去首页公共平台把喜欢的故事 ★ 一下
+            </div>
+          </template>
+          <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+            <BaseCard
+              v-for="s in shelfStories"
+              :key="s.id"
+              hover
+              class="overflow-hidden relative group cursor-pointer"
+              @click="openStory(s.id)"
+            >
+              <div
+                class="h-28 grid place-items-center text-4xl"
+                :class="!s.cover_url && 'bg-gradient-to-br from-paper-deep to-gold-mute'"
+              >
+                <img v-if="s.cover_url" :src="s.cover_url" loading="lazy" class="w-full h-full object-cover" alt="" />
+                <span v-else>{{ s.is_custom ? "📘" : "📖" }}</span>
+              </div>
+              <div class="p-3">
+                <div class="font-semibold text-sm text-ink truncate">{{ s.title }}</div>
+                <div class="text-xs text-ink-mute mt-0.5">{{ s.scene_count }} 幕</div>
+              </div>
+              <button
+                class="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center"
+                title="从书架移除"
+                @click="(e) => onRemoveFromShelf(s.id, e)"
+              >✕</button>
+            </BaseCard>
+          </div>
+        </section>
+
+        <!-- 📘 我创建的 -->
+        <section>
+          <div class="font-bold text-ink mb-2 flex items-center gap-2">
+            <span>📘 我的原创</span>
+            <span class="text-xs text-ink-mute font-normal">{{ myStories.length }} 本</span>
+          </div>
+          <template v-if="myStories.length === 0">
+            <div class="text-center py-10 bg-white rounded-[var(--radius-card)] border border-paper-edge">
+              <div class="text-4xl mb-2">✍️</div>
+              <div class="font-semibold">还没创建过故事</div>
+              <div class="text-xs text-ink-soft mt-1">首页输入一段描述 / 视频 / 手绘开始创作</div>
+              <div class="mt-3"><BaseButton pill size="sm" @click="backHome">去首页创作 →</BaseButton></div>
+            </div>
+          </template>
+          <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
             <BaseCard
               v-for="s in myStories"
               :key="s.id"
               hover
-              class="overflow-hidden"
+              class="overflow-hidden relative group cursor-pointer"
               @click="s.available && openStory(s.id)"
             >
               <div
-                class="h-32 grid place-items-center text-5xl"
-                :style="s.cover_url ? `background-image:url(${s.cover_url}); background-size:cover; background-position:center;` : ''"
+                class="h-28 grid place-items-center text-4xl"
                 :class="!s.cover_url && 'bg-gradient-to-br from-paper-deep to-gold-mute'"
               >
-                <span v-if="!s.cover_url">{{ s.status === "generating" ? "⏳" : s.status === "failed" ? "⚠️" : "📘" }}</span>
+                <img v-if="s.cover_url" :src="s.cover_url" loading="lazy" class="w-full h-full object-cover" alt="" />
+                <span v-else>{{ s.status === "generating" ? "⏳" : s.status === "failed" ? "⚠️" : "📘" }}</span>
               </div>
-              <div class="p-4">
-                <div class="font-bold">{{ s.title }}</div>
-                <div class="text-xs text-ink-mute mt-1">
-                  {{ s.scene_count > 0 ? `${s.scene_count} 幕` : (s.status === "generating" ? "后台生成中" : "—") }}
+              <div class="p-3">
+                <div class="font-semibold text-sm text-ink truncate">{{ s.title }}</div>
+                <div class="text-xs text-ink-mute mt-0.5">
+                  {{ s.scene_count > 0 ? `${s.scene_count} 幕` : (s.status === "generating" ? "生成中" : "—") }}
                 </div>
-                <div v-if="s.status === 'generating'" class="mt-2 h-1 bg-paper-deep rounded-full overflow-hidden">
+                <div v-if="s.status === 'generating'" class="mt-1.5 h-1 bg-paper-deep rounded-full overflow-hidden">
                   <div class="h-full bg-gradient-to-r from-accent-soft to-accent-deep" :style="{ width: `${s.progress || 0}%` }"></div>
                 </div>
               </div>
+              <button
+                class="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center"
+                title="删除"
+                @click="(e) => onDeleteCustom(s.id, e)"
+              >✕</button>
             </BaseCard>
           </div>
-        </template>
+        </section>
       </div>
 
       <div v-else-if="tab === 'sessions'">
@@ -178,16 +259,21 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                 v-for="s in items"
                 :key="s.id"
                 hover
-                class="p-4"
+                class="p-4 relative group cursor-pointer"
                 @click="s.report_ready ? openReport(s.story_id) : openStory(s.story_id)"
               >
                 <div class="flex items-center gap-2 mb-1">
                   <div class="text-2xl">🎬</div>
-                  <div class="text-sm font-medium">{{ new Date(s.started_at).toLocaleString() }}</div>
+                  <div class="text-sm font-medium truncate">{{ new Date(s.started_at).toLocaleString() }}</div>
                 </div>
                 <div class="text-xs" :class="s.report_ready ? 'text-good' : 'text-ink-mute'">
                   {{ s.report_ready ? "✓ 报告已生成 — 点查看" : "进行中 — 点继续" }}
                 </div>
+                <button
+                  class="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center text-xs"
+                  title="删除会话"
+                  @click="(e) => onRemoveSession(s.id, e)"
+                >✕</button>
               </BaseCard>
             </div>
           </div>

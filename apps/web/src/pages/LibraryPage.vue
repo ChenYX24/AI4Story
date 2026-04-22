@@ -6,17 +6,40 @@ import TopBar from "@/components/TopBar.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseModal from "@/components/BaseModal.vue";
+import BaseTabs from "@/components/BaseTabs.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import { useStoryStore } from "@/stores/story";
+import { useShelfStore } from "@/stores/shelf";
 import { useToastStore } from "@/stores/toast";
 import { deleteCustomStory, patchCustomStory } from "@/api/endpoints";
 import type { StoryCard } from "@/api/types";
 
 const router = useRouter();
 const store = useStoryStore();
+const shelf = useShelfStore();
 const toast = useToastStore();
 const loading = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+// Filter: 全部 / 我的书架 / 我的原创
+const filterTabs = [
+  { key: "all",     label: "全部", icon: "📚" },
+  { key: "shelf",   label: "我的书架", icon: "🔖" },
+  { key: "custom",  label: "我的原创", icon: "📘" },
+];
+const filter = ref<"all" | "shelf" | "custom">("all");
+
+const filteredList = computed(() => {
+  if (filter.value === "shelf") return store.list.filter((s) => shelf.has(s.id));
+  if (filter.value === "custom") return store.list.filter((s) => s.is_custom);
+  return store.list;
+});
+
+function toggleShelf(s: StoryCard, e: MouseEvent) {
+  e.stopPropagation();
+  shelf.toggle(s.id);
+  toast.push(shelf.has(s.id) ? `已加到书架` : `已从书架移除`, "success");
+}
 
 // 已看过的自定义故事 id — 用来显示红点 new-indicator
 const seenIds = useLocalStorage<string[]>("mindshow_seen_stories", []);
@@ -102,6 +125,12 @@ async function onDelete(id: string, e: MouseEvent) {
         </div>
       </div>
 
+      <!-- 筛选 tabs -->
+      <div class="mb-5">
+        <BaseTabs v-model="filter" :tabs="filterTabs" />
+        <span class="text-xs text-ink-mute ml-3 align-middle">共 {{ filteredList.length }} 个</span>
+      </div>
+
       <!-- 骨架屏：首次加载（list 还没来 + loading=true） -->
       <div
         v-if="loading && store.list.length === 0"
@@ -118,12 +147,17 @@ async function onDelete(id: string, e: MouseEvent) {
       </div>
 
       <div
-        v-else-if="!loading && store.list.length === 0"
+        v-else-if="!loading && filteredList.length === 0"
         class="text-center py-16"
       >
         <div class="text-5xl mb-3">📖</div>
-        <div class="text-ink-soft">书架是空的 — 回到首页输入一段故事开始吧</div>
-        <div class="mt-4">
+        <div class="text-ink-soft">
+          {{ filter === "shelf" ? "书架里还没有故事，去首页公共平台加几本吧" :
+             filter === "custom" ? "还没自己创建过故事" :
+             "书架是空的 — 回到首页输入一段故事开始吧" }}
+        </div>
+        <div class="mt-4 flex gap-2 justify-center">
+          <BaseButton v-if="filter === 'shelf'" variant="soft" pill @click="router.push('/')">去首页发现</BaseButton>
           <BaseButton pill @click="router.push('/')">回首页创建</BaseButton>
         </div>
       </div>
@@ -133,7 +167,7 @@ async function onDelete(id: string, e: MouseEvent) {
         class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-5"
       >
         <BaseCard
-          v-for="story in store.list"
+          v-for="story in filteredList"
           :key="story.id"
           :hover="!!story.available"
           class="overflow-hidden relative group"
@@ -191,6 +225,17 @@ async function onDelete(id: string, e: MouseEvent) {
               style="box-shadow: 0 0 0 3px rgba(255, 122, 61, 0.25);"
               @mouseenter="markSeen(story.id)"
             ></div>
+
+            <!-- 收藏 ☆/★ 切换（右下角）-->
+            <button
+              v-if="story.available"
+              class="absolute bottom-2 right-2 w-8 h-8 rounded-full grid place-items-center transition backdrop-blur text-base"
+              :class="shelf.has(story.id)
+                ? 'bg-accent text-white shadow-[0_4px_12px_rgba(255,122,61,0.45)]'
+                : 'bg-white/90 text-ink-soft hover:bg-gold-mute'"
+              :title="shelf.has(story.id) ? '从书架移除' : '加到书架'"
+              @click="(e) => toggleShelf(story, e)"
+            >{{ shelf.has(story.id) ? "★" : "☆" }}</button>
           </div>
           <div class="p-4">
             <div class="font-bold text-ink leading-snug">{{ story.title }}</div>

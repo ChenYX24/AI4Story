@@ -30,7 +30,15 @@ export const useSessionStore = defineStore("session", () => {
     r.finished_at = new Date().toISOString();
   }
 
+  function remove(id: string) {
+    list.value = list.value.filter((s) => s.id !== id);
+  }
+
+  function clearAllForStory(storyId: string) {
+    list.value = list.value.filter((s) => s.story_id !== storyId);
+  }
+
   function clear() { list.value = []; }
 
-  return { list, start, markReportReady, clear };
+  return { list, start, markReportReady, remove, clearAllForStory, clear };
 });
