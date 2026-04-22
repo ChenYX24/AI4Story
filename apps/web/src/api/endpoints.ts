@@ -44,3 +44,25 @@ export const postChat = (req: ChatRequest) =>
   apiPost<ChatResponse>("/api/chat", req);
 export const createProp = (req: CreatePropRequest) =>
   apiPost<CreatePropResponse>("/api/create_prop", req);
+
+// ---- 账号 ----
+import type {
+  AuthResponse, MeResponse,
+  PublicStoriesResponse, PublicAssetsResponse,
+  UploadImageRequest, UploadImageResponse,
+} from "./types";
+
+export const authRegister = (nickname: string, password: string) =>
+  apiPost<AuthResponse>("/api/auth/register", { nickname, password });
+export const authLogin = (nickname: string, password: string) =>
+  apiPost<AuthResponse>("/api/auth/login", { nickname, password });
+export const authMe = () => apiGet<MeResponse>("/api/auth/me");
+export const authLogout = () => apiPost<{ ok: boolean }>("/api/auth/logout");
+
+// ---- 公共平台 ----
+export const fetchPublicStories = () => apiGet<PublicStoriesResponse>("/api/public/stories");
+export const fetchPublicAssets  = () => apiGet<PublicAssetsResponse>("/api/public/assets");
+
+// ---- 上传 ----
+export const uploadImage = (body: UploadImageRequest) =>
+  apiPost<UploadImageResponse>("/api/upload/image", body);

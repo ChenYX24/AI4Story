@@ -18,13 +18,40 @@ const sess = useSessionStore();
 const toast = useToastStore();
 
 const showLogin = ref(!user.isAuthed);
+const authMode = ref<"login" | "register">("login");
 const nick = ref("");
+const password = ref("");
+const authBusy = ref(false);
 
-function login() {
-  try { user.login(nick.value); showLogin.value = false; nick.value = ""; }
-  catch (e: any) { toast.push(e.message, "warn"); }
+async function submitAuth() {
+  const n = nick.value.trim();
+  if (!n) { toast.push("请输入昵称", "warn"); return; }
+  if (!password.value || password.value.length < 4) {
+    toast.push("密码至少 4 位", "warn"); return;
+  }
+  authBusy.value = true;
+  try {
+    if (authMode.value === "login") {
+      await user.login(n, password.value);
+      toast.push(`欢迎回来，${n}`, "success");
+    } else {
+      await user.register(n, password.value);
+      toast.push(`${n}，账号创建成功 ✨`, "success");
+    }
+    showLogin.value = false;
+    nick.value = ""; password.value = "";
+  } catch (e: any) {
+    toast.push(e?.message || "失败", "error");
+  } finally {
+    authBusy.value = false;
+  }
 }
-function logout() { user.logout(); showLogin.value = true; }
+
+async function logout() {
+  await user.logout();
+  showLogin.value = true;
+  toast.push("已登出", "info");
+}
 
 const tabs = [
   { key: "stories", label: "我的故事", icon: "📖" },
@@ -75,11 +102,11 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
         <div
           class="w-16 h-16 rounded-full grid place-items-center text-2xl font-extrabold text-white shadow-card"
           style="background: linear-gradient(135deg, #ffcb63, #ff7a3d);"
-        >{{ user.user?.nick.slice(0, 1).toUpperCase() }}</div>
+        >{{ (user.user?.nickname || "?").slice(0, 1).toUpperCase() }}</div>
         <div class="flex-1 min-w-0">
-          <div class="text-xl font-bold">{{ user.user?.nick }}</div>
+          <div class="text-xl font-bold">{{ user.user?.nickname }}</div>
           <div class="text-xs text-ink-mute">
-            加入于 {{ user.user ? new Date(user.user.created_at).toLocaleDateString() : "" }} · MVP 假登录
+            加入于 {{ user.user?.created_at ? new Date(Number(user.user.created_at) * 1000).toLocaleDateString() : "" }}
           </div>
         </div>
         <BaseButton variant="danger" size="sm" pill @click="logout">登出</BaseButton>
@@ -200,21 +227,44 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
       </div>
     </div>
 
-    <!-- 登录 Modal -->
-    <BaseModal :open="showLogin" title="👋 欢迎来到漫秀" @close="router.push('/')">
-      <p class="text-sm text-ink-soft mb-3">先取个昵称，后续资产、会话、报告都会记到你的账户下。</p>
+    <!-- 登录 / 注册 Modal -->
+    <BaseModal :open="showLogin" :title="authMode === 'login' ? '👋 欢迎回来' : '✨ 创建新账号'" @close="router.push('/')">
+      <div class="flex gap-1 p-1 rounded-full bg-paper-deep mb-4 text-sm">
+        <button
+          class="flex-1 py-2 rounded-full transition font-medium"
+          :class="authMode === 'login' ? 'bg-white shadow text-accent-deep' : 'text-ink-soft'"
+          @click="authMode = 'login'"
+        >登录</button>
+        <button
+          class="flex-1 py-2 rounded-full transition font-medium"
+          :class="authMode === 'register' ? 'bg-white shadow text-accent-deep' : 'text-ink-soft'"
+          @click="authMode = 'register'"
+        >注册</button>
+      </div>
       <input
         v-model="nick"
         type="text"
         maxlength="20"
-        placeholder="小朋友的昵称，例如：糖糖"
-        class="w-full px-4 py-3 rounded-xl border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-        @keydown.enter="login"
+        placeholder="昵称"
+        class="w-full px-4 py-3 mb-3 rounded-xl border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+        @keydown.enter="submitAuth"
       />
-      <div class="text-xs text-ink-mute mt-2">MVP 阶段：仅本地记录；阶段 2 接入真正账户</div>
+      <input
+        v-model="password"
+        type="password"
+        maxlength="40"
+        placeholder="密码（至少 4 位）"
+        class="w-full px-4 py-3 rounded-xl border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+        @keydown.enter="submitAuth"
+      />
+      <div class="text-xs text-ink-mute mt-2">
+        {{ authMode === 'login' ? '后续资产、会话、报告都会记到你的账户下。' : '注册后昵称即账号名，请记住密码。' }}
+      </div>
       <template #footer>
         <BaseButton variant="soft" pill @click="router.push('/')">稍后</BaseButton>
-        <BaseButton pill @click="login">开始</BaseButton>
+        <BaseButton pill :disabled="authBusy" @click="submitAuth">
+          {{ authBusy ? "处理中…" : authMode === 'login' ? '登录' : '注册' }}
+        </BaseButton>
       </template>
     </BaseModal>
   </div>

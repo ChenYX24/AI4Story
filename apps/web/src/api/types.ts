@@ -194,3 +194,50 @@ export interface CreatePropResponse {
   name: string;
   url: string;
 }
+
+// ---- 账号 ----
+export interface AuthResponse {
+  id: string;
+  nickname: string;
+  token: string;
+}
+export interface MeResponse {
+  id: string;
+  nickname: string;
+  created_at: number;
+}
+
+// ---- 公共平台 ----
+export interface PublicStoryCard {
+  id: string;
+  title: string;
+  summary: string;
+  cover_url?: string | null;
+  scene_count: number;
+  author: string;
+  likes: number;
+  official?: boolean;
+  category?: string;
+  emoji_cover?: string | null;
+}
+export interface PublicAsset {
+  id: string;
+  name: string;
+  kind: "character" | "object";
+  url: string;
+  svg_url?: string | null;
+  category?: string;
+}
+export interface PublicStoriesResponse { stories: PublicStoryCard[]; }
+export interface PublicAssetsResponse { assets: PublicAsset[]; }
+
+// ---- 上传 ----
+export interface UploadImageRequest {
+  data: string;           // data URL 或纯 base64
+  ext?: string;           // 裸 base64 时必填
+  kind?: string;          // sketch / prop / avatar / cover / misc
+}
+export interface UploadImageResponse {
+  url: string;
+  size: number;
+}

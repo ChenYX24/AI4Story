@@ -1,39 +1,54 @@
-// F1 骨架：localStorage 假登录，阶段 2 换真正后端 auth
+// 真·账号 store —— 后端 /api/auth/{register,login,me,logout}
+// token 存 localStorage（'mindshow_token'，由 api/client 自动读出加 header）
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { useLocalStorage } from "@vueuse/core";
+import { authLogin, authLogout, authMe, authRegister } from "@/api/endpoints";
+import { getAuthToken, setAuthToken } from "@/api/client";
 
 export interface User {
   id: string;
-  nick: string;
-  created_at: string;
+  nickname: string;
+  created_at?: number | string;
 }
 
 export const useUserStore = defineStore("user", () => {
-  const user = useLocalStorage<User | null>("mindshow_user", null, {
-    serializer: {
-      read: (v: string) => (v ? JSON.parse(v) : null),
-      write: (v: User | null) => JSON.stringify(v),
-    },
-  });
+  const user = ref<User | null>(null);
+  const booting = ref(false);
 
   const isAuthed = computed(() => user.value !== null);
 
-  const pendingLogin = ref(false);
-
-  function login(nick: string) {
-    const trimmed = nick.trim();
-    if (!trimmed) throw new Error("昵称不能为空");
-    user.value = {
-      id: "u_" + Math.random().toString(36).slice(2, 10),
-      nick: trimmed,
-      created_at: new Date().toISOString(),
-    };
+  async function boot() {
+    // 启动时尝试用 localStorage token 恢复会话
+    if (!getAuthToken()) { user.value = null; return; }
+    booting.value = true;
+    try {
+      const me = await authMe();
+      user.value = { id: me.id, nickname: me.nickname, created_at: me.created_at };
+    } catch {
+      user.value = null;
+      setAuthToken(null);
+    } finally {
+      booting.value = false;
+    }
   }
 
-  function logout() {
+  async function login(nickname: string, password: string) {
+    const r = await authLogin(nickname, password);
+    setAuthToken(r.token);
+    user.value = { id: r.id, nickname: r.nickname };
+  }
+
+  async function register(nickname: string, password: string) {
+    const r = await authRegister(nickname, password);
+    setAuthToken(r.token);
+    user.value = { id: r.id, nickname: r.nickname };
+  }
+
+  async function logout() {
+    try { await authLogout(); } catch { /* ignore */ }
+    setAuthToken(null);
     user.value = null;
   }
 
-  return { user, isAuthed, pendingLogin, login, logout };
+  return { user, isAuthed, booting, boot, login, register, logout };
 });

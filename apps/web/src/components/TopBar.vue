@@ -104,7 +104,7 @@ function onClick(i: number) {
 
     <RouterLink to="/profile" custom v-slot="{ navigate }">
       <BaseButton variant="soft" size="sm" pill @click="navigate">
-        <span>{{ user.isAuthed ? `👤 ${user.user?.nick}` : "👤 我的" }}</span>
+        <span>{{ user.isAuthed ? `👤 ${user.user?.nickname}` : "👤 我的" }}</span>
       </BaseButton>
     </RouterLink>
   </header>

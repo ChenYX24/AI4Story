@@ -1,16 +1,41 @@
 <script setup lang="ts">
 // 互动场景：拖拽角色/道具到背景 → 选两个 + 输入动作 → 加入 ops 序列 → 完成 → /api/interact
 // 保留与 web-legacy/js/interactive_view.js 一致的 contract，但用 Pointer Events + Vue reactivity 重写
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import { useToastStore } from "@/stores/toast";
 import { useSessionStore } from "@/stores/session";
-import { fetchPlacements, postInteract, createProp } from "@/api/endpoints";
+import { fetchPlacements, postInteract, createProp, uploadImage } from "@/api/endpoints";
 import type {
   Scene, SceneCharacter, SceneProp,
   Transform, Operation, CustomProp,
   InteractResponse,
 } from "@/api/types";
 import BaseButton from "./BaseButton.vue";
+import SketchPadModal from "./SketchPadModal.vue";
+
+// ---- 生图 loading hint 轮播 ----
+const LOADING_HINTS = [
+  "AI 正在调色盘里挑颜色…",
+  "小画笔正在认真地画…",
+  "把你说的故事变成画…",
+  "再加一点点魔法…",
+  "快完成啦，再等一下～",
+];
+const loadingHint = ref("");
+let loadingTimer: ReturnType<typeof setInterval> | null = null;
+function startLoadingHints() {
+  stopLoadingHints();
+  let i = 0;
+  loadingHint.value = LOADING_HINTS[0];
+  loadingTimer = setInterval(() => {
+    i = (i + 1) % LOADING_HINTS.length;
+    loadingHint.value = LOADING_HINTS[i];
+  }, 2600);
+}
+function stopLoadingHints() {
+  if (loadingTimer) { clearInterval(loadingTimer); loadingTimer = null; }
+  loadingHint.value = "";
+}
 
 const props = defineProps<{ scene: Scene; storyId: string; }>();
 const emit = defineEmits<{
@@ -65,9 +90,11 @@ function findUrlByName(name: string, kind: "character" | "object"): string | und
 }
 
 async function loadInitialPlacements() {
+  // 参考 legacy：初始只放角色 (character)，道具留在侧边栏让用户主动拖
   try {
     const r = await fetchPlacements(props.storyId, props.scene.index);
     for (const p of r.placements) {
+      if (p.kind !== "character") continue;
       placed.value.push({
         id: `${p.kind}-${p.name}-${Math.random().toString(36).slice(2, 6)}`,
         name: p.name,
@@ -78,7 +105,22 @@ async function loadInitialPlacements() {
         rotation: p.rotation ?? 0,
       });
     }
-  } catch { /* 没有初始 placements 也 OK */ }
+  } catch { /* no initial placements = ok */ }
+  // 如果 placements 里没有角色（极端情况），按 scene.characters 的 default_x/y 铺开
+  if (placed.value.length === 0 && props.scene.characters?.length) {
+    props.scene.characters.forEach((c, i) => {
+      placed.value.push({
+        id: `character-${c.name}-fallback-${i}`,
+        name: c.name,
+        kind: "character",
+        url: c.url,
+        x: c.default_x ?? (0.3 + i * 0.2),
+        y: c.default_y ?? 0.7,
+        scale: c.default_scale ?? 1,
+        rotation: 0,
+      });
+    });
+  }
 }
 
 onMounted(loadInitialPlacements);
@@ -214,6 +256,7 @@ async function complete() {
     return;
   }
   generating.value = true;
+  startLoadingHints();
   try {
     const transforms: Transform[] = placed.value.map((p) => ({
       name: p.name, kind: p.kind, x: p.x, y: p.y, scale: p.scale, rotation: p.rotation,
@@ -235,6 +278,85 @@ async function complete() {
     toast.push(`生成失败：${e.message}`, "error");
   } finally {
     generating.value = false;
+    stopLoadingHints();
+  }
+}
+
+onBeforeUnmount(stopLoadingHints);
+
+// ---- F: 上传 / 拍照 / 画板 作为自定义道具的"参考图" ----
+const showSketchPad = ref(false);
+const cameraOpen = ref(false);
+const cameraStream = ref<MediaStream | null>(null);
+const videoEl = ref<HTMLVideoElement | null>(null);
+
+async function onUploadPick(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  (e.target as HTMLInputElement).value = ""; // 允许同名重选
+  if (!file) return;
+  if (!file.type.startsWith("image/")) { toast.push("请选择图片", "warn"); return; }
+  if (file.size > 6 * 1024 * 1024) { toast.push("图片不能超过 6MB", "warn"); return; }
+  const fr = new FileReader();
+  fr.onload = async () => {
+    const dataUrl = String(fr.result || "");
+    await addCustomFromImage(dataUrl, file.name.replace(/\.[^.]+$/, "") || "我的图片");
+  };
+  fr.readAsDataURL(file);
+}
+
+async function openCamera() {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+    cameraStream.value = s;
+    cameraOpen.value = true;
+    await new Promise((r) => setTimeout(r, 80));
+    if (videoEl.value) {
+      videoEl.value.srcObject = s;
+      await videoEl.value.play().catch(() => {});
+    }
+  } catch (e: any) {
+    toast.push(`摄像头不可用：${e?.message || e}`, "warn");
+  }
+}
+function closeCamera() {
+  cameraStream.value?.getTracks().forEach((t) => t.stop());
+  cameraStream.value = null;
+  cameraOpen.value = false;
+}
+async function snap() {
+  if (!videoEl.value) return;
+  const v = videoEl.value;
+  const cvs = document.createElement("canvas");
+  cvs.width = v.videoWidth; cvs.height = v.videoHeight;
+  const ctx = cvs.getContext("2d");
+  if (!ctx) return;
+  ctx.drawImage(v, 0, 0);
+  const dataUrl = cvs.toDataURL("image/png");
+  closeCamera();
+  await addCustomFromImage(dataUrl, "拍的照片");
+}
+
+async function onSketchDone(dataUrl: string) {
+  showSketchPad.value = false;
+  await addCustomFromImage(dataUrl, "手绘道具");
+}
+
+async function addCustomFromImage(dataUrl: string, name: string) {
+  try {
+    const up = await uploadImage({ data: dataUrl, kind: "prop" });
+    customProps.value.push({ name, url: up.url });
+    placed.value.push({
+      id: `custom-upload-${Date.now()}`,
+      name,
+      kind: "object",
+      url: up.url,
+      custom_url: up.url,
+      x: 0.5, y: 0.5, scale: 1, rotation: 0,
+      isCustom: true,
+    });
+    toast.push(`✨ 「${name}」已加到道具库`, "success");
+  } catch (e: any) {
+    toast.push(`上传失败：${e?.message || e}`, "error");
   }
 }
 
@@ -243,11 +365,29 @@ const sidebarProps = computed(() => props.scene.props || []);
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col">
+  <div class="flex-1 flex flex-col relative">
     <!-- 互动目标提示 -->
-    <div class="mb-3 text-xs text-ink-soft px-1">
-      🎯 把角色和道具拖到背景里，点选两个对象再说一句"做什么"，多次安排后点完成
+    <div class="mb-3 text-xs text-ink-soft px-1 flex items-center gap-2 flex-wrap">
+      <span class="inline-flex items-center gap-1 bg-gold/15 px-2 py-1 rounded-full border border-gold/30 text-ink">
+        🎯 <span class="font-semibold">互动目标：</span><span class="text-ink-soft">{{ scene.interaction_goal || "把场景填满" }}</span>
+      </span>
+      <span class="hidden md:inline text-ink-mute">把侧边的道具拖进舞台 · 点选两个对象再写"做什么" · 多次安排后点完成</span>
     </div>
+
+    <!-- 生图 loading 覆盖 -->
+    <Transition name="modal">
+      <div
+        v-if="generating"
+        class="absolute inset-0 z-30 grid place-items-center bg-paper/85 backdrop-blur rounded-xl"
+      >
+        <div class="text-center px-6 py-5 bg-white rounded-2xl shadow-[var(--shadow-card-lg)] border border-paper-edge max-w-sm">
+          <div class="mx-auto mb-3 w-12 h-12 border-4 border-gold-mute border-t-accent rounded-full animate-spin"></div>
+          <div class="font-display font-bold text-lg">AI 正在作画…</div>
+          <div class="text-sm text-ink-soft mt-2 animate-pulse">{{ loadingHint }}</div>
+          <div class="text-xs text-ink-mute mt-3">预计 30-90 秒，保持网络通畅</div>
+        </div>
+      </div>
+    </Transition>
 
     <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-[420px]">
       <!-- 舞台 -->
@@ -331,21 +471,49 @@ const sidebarProps = computed(() => props.scene.props || []);
           </div>
         </div>
         <!-- 创建新道具 -->
-        <div class="border-t border-paper-edge pt-2">
-          <div class="text-xs font-bold text-ink-soft mb-1">✨ 造个新道具</div>
+        <div class="border-t border-paper-edge pt-2 space-y-2">
+          <div class="text-xs font-bold text-ink-soft">✨ 造个新道具</div>
+          <!-- AI 生成 -->
           <input
             v-model="newPropName"
             type="text"
-            placeholder="比如：会发光的画笔"
+            placeholder="AI 画：比如「会发光的画笔」"
             maxlength="16"
             class="w-full px-2 py-1.5 text-xs rounded border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
             @keydown.enter="addCustomProp"
           />
           <button
-            class="mt-1 w-full text-xs px-2 py-1 rounded bg-gradient-to-br from-accent-soft to-accent-deep text-white hover:brightness-110 disabled:opacity-50"
+            class="w-full text-xs px-2 py-1 rounded bg-gradient-to-br from-accent-soft to-accent-deep text-white hover:brightness-110 disabled:opacity-50"
             :disabled="!newPropName.trim()"
             @click="addCustomProp"
-          >＋ 创建</button>
+          >＋ AI 生成</button>
+          <!-- 上传 / 拍照 / 画板 -->
+          <div class="grid grid-cols-3 gap-1">
+            <label
+              class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge cursor-pointer transition"
+              title="上传图片"
+            >
+              <span class="text-lg">📁</span>
+              <span>上传</span>
+              <input type="file" accept="image/*" class="hidden" @change="onUploadPick" />
+            </label>
+            <button
+              class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge transition"
+              title="摄像头拍照"
+              @click="openCamera"
+            >
+              <span class="text-lg">📷</span>
+              <span>拍照</span>
+            </button>
+            <button
+              class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge transition"
+              title="画板绘制"
+              @click="showSketchPad = true"
+            >
+              <span class="text-lg">🎨</span>
+              <span>画板</span>
+            </button>
+          </div>
         </div>
       </aside>
     </div>
@@ -416,5 +584,38 @@ const sidebarProps = computed(() => props.scene.props || []);
         {{ generating ? "AI 正在画…" : `✨ 完成 (${ops.length}) 并生成下一幕` }}
       </BaseButton>
     </div>
+
+    <!-- 摄像头 modal -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div
+          v-if="cameraOpen"
+          class="fixed inset-0 z-[60] bg-cinema/70 backdrop-blur-sm grid place-items-center p-4"
+          @click.self="closeCamera"
+        >
+          <div class="bg-white rounded-2xl p-4 max-w-[520px] w-full">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-bold">📷 摄像头拍照</h3>
+              <button class="w-8 h-8 rounded-full bg-paper-deep hover:bg-gold-mute" @click="closeCamera">✕</button>
+            </div>
+            <div class="bg-cinema rounded-xl overflow-hidden aspect-video">
+              <video ref="videoEl" class="w-full h-full object-contain" playsinline muted></video>
+            </div>
+            <div class="flex justify-end gap-2 mt-3">
+              <BaseButton variant="soft" pill size="sm" @click="closeCamera">取消</BaseButton>
+              <BaseButton pill size="sm" @click="snap">📸 拍下</BaseButton>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 画板 modal -->
+    <SketchPadModal :open="showSketchPad" @close="showSketchPad = false" @submit="onSketchDone" />
   </div>
 </template>
+
+<style scoped>
+.modal-enter-active, .modal-leave-active { transition: all 0.25s ease; }
+.modal-enter-from, .modal-leave-to { opacity: 0; transform: scale(0.98); }
+</style>

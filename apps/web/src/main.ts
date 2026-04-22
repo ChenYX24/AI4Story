@@ -27,3 +27,8 @@ window.addEventListener("unhandledrejection", (e) => {
 app.use(createPinia());
 app.use(router);
 app.mount("#app");
+
+// 启动后尝试恢复账号会话（不阻塞 mount）
+import("@/stores/user").then((m) => {
+  try { void m.useUserStore().boot(); } catch { /* ignore */ }
+});
