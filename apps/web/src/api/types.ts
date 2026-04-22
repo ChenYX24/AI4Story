@@ -189,10 +189,13 @@ export interface CreatePropRequest {
   scene_idx: number;
   name: string;
   description?: string;
+  reference_image_url?: string;
+  skip_ai?: boolean;
 }
 export interface CreatePropResponse {
   name: string;
   url: string;
+  reference_image_url?: string;
 }
 
 // ---- 账号 ----

@@ -1,6 +1,10 @@
 """
-通用图片上传 — 手绘 tab 上传 / 摄像头拍照 / 画板导出 都走这里。
-接受 base64 data URL，存到 outputs/uploads/，返回可直接展示的 /outputs/... 路径。
+通用图片上传 — 手绘 tab 上传 / 摄像头拍照 / 画板导出都走这里。
+后端存储通过 `apps.api.storage.get_storage()` 抽象：
+  - MINDSHOW_STORAGE=local  → 写本机 outputs/uploads/，URL 形如 /outputs/uploads/...
+  - MINDSHOW_STORAGE=s3     → 上 AWS/S3 兼容桶
+  - MINDSHOW_STORAGE=oss    → 上阿里云 OSS
+详见 apps/api/storage/__init__.py
 """
 import base64
 import re
@@ -9,12 +13,9 @@ import secrets
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..config import OUTPUTS_ROOT
+from ..storage import get_storage
 
 router = APIRouter(prefix="/upload", tags=["upload"])
-
-UPLOAD_DIR = OUTPUTS_ROOT / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 _DATA_URL = re.compile(r"^data:image/(png|jpe?g|webp|gif);base64,(.+)$", re.DOTALL)
 _ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "gif"}
@@ -63,6 +64,7 @@ def upload_image(req: UploadImageRequest) -> UploadImageResponse:
 
     kind = re.sub(r"[^a-z0-9_-]", "", (req.kind or "misc").lower()) or "misc"
     name = f"{kind}_{secrets.token_hex(6)}.{ext}"
-    out = UPLOAD_DIR / name
-    out.write_bytes(payload)
-    return UploadImageResponse(url=f"/outputs/uploads/{name}", size=len(payload))
+    key = f"uploads/{name}"
+    mime = "image/jpeg" if ext == "jpg" else f"image/{ext}"
+    url = get_storage().save_bytes(key, payload, content_type=mime)
+    return UploadImageResponse(url=url, size=len(payload))

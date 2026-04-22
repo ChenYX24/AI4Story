@@ -31,12 +31,28 @@ from .qwen_service import QwenError, call_json  # noqa: E402
 REMBG_MODEL = "isnet-general-use"
 
 
+def _load_reference_bytes(url: str) -> bytes:
+    """读取参考图字节；支持 /outputs/... 本地路径与绝对 http(s)。"""
+    u = (url or "").strip()
+    if not u:
+        raise ValueError("empty reference url")
+    if u.startswith("/outputs/"):
+        p = OUTPUTS_ROOT / u[len("/outputs/"):]
+        return p.read_bytes()
+    if u.startswith(("http://", "https://")):
+        import requests  # 已在 requirements
+        r = requests.get(u, timeout=15)
+        r.raise_for_status()
+        return r.content
+    raise ValueError(f"unsupported reference url: {u!r}")
+
+
 def _slug(name: str) -> str:
     cleaned = re.sub(r"[^\w\u4e00-\u9fff-]+", "_", name.strip())
     return cleaned.strip("_") or "prop"
 
 
-def _build_prompt(name: str, description: str | None) -> str:
+def _build_prompt(name: str, description: str | None, has_reference: bool = False) -> str:
     extra = (description or "").strip()
     parts = [
         f'Create one single "{name}" object illustration.',
@@ -49,6 +65,11 @@ def _build_prompt(name: str, description: str | None) -> str:
     ]
     if extra:
         parts.append(f"Extra detail: {extra}")
+    if has_reference:
+        parts.append(
+            "Note: a child has provided a rough sketch/photo as reference — "
+            "keep the general shape and vibe of their idea while rendering in the storybook style."
+        )
     return " ".join(parts)
 
 
@@ -56,18 +77,27 @@ def create_custom_prop(
     session_id: str,
     name: str,
     description: str | None,
+    *,
+    reference_image_url: str | None = None,
+    skip_ai: bool = False,
 ) -> tuple[str, Path]:
-    if not ARK_API_KEY:
-        raise RuntimeError("ARK_API_KEY 未配置，无法生成物品")
-
-    raw_png = generate_image_bytes(
-        api_key=ARK_API_KEY,
-        prompt=_build_prompt(name, description),
-        size=SEEDREAM_SIZE,
-        model=SEEDREAM_MODEL,
-        provider=SEEDREAM_PROVIDER,
-        timeout=SEEDREAM_TIMEOUT,
-    )
+    # skip_ai：直接把 reference 图原样视为道具图（画板 / 手绘 / 摄像头场景推荐）
+    if skip_ai and reference_image_url:
+        try:
+            raw_png = _load_reference_bytes(reference_image_url)
+        except Exception as e:
+            raise RuntimeError(f"无法读取参考图：{e}") from e
+    else:
+        if not ARK_API_KEY:
+            raise RuntimeError("ARK_API_KEY 未配置，无法生成物品")
+        raw_png = generate_image_bytes(
+            api_key=ARK_API_KEY,
+            prompt=_build_prompt(name, description, has_reference=bool(reference_image_url)),
+            size=SEEDREAM_SIZE,
+            model=SEEDREAM_MODEL,
+            provider=SEEDREAM_PROVIDER,
+            timeout=SEEDREAM_TIMEOUT,
+        )
 
     try:
         img = Image.open(io.BytesIO(raw_png)).convert("RGBA")

@@ -82,11 +82,17 @@ class CreatePropRequest(BaseModel):
     scene_idx: int
     name: str
     description: str | None = None
+    # 可选：来自用户上传 / 画板 / 摄像头的参考图 URL（相对 /outputs/... 或绝对 http）。
+    # 提供时，AI 生成的 prompt 会带上"用户参考图"的提示。
+    reference_image_url: str | None = None
+    # True = 直接以 reference_image_url 作为道具图（不调 AI，跳过 Seedream），适合画板/手绘原样保留
+    skip_ai: bool = False
 
 
 class CreatePropResponse(BaseModel):
     name: str
     url: str
+    reference_image_url: str | None = None
 
 
 class BatchPropItem(BaseModel):

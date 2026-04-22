@@ -12,6 +12,7 @@ import type {
 } from "@/api/types";
 import BaseButton from "./BaseButton.vue";
 import SketchPadModal from "./SketchPadModal.vue";
+import CustomPropCreateModal from "./CustomPropCreateModal.vue";
 
 // ---- 生图 loading hint 轮播 ----
 const LOADING_HINTS = [
@@ -557,22 +558,67 @@ async function onSketchDone(dataUrl: string) {
   await addCustomFromImage(dataUrl, "手绘道具");
 }
 
-async function addCustomFromImage(dataUrl: string, name: string) {
+// 上传/拍照/画板完成 → 先存盘 → 弹 CustomPropCreateModal 让用户填名称/描述 → 再决定 AI 画或直接用
+const propModalOpen = ref(false);
+const propModalRefUrl = ref("");
+const propModalDefaultName = ref("");
+const propModalBusy = ref(false);
+
+async function addCustomFromImage(dataUrl: string, defaultName: string) {
   try {
     const up = await uploadImage({ data: dataUrl, kind: "prop" });
-    customProps.value.push({ name, url: up.url });
+    propModalRefUrl.value = up.url;
+    propModalDefaultName.value = defaultName;
+    propModalOpen.value = true;
+  } catch (e: any) {
+    toast.push(`上传失败：${e?.message || e}`, "error");
+  }
+}
+
+async function onPropModalSubmit(payload: { name: string; description: string; skipAi: boolean }) {
+  propModalBusy.value = true;
+  try {
+    if (payload.skipAi) {
+      // 直接用原图作为道具，不调 Seedream
+      customProps.value.push({ name: payload.name, url: propModalRefUrl.value });
+      placed.value.push({
+        id: `custom-raw-${Date.now()}`,
+        name: payload.name,
+        kind: "object",
+        url: propModalRefUrl.value,
+        custom_url: propModalRefUrl.value,
+        x: 0.5, y: 0.5, scale: 1, rotation: 0,
+        isCustom: true,
+      });
+      toast.push(`✅ 「${payload.name}」已加到道具库`, "success");
+      propModalOpen.value = false;
+      return;
+    }
+    // AI 再画一个（Seedream 走 text prompt + 参考提示）
+    const r = await createProp({
+      session_id: sessionId.value,
+      scene_idx: props.scene.index,
+      name: payload.name,
+      description: payload.description || undefined,
+      reference_image_url: propModalRefUrl.value,
+      skip_ai: false,
+    });
+    customProps.value.push({ name: r.name, url: r.url });
     placed.value.push({
-      id: `custom-upload-${Date.now()}`,
-      name,
+      id: `custom-ai-${Date.now()}`,
+      name: r.name,
       kind: "object",
-      url: up.url,
-      custom_url: up.url,
+      url: r.url,
+      custom_url: r.url,
       x: 0.5, y: 0.5, scale: 1, rotation: 0,
       isCustom: true,
     });
-    toast.push(`✨ 「${name}」已加到道具库`, "success");
+    toast.push(`✨ AI 画的「${r.name}」好啦`, "success");
+    propModalOpen.value = false;
   } catch (e: any) {
-    toast.push(`上传失败：${e?.message || e}`, "error");
+    toast.push(`生成失败：${e?.message || e}`, "error");
+  } finally {
+    propModalBusy.value = false;
   }
 }
 
@@ -868,6 +914,15 @@ const sidebarProps = computed(() => props.scene.props || []);
 
     <!-- 画板 modal -->
     <SketchPadModal :open="showSketchPad" @close="showSketchPad = false" @submit="onSketchDone" />
+
+    <!-- 自定义道具创建 modal -->
+    <CustomPropCreateModal
+      :open="propModalOpen"
+      :image-url="propModalRefUrl"
+      :default-name="propModalDefaultName"
+      @close="propModalOpen = false"
+      @submit="onPropModalSubmit"
+    />
   </div>
 </template>
 
