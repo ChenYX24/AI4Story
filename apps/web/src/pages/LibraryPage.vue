@@ -6,6 +6,7 @@ import TopBar from "@/components/TopBar.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseModal from "@/components/BaseModal.vue";
+import Skeleton from "@/components/Skeleton.vue";
 import { useStoryStore } from "@/stores/story";
 import { useToastStore } from "@/stores/toast";
 import { deleteCustomStory, patchCustomStory } from "@/api/endpoints";
@@ -101,8 +102,23 @@ async function onDelete(id: string, e: MouseEvent) {
         </div>
       </div>
 
+      <!-- 骨架屏：首次加载（list 还没来 + loading=true） -->
       <div
-        v-if="!loading && store.list.length === 0"
+        v-if="loading && store.list.length === 0"
+        class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-5"
+      >
+        <div v-for="i in 6" :key="i" class="bg-white border border-paper-edge rounded-[var(--radius-card)] overflow-hidden shadow-[var(--shadow-card)]">
+          <Skeleton height="144px" rounded="" />
+          <div class="p-4 space-y-2">
+            <Skeleton height="18px" />
+            <Skeleton height="14px" />
+            <Skeleton height="14px" />
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-else-if="!loading && store.list.length === 0"
         class="text-center py-16"
       >
         <div class="text-5xl mb-3">📖</div>
@@ -125,9 +141,16 @@ async function onDelete(id: string, e: MouseEvent) {
         >
           <div
             class="h-36 grid place-items-center text-6xl relative overflow-hidden"
-            :style="story.cover_url ? `background-image:url(${story.cover_url}); background-size:cover; background-position:center;` : ''"
             :class="!story.cover_url && 'bg-gradient-to-br from-paper-deep to-gold-mute'"
           >
+            <img
+              v-if="story.cover_url"
+              :src="story.cover_url"
+              loading="lazy"
+              decoding="async"
+              class="absolute inset-0 w-full h-full object-cover"
+              alt=""
+            />
             <span v-if="!story.cover_url">
               {{ story.status === "generating" ? "⏳" : story.status === "failed" ? "⚠️" : story.is_custom ? "📘" : "📖" }}
             </span>

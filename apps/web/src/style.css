@@ -99,3 +99,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--color-gold);
   outline-offset: 2px;
 }
+
+/* ---------- 全局 shimmer (骨架屏) ---------- */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 100%
+  );
+  animation: shimmer 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer { animation: none; opacity: 0.45; }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "漫秀 MindShow",
+  "short_name": "漫秀",
+  "description": "AI 互动绘本剧场 — 把灵感变成可体验的故事",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fff6e8",
+  "theme_color": "#ff7a3d",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

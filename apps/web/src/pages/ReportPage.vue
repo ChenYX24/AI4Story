@@ -275,6 +275,8 @@ const reportTabs = [
                 v-for="(u, i) in store.comicUrls"
                 :key="i"
                 :src="u"
+                loading="lazy"
+                decoding="async"
                 :alt="`第 ${i + 1} 幅`"
                 class="h-28 w-auto rounded-lg border border-paper-edge shadow-sm hover:shadow-md hover:-translate-y-0.5 transition shrink-0"
               />

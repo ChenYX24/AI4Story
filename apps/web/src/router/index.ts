@@ -16,7 +16,7 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   { path: "/profile", name: "profile", component: () => import("@/pages/ProfilePage.vue") },
-  { path: "/:path(.*)", redirect: { name: "landing" } },
+  { path: "/:path(.*)", name: "not-found", component: () => import("@/pages/NotFoundPage.vue") },
 ];
 
 const router = createRouter({

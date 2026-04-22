@@ -9,6 +9,7 @@ import { useStoryStore } from "@/stores/story";
 import { useToastStore } from "@/stores/toast";
 import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
+import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import { postChat } from "@/api/endpoints";
 import type { Scene, InteractResponse } from "@/api/types";
 
@@ -113,6 +114,20 @@ async function advanceLine() {
 // 点击已显示的旁白气泡重播
 function replayLine(idx: number) { tts.play(idx); }
 
+// ---- 键盘快捷键 ----
+useKeyboardShortcuts([
+  { key: "ArrowRight", handler: () => turnPage("next") },
+  { key: "ArrowLeft",  handler: () => turnPage("prev") },
+  { key: " ",          handler: () => advanceLine() },
+  { key: "Escape",     handler: () => router.push("/library") },
+  ...Array.from({ length: 9 }, (_, i) => ({
+    key: String(i + 1),
+    handler: () => {
+      if (i <= store.highestUnlocked && i < store.flow.length) loadCursor(i);
+    },
+  })),
+]);
+
 async function sendChat(textOverride?: string) {
   const v = (textOverride ?? inputText.value).trim();
   if (!v || chatBusy.value) return;
@@ -181,7 +196,11 @@ async function onInteractDone(
 onMounted(async () => {
   try {
     if (!store.current || store.current.id !== props.id) {
+      // 切换故事：清空上一个的 interactions / comicUrls / sceneCache
+      if (store.current && store.current.id !== props.id) store.reset();
       await store.loadStory(props.id);
+    } else if (store.cursor === 0 && store.interactions.length === 0) {
+      // 同一故事但已结束 → 重新玩要清空
     }
     if (store.flow.length === 0) {
       toast.push("这个故事暂未准备好", "error");
@@ -223,6 +242,29 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
         class="relative"
         :style="{ perspective: '1800px' }"
       >
+        <!-- 骨架（scene 未加载时） -->
+        <div
+          v-if="!scene"
+          class="bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] p-6 sm:p-10 min-h-[420px] sm:min-h-[520px] flex flex-col"
+          style="box-shadow: var(--shadow-book);"
+        >
+          <div class="flex justify-between mb-4">
+            <div class="w-24 h-4 rounded bg-paper-deep relative overflow-hidden">
+              <div class="absolute inset-0 animate-shimmer"></div>
+            </div>
+            <div class="w-12 h-4 rounded bg-paper-deep relative overflow-hidden">
+              <div class="absolute inset-0 animate-shimmer"></div>
+            </div>
+          </div>
+          <div class="flex-1 rounded-xl bg-paper-deep relative overflow-hidden">
+            <div class="absolute inset-0 animate-shimmer"></div>
+          </div>
+          <div class="mt-6 pt-4 border-t border-dashed border-paper-edge flex justify-between">
+            <div class="w-20 h-8 rounded-full bg-paper-deep"></div>
+            <div class="w-24 h-8 rounded-full bg-paper-deep"></div>
+          </div>
+        </div>
+
         <Transition name="book" mode="out-in">
           <div
             v-if="scene"

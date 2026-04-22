@@ -1,16 +1,47 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref } from "vue";
+
 defineProps<{
   compact?: boolean; // compact=true 用作 banner，不占全屏
 }>();
 const emit = defineEmits<{ (e: "explore"): void }>();
+
+// 鼠标视差：中心胶片 ±10px、侧边 ±4px
+const rootRef = ref<HTMLElement | null>(null);
+const px = ref(0);
+const py = ref(0);
+let raf = 0;
+
+function onMove(e: MouseEvent) {
+  if (!rootRef.value) return;
+  const rect = rootRef.value.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width - 0.5;  // [-0.5, 0.5]
+  const y = (e.clientY - rect.top) / rect.height - 0.5;
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => {
+    px.value = x * 20;
+    py.value = y * 12;
+  });
+}
+function onLeave() {
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => {
+    px.value = 0;
+    py.value = 0;
+  });
+}
+onBeforeUnmount(() => cancelAnimationFrame(raf));
 </script>
 
 <template>
   <section
+    ref="rootRef"
     class="relative w-full overflow-hidden rounded-b-[48px] flex flex-col items-center justify-center text-center"
     :class="compact
       ? 'min-h-[360px] py-10 bg-gradient-to-b from-cinema via-cinema-soft to-[#2a1a0b]'
       : 'min-h-[88vh] py-16 bg-gradient-to-b from-[#1a0f06] via-cinema to-[#2a1a0b]'"
+    @mousemove="onMove"
+    @mouseleave="onLeave"
   >
     <!-- 星空 -->
     <div
@@ -36,14 +67,24 @@ const emit = defineEmits<{ (e: "explore"): void }>();
       style="background: repeating-linear-gradient(90deg, #0f0f0f 0 20px, #1f1f1f 20px 24px, #0f0f0f 24px 44px, #000 44px 48px); border-top: 2px solid #ffcb63; border-bottom: 2px solid #ffcb63; box-shadow: 0 0 30px rgba(255,203,99,0.35);"
     ></div>
 
-    <!-- 主视觉：三帧胶片 -->
-    <div class="relative z-[2] flex items-stretch justify-center gap-3 px-6 max-w-[1100px] animate-floaty">
+    <!-- 主视觉：三帧胶片（带鼠标视差） -->
+    <div
+      class="relative z-[2] flex items-stretch justify-center gap-3 px-6 max-w-[1100px] animate-floaty"
+      :style="{ transition: 'transform 0.25s cubic-bezier(0.2,0.7,0.25,1)' }"
+    >
       <!-- 左侧帧 -->
-      <div class="hidden sm:grid w-[180px] h-[240px] place-items-center text-[80px] opacity-60 border-2 border-[#3a2a12] bg-[#0b0b0b] shadow-[inset_0_0_30px_rgba(255,203,99,.15)]">🦊</div>
+      <div
+        class="hidden sm:grid w-[180px] h-[240px] place-items-center text-[80px] opacity-60 border-2 border-[#3a2a12] bg-[#0b0b0b] shadow-[inset_0_0_30px_rgba(255,203,99,.15)]"
+        :style="{ transform: `translate(${-px * 0.4}px, ${-py * 0.4}px)`, transition: 'transform 0.2s ease-out' }"
+      >🦊</div>
       <!-- 中心帧 -->
       <div
         class="relative grid place-items-center w-[360px] sm:w-[420px] h-[320px] sm:h-[360px] bg-[#0b0b0b] border-2 border-gold text-white"
-        style="box-shadow: inset 0 0 60px rgba(255,203,99,.25), 0 0 60px rgba(255,203,99,.55);"
+        :style="{
+          boxShadow: 'inset 0 0 60px rgba(255,203,99,.25), 0 0 60px rgba(255,203,99,.55)',
+          transform: `translate(${px}px, ${py}px)`,
+          transition: 'transform 0.15s ease-out',
+        }"
       >
         <div class="relative">
           <div
@@ -63,7 +104,10 @@ const emit = defineEmits<{ (e: "explore"): void }>();
         </div>
       </div>
       <!-- 右侧帧 -->
-      <div class="hidden sm:grid w-[180px] h-[240px] place-items-center text-[80px] opacity-60 border-2 border-[#3a2a12] bg-[#0b0b0b] shadow-[inset_0_0_30px_rgba(255,203,99,.15)]">🌙</div>
+      <div
+        class="hidden sm:grid w-[180px] h-[240px] place-items-center text-[80px] opacity-60 border-2 border-[#3a2a12] bg-[#0b0b0b] shadow-[inset_0_0_30px_rgba(255,203,99,.15)]"
+        :style="{ transform: `translate(${-px * 0.4}px, ${-py * 0.4}px)`, transition: 'transform 0.2s ease-out' }"
+      >🌙</div>
     </div>
 
     <!-- 向下探索 CTA -->

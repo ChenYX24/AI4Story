@@ -73,10 +73,19 @@ def create_app() -> FastAPI:
     def index() -> FileResponse:
         return FileResponse(spa_index)
 
-    # SPA fallback：vue-router history 模式下的所有非 API 路径都回 index.html
+    # SPA fallback：先看 dist 下是否有该文件（favicon/manifest 等），没有才回 index.html 让 vue-router 接管
+    _dist_root = web_v2_dist if web_v2_dist.exists() else FRONTEND_DIR
+
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str, request: Request) -> FileResponse:
-        # 已挂载的前缀 (api / outputs / assets / bundle / static / view) 由 starlette 直接路由，不会进这里
+        _ = request  # unused
+        if full_path:
+            cand = _dist_root / full_path
+            try:
+                if cand.is_file() and cand.resolve().is_relative_to(_dist_root.resolve()):
+                    return FileResponse(cand)
+            except (ValueError, OSError):
+                pass
         return FileResponse(spa_index)
 
     return app
