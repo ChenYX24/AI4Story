@@ -163,28 +163,176 @@ function allowDrop(e: DragEvent) {
   if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 }
 
-// ---- Drag-to-move on stage ----
-let activePointer: { id: string; offX: number; offY: number } | null = null;
+// ---- Multi-pointer gesture tracking ----
+// 每个物体上当前活动的 pointers（pointerId → clientX/Y）
+const itemActivePointers = new Map<string, Map<number, { clientX: number; clientY: number }>>();
+
+interface PinchState {
+  itemId: string;
+  startDist: number;
+  startAngle: number;
+  startScale: number;
+  startRotation: number;
+}
+let pinch: PinchState | null = null;
+
+// 单指拖移（不在 pinch/corner resize 中时）
+let activePointer: { id: string; pointerId: number; offX: number; offY: number } | null = null;
+
+// 角落手柄：拖它同时缩放 + 旋转
+interface CornerState {
+  itemId: string;
+  pointerId: number;
+  centerPx: number;   // stage-relative px
+  centerPy: number;
+  startDist: number;
+  startAngle: number;
+  startScale: number;
+  startRotation: number;
+}
+let cornerResize: CornerState | null = null;
+
+function pointerDist(a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }) {
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+function pointerAngle(a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }) {
+  return Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+}
+function wrapDeg(d: number) {
+  let r = d % 360;
+  if (r > 180) r -= 360;
+  if (r < -180) r += 360;
+  return r;
+}
+
+function enterPinchIfPossible(item: PlacedItem) {
+  const map = itemActivePointers.get(item.id);
+  if (!map || map.size !== 2) return;
+  const [p1, p2] = [...map.values()];
+  pinch = {
+    itemId: item.id,
+    startDist: pointerDist(p1, p2),
+    startAngle: pointerAngle(p1, p2),
+    startScale: item.scale,
+    startRotation: item.rotation,
+  };
+  // 进入 pinch → 清单指移动
+  if (activePointer?.id === item.id) activePointer = null;
+}
 
 function onItemPointerDown(e: PointerEvent, item: PlacedItem) {
   if (!stageRef.value) return;
   (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  let map = itemActivePointers.get(item.id);
+  if (!map) { map = new Map(); itemActivePointers.set(item.id, map); }
+  map.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+  if (map.size >= 2) {
+    enterPinchIfPossible(item);
+    return;
+  }
+  // 单指 → drag 移动
   const rect = stageRef.value.getBoundingClientRect();
   activePointer = {
     id: item.id,
+    pointerId: e.pointerId,
     offX: (e.clientX - rect.left) / rect.width - item.x,
     offY: (e.clientY - rect.top) / rect.height - item.y,
   };
 }
+
 function onStagePointerMove(e: PointerEvent) {
-  if (!activePointer || !stageRef.value) return;
-  const rect = stageRef.value.getBoundingClientRect();
-  const item = placed.value.find((p) => p.id === activePointer!.id);
-  if (!item) return;
-  item.x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width  - activePointer.offX));
-  item.y = Math.max(0, Math.min(1, (e.clientY - rect.top)  / rect.height - activePointer.offY));
+  if (!stageRef.value) return;
+
+  // 1. corner resize 优先
+  if (cornerResize && cornerResize.pointerId === e.pointerId) {
+    const item = placed.value.find((p) => p.id === cornerResize!.itemId);
+    if (!item) return;
+    const rect = stageRef.value.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const dx = px - cornerResize.centerPx;
+    const dy = py - cornerResize.centerPy;
+    const dist = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    item.scale = clamp(
+      cornerResize.startScale * (dist / Math.max(8, cornerResize.startDist)),
+      MIN_SCALE, MAX_SCALE,
+    );
+    item.rotation = wrapDeg(
+      cornerResize.startRotation + ((angle - cornerResize.startAngle) * 180) / Math.PI,
+    );
+    return;
+  }
+
+  // 2. pinch（两指）更新
+  if (pinch) {
+    const map = itemActivePointers.get(pinch.itemId);
+    if (!map) { pinch = null; return; }
+    if (map.has(e.pointerId)) {
+      map.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+    }
+    if (map.size >= 2) {
+      const item = placed.value.find((p) => p.id === pinch!.itemId);
+      if (!item) return;
+      const [p1, p2] = [...map.values()];
+      const dist = pointerDist(p1, p2);
+      const angle = pointerAngle(p1, p2);
+      item.scale = clamp(
+        pinch.startScale * (dist / Math.max(8, pinch.startDist)),
+        MIN_SCALE, MAX_SCALE,
+      );
+      item.rotation = wrapDeg(
+        pinch.startRotation + ((angle - pinch.startAngle) * 180) / Math.PI,
+      );
+      return;
+    }
+  }
+
+  // 3. 单指拖移
+  if (activePointer && activePointer.pointerId === e.pointerId) {
+    const rect = stageRef.value.getBoundingClientRect();
+    const item = placed.value.find((p) => p.id === activePointer!.id);
+    if (!item) return;
+    item.x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width - activePointer.offX));
+    item.y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height - activePointer.offY));
+  }
 }
-function onStagePointerUp() { activePointer = null; }
+
+function onStagePointerUp(e?: PointerEvent) {
+  if (!e) { activePointer = null; pinch = null; cornerResize = null; itemActivePointers.clear(); return; }
+  // 从所有 item maps 里移除这个 pointerId
+  for (const map of itemActivePointers.values()) map.delete(e.pointerId);
+  if (pinch) {
+    const m = itemActivePointers.get(pinch.itemId);
+    if (!m || m.size < 2) pinch = null;
+  }
+  if (cornerResize && cornerResize.pointerId === e.pointerId) cornerResize = null;
+  if (activePointer && activePointer.pointerId === e.pointerId) activePointer = null;
+}
+
+// 角落手柄：pointerdown 独立处理
+function onCornerPointerDown(e: PointerEvent, item: PlacedItem) {
+  e.stopPropagation();
+  if (!stageRef.value) return;
+  (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  const stageRect = stageRef.value.getBoundingClientRect();
+  const centerPx = item.x * stageRect.width;
+  const centerPy = item.y * stageRect.height;
+  const px = e.clientX - stageRect.left;
+  const py = e.clientY - stageRect.top;
+  const dx = px - centerPx;
+  const dy = py - centerPy;
+  cornerResize = {
+    itemId: item.id,
+    pointerId: e.pointerId,
+    centerPx, centerPy,
+    startDist: Math.hypot(dx, dy),
+    startAngle: Math.atan2(dy, dx),
+    startScale: item.scale,
+    startRotation: item.rotation,
+  };
+}
 
 // ---- 选两个做 op ----
 function selectItem(item: PlacedItem) {
@@ -465,8 +613,9 @@ const sidebarProps = computed(() => props.scene.props || []);
         @drop="onStageDrop"
         @dragover="allowDrop"
         @pointermove="onStagePointerMove"
-        @pointerup="onStagePointerUp"
-        @pointerleave="onStagePointerUp"
+        @pointerup="(e) => onStagePointerUp(e)"
+        @pointercancel="(e) => onStagePointerUp(e)"
+        @pointerleave="() => onStagePointerUp()"
         @click.self="onStageBackgroundClick"
         style="touch-action: none;"
       >
@@ -506,6 +655,15 @@ const sidebarProps = computed(() => props.scene.props || []);
 
           <div class="text-[10px] text-center text-ink-soft mt-0.5 px-1 bg-white/70 rounded pointer-events-none">{{ item.name }}</div>
 
+          <!-- 右下角落手柄 — 拖动同时缩放 + 旋转（仅单选态） -->
+          <button
+            v-if="editingItem?.id === item.id"
+            class="absolute -right-2 -bottom-2 w-6 h-6 rounded-full bg-accent text-white text-xs grid place-items-center shadow-[0_4px_10px_rgba(255,122,61,0.45)] cursor-nwse-resize hover:bg-accent-deep active:scale-95 transition"
+            title="拖动缩放 / 旋转"
+            @pointerdown.stop="(e) => onCornerPointerDown(e, item)"
+            @click.stop
+          >⇲</button>
+
           <!-- 选中工具条 — 单选（A 且无 B）时显示 -->
           <div
             v-if="editingItem?.id === item.id"
@@ -513,7 +671,6 @@ const sidebarProps = computed(() => props.scene.props || []);
             @click.stop
           >
             <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="缩小" @click="scaleItem(item, 1/1.15)">−</button>
-            <span class="text-[10px] text-ink-mute w-8 text-center">{{ Math.round(item.scale * 100) }}%</span>
             <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="放大" @click="scaleItem(item, 1.15)">+</button>
             <span class="w-px h-4 bg-paper-edge mx-0.5"></span>
             <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="逆时针旋转 15°" @click="rotateItem(item, -ROT_STEP)">↺</button>
@@ -536,7 +693,7 @@ const sidebarProps = computed(() => props.scene.props || []);
           </template>
           <template v-else-if="selA">
             已选 <span class="text-accent-deep font-semibold">{{ selA.name }}</span>
-            <span class="ml-2 text-ink-mute">上方工具条可缩放/旋转/删除 · 再点一个对象可以组合动作</span>
+            <span class="ml-2 text-ink-mute">拖右下 ⇲ 缩放旋转 · 双指捏合 · 再点一个对象可组合动作</span>
           </template>
         </div>
       </div>
