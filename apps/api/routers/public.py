@@ -38,12 +38,27 @@ class PublicAsset(BaseModel):
     category: str = "featured"
 
 
+class PublicAssetBundle(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    # bundle 的封面：可以是 emoji 或 URL，前端两者兼容
+    cover_emoji: str | None = None
+    cover_url: str | None = None
+    kind: str      # character_pack / object_pack / mixed
+    asset_ids: list[str]
+    item_count: int
+    official: bool = True
+    likes: int = 0
+
+
 class PublicStoriesResponse(BaseModel):
     stories: list[PublicStoryCard]
 
 
 class PublicAssetsResponse(BaseModel):
     assets: list[PublicAsset]
+    bundles: list[PublicAssetBundle] = []
 
 
 def _default_card() -> PublicStoryCard:
@@ -115,6 +130,51 @@ def _iter_global_assets() -> list[PublicAsset]:
     return out
 
 
+def _build_official_bundles(assets: list[PublicAsset]) -> list[PublicAssetBundle]:
+    """基于已有的全局资产自动拼几个"官方打包"。未来用户能自造 bundle 后走新表。"""
+    bundles: list[PublicAssetBundle] = []
+    chars = [a for a in assets if a.kind == "character"]
+    objs = [a for a in assets if a.kind == "object"]
+
+    # 小红帽人物包 — 4 位角色
+    red_char_ids = [a.id for a in chars if a.name in ("小红帽", "大灰狼", "外婆", "猎人")]
+    if red_char_ids:
+        bundles.append(PublicAssetBundle(
+            id="bundle-little-red-characters",
+            name="小红帽·故事角色包",
+            description="小红帽、大灰狼、外婆、猎人 四位经典角色，彩铅手绘风格。",
+            cover_emoji="🧒",
+            cover_url=next((a.url for a in chars if a.name == "小红帽"), None),
+            kind="character_pack",
+            asset_ids=red_char_ids,
+            item_count=len(red_char_ids),
+            official=True,
+            likes=420,
+        ))
+
+    # 小红帽道具包 — 鲜花/篮子/床/睡帽/步枪
+    red_obj_ids = [a.id for a in objs if a.name in ("鲜花", "篮子", "床", "睡帽", "步枪")]
+    if red_obj_ids:
+        bundles.append(PublicAssetBundle(
+            id="bundle-little-red-props",
+            name="小红帽·故事道具包",
+            description="鲜花、篮子、小床、睡帽、步枪——小红帽故事里全部道具。",
+            cover_emoji="🧺",
+            cover_url=next((a.url for a in objs if a.name == "鲜花"), None),
+            kind="object_pack",
+            asset_ids=red_obj_ids,
+            item_count=len(red_obj_ids),
+            official=True,
+            likes=338,
+        ))
+
+    # 未来：火焰山等其它故事的打包
+    # bundles.append(PublicAssetBundle(id="bundle-huoyanshan", ...))
+    return bundles
+
+
 @router.get("/assets", response_model=PublicAssetsResponse)
 def public_assets() -> PublicAssetsResponse:
-    return PublicAssetsResponse(assets=_iter_global_assets())
+    assets = _iter_global_assets()
+    bundles = _build_official_bundles(assets)
+    return PublicAssetsResponse(assets=assets, bundles=bundles)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import CinemaHero from "@/components/CinemaHero.vue";
 import BaseCard from "@/components/BaseCard.vue";
@@ -9,18 +9,20 @@ import BaseModal from "@/components/BaseModal.vue";
 import { useUserStore } from "@/stores/user";
 import { useToastStore } from "@/stores/toast";
 import { useShelfStore } from "@/stores/shelf";
+import { useAssetShelfStore } from "@/stores/assetShelf";
 import {
   createCustomStory,
   fetchPublicStories,
   fetchPublicAssets,
   uploadImage,
 } from "@/api/endpoints";
-import type { PublicStoryCard, PublicAsset } from "@/api/types";
+import type { PublicStoryCard, PublicAsset, PublicAssetBundle } from "@/api/types";
 
 const router = useRouter();
 const user = useUserStore();
 const toast = useToastStore();
 const shelf = useShelfStore();
+const assetShelf = useAssetShelfStore();
 
 const landingTabs = [
   { key: "text",   label: "文字描述", icon: "✍️" },
@@ -62,6 +64,7 @@ const plazaTabs = [
 const plazaTab = ref("stories");
 const plazaStories = ref<PublicStoryCard[]>([]);
 const plazaAssets  = ref<PublicAsset[]>([]);
+const plazaBundles = ref<PublicAssetBundle[]>([]);
 const plazaLoading = ref(false);
 
 async function loadPlaza() {
@@ -69,7 +72,10 @@ async function loadPlaza() {
   try {
     const [s, a] = await Promise.allSettled([fetchPublicStories(), fetchPublicAssets()]);
     if (s.status === "fulfilled") plazaStories.value = s.value.stories;
-    if (a.status === "fulfilled") plazaAssets.value = a.value.assets;
+    if (a.status === "fulfilled") {
+      plazaAssets.value = a.value.assets;
+      plazaBundles.value = a.value.bundles || [];
+    }
   } finally {
     plazaLoading.value = false;
   }
@@ -81,10 +87,12 @@ onMounted(loadPlaza);
 type Preview =
   | { kind: "story"; data: PublicStoryCard }
   | { kind: "asset"; data: PublicAsset }
+  | { kind: "bundle"; data: PublicAssetBundle }
   | null;
 const preview = ref<Preview>(null);
 function openStory(s: PublicStoryCard) { preview.value = { kind: "story", data: s }; }
 function openAsset(a: PublicAsset) { preview.value = { kind: "asset", data: a }; }
+function openBundle(b: PublicAssetBundle) { preview.value = { kind: "bundle", data: b }; }
 
 function playStory(id: string) { preview.value = null; router.push({ name: "story", params: { id } }); }
 
@@ -93,7 +101,21 @@ function addToShelf(id: string) {
   toast.push("已加到书架", "success");
 }
 
-function shareAssetHint() { toast.push("资产导入/收藏在账号系统后补上 🎨", "info"); }
+function toggleAssetFav(id: string) {
+  assetShelf.toggleAsset(id);
+  toast.push(assetShelf.hasAsset(id) ? "已收藏到我的资产" : "已取消收藏", "success");
+}
+function toggleBundleFav(id: string) {
+  assetShelf.toggleBundle(id);
+  toast.push(assetShelf.hasBundle(id) ? "已收藏这个资产包" : "已取消收藏", "success");
+}
+
+// 通过 id 查单件资产（用于 bundle 预览展开）
+const assetById = computed(() => {
+  const m = new Map<string, PublicAsset>();
+  for (const a of plazaAssets.value) m.set(a.id, a);
+  return m;
+});
 
 // 手绘上传
 const sketchFile = ref<File | null>(null);
@@ -341,30 +363,76 @@ async function submitSketch() {
         </BaseCard>
       </div>
 
-      <!-- Assets grid -->
-      <div
-        v-else
-        class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
-      >
-        <BaseCard
-          v-for="a in plazaAssets"
-          :key="a.id"
-          hover
-          class="overflow-hidden cursor-pointer"
-          @click="openAsset(a)"
-        >
-          <div class="h-32 grid place-items-center bg-gradient-to-br from-paper-deep to-gold-mute">
-            <img :src="a.url" :alt="a.name" loading="lazy" class="max-w-[80%] max-h-[80%] object-contain drop-shadow-sm" />
+      <!-- Assets：先打包后单件 -->
+      <div v-else>
+        <!-- 打包资产 -->
+        <div v-if="plazaBundles.length" class="mb-6">
+          <div class="text-sm font-semibold text-ink-soft mb-3 flex items-center gap-2">
+            <span>📦 打包资产</span>
+            <span class="text-xs text-ink-mute font-normal">一键拿全整套</span>
           </div>
-          <div class="p-3">
-            <div class="font-semibold text-ink truncate">{{ a.name }}</div>
-            <div class="text-xs text-ink-mute mt-0.5">
-              {{ a.kind === 'character' ? '人物' : '道具' }} · 官方
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+            <BaseCard
+              v-for="b in plazaBundles"
+              :key="b.id"
+              hover
+              :glow="!!b.official"
+              class="overflow-hidden cursor-pointer relative"
+              @click="openBundle(b)"
+            >
+              <div class="h-32 relative grid place-items-center bg-gradient-to-br from-gold to-accent-soft overflow-hidden">
+                <img v-if="b.cover_url" :src="b.cover_url" class="max-w-[55%] max-h-[80%] object-contain drop-shadow-md" alt="" />
+                <div v-else class="text-6xl">{{ b.cover_emoji || "📦" }}</div>
+                <div class="absolute bottom-1 right-2 px-2 py-0.5 text-[11px] rounded-full bg-white/90 text-ink font-semibold">
+                  × {{ b.item_count }}
+                </div>
+              </div>
+              <div class="p-3">
+                <div class="font-semibold text-ink truncate">{{ b.name }}</div>
+                <div class="text-xs text-ink-mute mt-0.5 line-clamp-1">{{ b.description }}</div>
+                <div class="mt-2 flex items-center justify-between text-[11px]">
+                  <span class="text-ink-soft">{{ b.kind === 'character_pack' ? '人物包' : b.kind === 'object_pack' ? '道具包' : '混合包' }}</span>
+                  <span class="text-warn">❤ {{ b.likes ?? 0 }}</span>
+                </div>
+                <div v-if="assetShelf.hasBundle(b.id)" class="mt-1">
+                  <span class="px-2 py-0.5 text-[11px] bg-good/15 text-good rounded-full">✓ 已收藏</span>
+                </div>
+              </div>
+            </BaseCard>
+          </div>
+        </div>
+
+        <!-- 单件资产 -->
+        <div>
+          <div class="text-sm font-semibold text-ink-soft mb-3 flex items-center gap-2">
+            <span>🎭 单件资产</span>
+            <span class="text-xs text-ink-mute font-normal">点击预览 / 收藏</span>
+          </div>
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+            <BaseCard
+              v-for="a in plazaAssets"
+              :key="a.id"
+              hover
+              class="overflow-hidden cursor-pointer relative"
+              @click="openAsset(a)"
+            >
+              <div class="h-28 grid place-items-center bg-gradient-to-br from-paper-deep to-gold-mute">
+                <img :src="a.url" :alt="a.name" loading="lazy" class="max-w-[78%] max-h-[80%] object-contain drop-shadow-sm" />
+              </div>
+              <div class="p-3">
+                <div class="font-semibold text-ink text-sm truncate">{{ a.name }}</div>
+                <div class="text-xs text-ink-mute mt-0.5">
+                  {{ a.kind === 'character' ? '人物' : '道具' }} · 官方
+                </div>
+                <div v-if="assetShelf.hasAsset(a.id)" class="mt-1">
+                  <span class="px-2 py-0.5 text-[10px] bg-good/15 text-good rounded-full">✓ 已收藏</span>
+                </div>
+              </div>
+            </BaseCard>
+            <div v-if="!plazaLoading && plazaAssets.length === 0" class="col-span-full text-center py-12 text-ink-mute text-sm">
+              暂无资产
             </div>
           </div>
-        </BaseCard>
-        <div v-if="!plazaLoading && plazaAssets.length === 0" class="col-span-full text-center py-12 text-ink-mute text-sm">
-          暂无资产
         </div>
       </div>
 
@@ -408,6 +476,37 @@ async function submitSketch() {
           {{ preview.data.kind === 'character' ? '人物' : '道具' }} · 官方精选
         </div>
       </template>
+      <template v-else-if="preview?.kind === 'bundle'">
+        <div class="w-full h-48 rounded-xl overflow-hidden mb-3 bg-gradient-to-br from-gold to-accent-soft grid place-items-center relative">
+          <img v-if="preview.data.cover_url" :src="preview.data.cover_url" class="max-w-[50%] max-h-[80%] object-contain drop-shadow-lg" alt="" />
+          <div v-else class="text-7xl">{{ preview.data.cover_emoji || "📦" }}</div>
+          <div class="absolute top-2 right-2 px-2.5 py-1 rounded-full bg-white/95 text-ink text-xs font-semibold">
+            × {{ preview.data.item_count }} 件
+          </div>
+        </div>
+        <h3 class="font-display text-xl font-bold m-0 mb-1">{{ preview.data.name }}</h3>
+        <div class="text-xs text-ink-soft mb-3">
+          {{ preview.data.kind === 'character_pack' ? '人物包' : preview.data.kind === 'object_pack' ? '道具包' : '混合包' }}
+          · 官方精选 · ❤ {{ preview.data.likes ?? 0 }}
+        </div>
+        <p class="text-sm text-ink-soft leading-relaxed m-0 mb-3">{{ preview.data.description }}</p>
+        <!-- bundle 包含的资产缩略 -->
+        <div class="grid grid-cols-5 gap-2">
+          <div
+            v-for="aid in preview.data.asset_ids"
+            :key="aid"
+            class="aspect-square bg-paper-deep rounded-lg grid place-items-center p-1 overflow-hidden"
+            :title="assetById.get(aid)?.name"
+          >
+            <img
+              v-if="assetById.get(aid)?.url"
+              :src="assetById.get(aid)!.url"
+              class="max-w-full max-h-full object-contain"
+              alt=""
+            />
+          </div>
+        </div>
+      </template>
       <template #footer>
         <template v-if="preview?.kind === 'story'">
           <BaseButton variant="soft" pill @click="preview = null">关闭</BaseButton>
@@ -421,7 +520,15 @@ async function submitSketch() {
         </template>
         <template v-else-if="preview?.kind === 'asset'">
           <BaseButton variant="soft" pill @click="preview = null">关闭</BaseButton>
-          <BaseButton pill @click="shareAssetHint">收藏（开发中）</BaseButton>
+          <BaseButton pill @click="toggleAssetFav((preview as any).data.id)">
+            {{ assetShelf.hasAsset((preview as any).data.id) ? "★ 取消收藏" : "☆ 收藏" }}
+          </BaseButton>
+        </template>
+        <template v-else-if="preview?.kind === 'bundle'">
+          <BaseButton variant="soft" pill @click="preview = null">关闭</BaseButton>
+          <BaseButton pill @click="toggleBundleFav((preview as any).data.id)">
+            {{ assetShelf.hasBundle((preview as any).data.id) ? "★ 取消收藏" : "☆ 收藏整包" }}
+          </BaseButton>
         </template>
       </template>
     </BaseModal>

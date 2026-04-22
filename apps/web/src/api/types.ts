@@ -231,8 +231,23 @@ export interface PublicAsset {
   svg_url?: string | null;
   category?: string;
 }
+export interface PublicAssetBundle {
+  id: string;
+  name: string;
+  description?: string;
+  cover_emoji?: string | null;
+  cover_url?: string | null;
+  kind: "character_pack" | "object_pack" | "mixed";
+  asset_ids: string[];
+  item_count: number;
+  official?: boolean;
+  likes?: number;
+}
 export interface PublicStoriesResponse { stories: PublicStoryCard[]; }
-export interface PublicAssetsResponse { assets: PublicAsset[]; }
+export interface PublicAssetsResponse {
+  assets: PublicAsset[];
+  bundles?: PublicAssetBundle[];
+}
 
 // ---- 上传 ----
 export interface UploadImageRequest {
