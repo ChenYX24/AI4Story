@@ -8,6 +8,7 @@ import InteractiveView from "@/components/InteractiveView.vue";
 import { useStoryStore } from "@/stores/story";
 import { useToastStore } from "@/stores/toast";
 import { useASR } from "@/composables/useASR";
+import { useTTSPreload } from "@/composables/useTTSPreload";
 import { postChat } from "@/api/endpoints";
 import type { Scene, InteractResponse } from "@/api/types";
 
@@ -16,13 +17,13 @@ const router = useRouter();
 const store = useStoryStore();
 const toast = useToastStore();
 const asr = useASR({ lang: "zh-CN" });
+const tts = useTTSPreload();
 
 const loading = ref(true);
 const scene = ref<Scene | null>(null);
 const flipping = ref<"next" | "prev" | null>(null);
 const flipIn = ref(true);
 const lineCursor = ref(0);
-const audio = ref<HTMLAudioElement | null>(null);
 const inputText = ref("");
 
 // 聊天记录 — 单幕内的对话（切换幕时重置）
@@ -40,15 +41,38 @@ async function loadCursor(idx: number) {
     const node = store.flow[idx];
     const sc = await store.ensureScene(node.sceneIdx);
     scene.value = sc;
+    store.trackComic(sc.comic_url);
     store.cursor = idx;
     store.highestUnlocked = Math.max(store.highestUnlocked, idx);
     node.visited = true;
     lineCursor.value = 0;
     chatLog.value = [];
+    // narrative 幕：并发预载 TTS audio
+    if (sc.type === "narrative" && sc.storyboard?.length) {
+      tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+    } else {
+      tts.stop();
+    }
     // 进入动画
     flipIn.value = false;
     requestAnimationFrame(() => { flipIn.value = true; });
+    // 下一幕预取（scene + 图片）
+    prefetchNode(idx + 1);
   } finally { loading.value = false; flipping.value = null; }
+}
+
+async function prefetchNode(idx: number) {
+  if (idx < 0 || idx >= store.flow.length) return;
+  const node = store.flow[idx];
+  try {
+    const sc = await store.ensureScene(node.sceneIdx);
+    const urls: string[] = [];
+    if (sc.comic_url) urls.push(sc.comic_url);
+    if (sc.background_url) urls.push(sc.background_url);
+    (sc.characters || []).forEach((c) => c.url && urls.push(c.url));
+    (sc.props || []).forEach((p) => p.url && urls.push(p.url));
+    urls.forEach((u) => { const img = new Image(); img.src = u; });
+  } catch { /* silent */ }
 }
 
 async function turnPage(direction: "next" | "prev") {
@@ -75,33 +99,19 @@ async function turnPage(direction: "next" | "prev") {
   setTimeout(() => loadCursor(to), 420);
 }
 
-function stopAudio() {
-  if (audio.value) { audio.value.pause(); audio.value = null; }
-}
+function stopAudio() { tts.stop(); }
 
-async function playLine(idx: number) {
-  stopAudio();
-  const sb = scene.value?.storyboard || [];
-  const line = sb[idx];
-  if (!line) return;
-  try {
-    const q = new URLSearchParams({ text: line.text, tone: line.tone || "" });
-    if (line.speaker) q.set("speaker", line.speaker);
-    const a = new Audio(`/api/tts?${q.toString()}`);
-    audio.value = a;
-    a.play().catch(() => {});
-  } catch {
-    /* fallback: ignore */
-  }
-}
-
-function advanceLine() {
+async function advanceLine() {
   const sb = scene.value?.storyboard || [];
   if (lineCursor.value >= sb.length) { toast.push("这一幕讲完啦", "info"); return; }
   const idx = lineCursor.value;
   lineCursor.value += 1;
-  playLine(idx);
+  // 同时：文字展示 + 预载音频播放（音频已 preload, 这里立即 play）
+  await tts.play(idx);
 }
+
+// 点击已显示的旁白气泡重播
+function replayLine(idx: number) { tts.play(idx); }
 
 async function sendChat(textOverride?: string) {
   const v = (textOverride ?? inputText.value).trim();
@@ -117,13 +127,8 @@ async function sendChat(textOverride?: string) {
     });
     chatLog.value.push({ role: "assistant", text: r.reply });
     // 朗读 reply
-    try {
-      const q = new URLSearchParams({ text: r.reply, tone: "温柔" });
-      stopAudio();
-      const a = new Audio(`/api/tts?${q.toString()}`);
-      audio.value = a;
-      a.play().catch(() => {});
-    } catch { /* ignore */ }
+    tts.stop();
+    tts.playOne({ text: r.reply, tone: "温柔" });
   } catch (e: any) {
     toast.push(`聊天失败：${e.message}`, "error");
   } finally {
@@ -141,8 +146,21 @@ async function startMic() {
   }
 }
 
-// 互动完成回调 — dynamic narrative 替代当前 scene 渲染（不动 flow）
-async function onInteractDone(payload: InteractResponse) {
+// 互动完成回调 — dynamic narrative 替代当前 scene 渲染（不动 flow）+ 记录 interaction 供报告用
+async function onInteractDone(
+  payload: InteractResponse,
+  snap: { ops: any[]; custom_props: any[] },
+) {
+  // 写入 store 供 ReportPage 取
+  store.addInteraction({
+    scene_idx: scene.value?.index ?? 0,
+    interaction_goal: scene.value?.interaction_goal,
+    ops: snap.ops,
+    custom_props: snap.custom_props,
+    dynamic_summary: payload.summary,
+    comic_url: payload.comic_url,
+  });
+
   flipping.value = "next";
   setTimeout(() => {
     dynamicNode.value = payload;
@@ -151,6 +169,10 @@ async function onInteractDone(payload: InteractResponse) {
     flipping.value = null;
     flipIn.value = false;
     requestAnimationFrame(() => { flipIn.value = true; });
+    // dynamic 段落的 storyboard 也预载音频（虽然用户不点下一句，但聊天可能需要 tts）
+    if (payload.storyboard?.length) {
+      tts.preload(payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+    }
     toast.push("✨ 你的故事段落已经画好了", "success");
   }, 420);
 }
@@ -314,13 +336,15 @@ const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lin
                 <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
               </div>
             </template>
-            <!-- 预置叙事：点"下一句"逐条展开 -->
+            <!-- 预置叙事：点"下一句"逐条展开，已展开的可点击重播 -->
             <template v-else>
               <div
                 v-for="(ln, i) in visibleLines"
                 :key="'v-' + i"
-                class="fade-in bg-paper-deep rounded-xl px-3 py-2 text-sm leading-relaxed"
+                class="fade-in bg-paper-deep rounded-xl px-3 py-2 text-sm leading-relaxed cursor-pointer hover:bg-gold-mute transition"
                 :class="i === visibleLines.length - 1 && 'ring-1 ring-gold/40'"
+                title="点击重播"
+                @click="replayLine(i)"
               >
                 <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
               </div>

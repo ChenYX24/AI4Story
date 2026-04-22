@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { Scene, StoryCard, StoryDetail } from "@/api/types";
+import type { Scene, StoryCard, StoryDetail, Interaction, CustomProp, Operation } from "@/api/types";
 import { fetchStories, fetchStory, fetchScene } from "@/api/endpoints";
 
 export const useStoryStore = defineStore("story", () => {
@@ -12,6 +12,35 @@ export const useStoryStore = defineStore("story", () => {
   const flow = ref<Array<{ type: "narrative" | "interactive"; sceneIdx: number; visited: boolean }>>([]);
   const cursor = ref(0);
   const highestUnlocked = ref(0);
+
+  // 用户的交互快照 — 送给报告
+  const interactions = ref<Interaction[]>([]);
+  // 当前 story 内累计 custom props + comic urls（共享 + 分享面板用）
+  const comicUrls = ref<string[]>([]);
+
+  function addInteraction(snap: {
+    scene_idx: number;
+    interaction_goal?: string;
+    ops: Operation[];
+    custom_props: CustomProp[];
+    dynamic_summary?: string;
+    comic_url?: string;
+  }) {
+    interactions.value.push({
+      scene_idx: snap.scene_idx,
+      interaction_goal: snap.interaction_goal,
+      ops: snap.ops.map((o) => ({ ...o })),
+      custom_props: snap.custom_props.map((c) => ({ ...c })),
+      dynamic_summary: snap.dynamic_summary,
+    });
+    if (snap.comic_url && !comicUrls.value.includes(snap.comic_url)) {
+      comicUrls.value.push(snap.comic_url);
+    }
+  }
+
+  function trackComic(url?: string) {
+    if (url && !comicUrls.value.includes(url)) comicUrls.value.push(url);
+  }
 
   async function loadList() {
     const r = await fetchStories();
@@ -51,7 +80,14 @@ export const useStoryStore = defineStore("story", () => {
     cursor.value = 0;
     highestUnlocked.value = 0;
     sceneCache.value.clear();
+    interactions.value = [];
+    comicUrls.value = [];
   }
 
-  return { list, current, flow, cursor, highestUnlocked, loadList, loadStory, ensureScene, reset };
+  return {
+    list, current, flow, cursor, highestUnlocked,
+    interactions, comicUrls,
+    loadList, loadStory, ensureScene, reset,
+    addInteraction, trackComic,
+  };
 });

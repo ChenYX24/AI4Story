@@ -21,6 +21,7 @@ export const deleteCustomStory = (id: string) =>
 export const patchCustomStory = (id: string, body: { title?: string }) =>
   apiPatch<{ ok: boolean }>(`/api/stories/${encodeURIComponent(id)}`, body);
 
+
 // 拉服务器信息（LAN IP 之类）
 export const fetchServerInfo = () =>
   apiGet<{ lan_ip?: string }>("/api/server-info").catch(() => ({} as { lan_ip?: string }));

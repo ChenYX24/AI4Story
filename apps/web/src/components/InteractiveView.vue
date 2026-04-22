@@ -13,7 +13,12 @@ import type {
 import BaseButton from "./BaseButton.vue";
 
 const props = defineProps<{ scene: Scene; storyId: string; }>();
-const emit = defineEmits<{ (e: "done", payload: InteractResponse): void }>();
+const emit = defineEmits<{
+  (e: "done", payload: InteractResponse, snap: {
+    ops: Operation[];
+    custom_props: CustomProp[];
+  }): void;
+}>();
 
 const toast = useToastStore();
 const sessions = useSessionStore();
@@ -222,7 +227,10 @@ async function complete() {
       ops: ops.value,
       custom_props: customProps.value,
     });
-    emit("done", resp);
+    emit("done", resp, {
+      ops: ops.value.map((o) => ({ ...o })),
+      custom_props: customProps.value.map((c) => ({ ...c })),
+    });
   } catch (e: any) {
     toast.push(`生成失败：${e.message}`, "error");
   } finally {

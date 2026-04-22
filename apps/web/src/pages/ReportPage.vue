@@ -9,6 +9,7 @@ import { useReportStream } from "@/composables/useReportStream";
 import { useStoryStore } from "@/stores/story";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toast";
+import { fetchServerInfo, postShare } from "@/api/endpoints";
 import type { ReportResponse } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
@@ -21,6 +22,50 @@ const stream = useReportStream();
 const payload = ref<ReportResponse | null>(null);
 const tab = ref("share");
 const failed = ref(false);
+
+// Share / QR state
+const shareId = ref<string | null>(null);
+const shareUrl = ref<string>("");
+const shareQrSrc = computed(() =>
+  shareId.value
+    ? `/api/share/${shareId.value}/qr.svg?url=${encodeURIComponent(shareUrl.value)}`
+    : "",
+);
+const shareBuilding = ref(false);
+
+async function buildShare() {
+  if (shareId.value || shareBuilding.value) return;
+  shareBuilding.value = true;
+  try {
+    const comics = store.comicUrls.slice();
+    const title = (store.current?.title || store.current?.story_summary || "").slice(0, 30);
+    const r = await postShare({ story_title: title, comics });
+    shareId.value = r.share_id;
+    // LAN IP 判断：localhost/127.0.0.1 时从 /api/server-info 取真正局域网 IP，方便手机扫码
+    let host = location.hostname;
+    const isLocal = host === "localhost" || host === "127.0.0.1";
+    if (isLocal) {
+      const info = await fetchServerInfo();
+      if (info.lan_ip && info.lan_ip !== "127.0.0.1") host = info.lan_ip;
+    }
+    const port = location.port ? `:${location.port}` : "";
+    shareUrl.value = `${location.protocol}//${host}${port}/view/${r.share_id}`;
+  } catch (e: any) {
+    toast.push(`分享码生成失败：${e.message}`, "warn");
+  } finally {
+    shareBuilding.value = false;
+  }
+}
+
+async function copyShareUrl() {
+  if (!shareUrl.value) return;
+  try {
+    await navigator.clipboard.writeText(shareUrl.value);
+    toast.push("链接已复制", "success");
+  } catch {
+    toast.push("复制失败，请长按链接手动复制", "warn");
+  }
+}
 
 // 在 stream 期间根据 chunks 渐进显示（chunk.kind 决定渲染哪块）
 type ChunkAny = { kind: string; data: any };
@@ -36,10 +81,12 @@ async function runStream() {
     const resp = await stream.run({
       session_id: sessionId,
       story_id: props.id,
-      interactions: [],
+      interactions: store.interactions, // 真实记录，不是空数组
     });
     payload.value = resp;
     session.markReportReady(sessionId);
+    // 完成后异步生成分享码 + QR
+    void buildShare();
   } catch (e: any) {
     failed.value = true;
     toast.push(`报告生成失败：${e.message}`, "error");
@@ -193,21 +240,72 @@ const reportTabs = [
 
         <!-- Share 视图 -->
         <template v-if="tab === 'share'">
-          <BaseCard class="p-6 text-center">
-            <div class="text-6xl mb-2">🏆</div>
-            <div class="text-xl font-bold mb-2">{{ payload.share?.honor_title }}</div>
-            <p class="text-ink-soft">{{ payload.share?.summary }}</p>
+          <BaseCard class="p-6 text-center relative overflow-hidden">
+            <!-- confetti 背景渐变 -->
+            <div
+              class="absolute inset-0 pointer-events-none opacity-40"
+              style="background: radial-gradient(circle at 20% 30%, #ffcb63 0, transparent 40%), radial-gradient(circle at 80% 70%, #ff7a3d 0, transparent 40%);"
+            ></div>
+            <div class="relative">
+              <div class="text-6xl mb-2">🏆</div>
+              <div class="text-2xl font-bold mb-2">{{ payload.share?.honor_title }}</div>
+              <p class="text-ink-soft m-0">{{ payload.share?.summary }}</p>
+            </div>
           </BaseCard>
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 mt-4">
+
+          <!-- 成就 -->
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3 mt-4">
             <BaseCard
               v-for="(a, i) in payload.share?.achievements || []"
               :key="i"
               class="p-4 text-center"
             >
               <div class="text-3xl">{{ a.icon }}</div>
-              <div class="text-sm mt-2">{{ a.text }}</div>
+              <div class="text-sm mt-2 text-ink-soft">{{ a.text }}</div>
             </BaseCard>
           </div>
+
+          <!-- 漫画条 -->
+          <BaseCard v-if="store.comicUrls.length" class="p-5 mt-4">
+            <div class="text-xs tracking-wider text-ink-mute mb-2">
+              📚 故事漫画一览 · {{ store.comicUrls.length }} 幅
+            </div>
+            <div class="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+              <img
+                v-for="(u, i) in store.comicUrls"
+                :key="i"
+                :src="u"
+                :alt="`第 ${i + 1} 幅`"
+                class="h-28 w-auto rounded-lg border border-paper-edge shadow-sm hover:shadow-md hover:-translate-y-0.5 transition shrink-0"
+              />
+            </div>
+          </BaseCard>
+
+          <!-- 分享 QR -->
+          <BaseCard class="p-5 mt-4">
+            <div class="flex flex-col sm:flex-row gap-5 items-center">
+              <div
+                class="shrink-0 w-[148px] h-[148px] bg-white rounded-xl border border-paper-edge grid place-items-center"
+              >
+                <img
+                  v-if="shareQrSrc"
+                  :src="shareQrSrc"
+                  alt="分享二维码"
+                  class="w-[140px] h-[140px]"
+                />
+                <div v-else-if="shareBuilding" class="text-ink-mute text-xs animate-pulse">生成中…</div>
+                <div v-else class="text-ink-mute text-xs">准备中</div>
+              </div>
+              <div class="flex-1 min-w-0 text-center sm:text-left">
+                <div class="text-sm font-semibold text-ink mb-1">扫码分享给家人朋友</div>
+                <div class="text-xs text-ink-soft mb-3">手机上可左右滑动翻看故事漫画</div>
+                <div v-if="shareUrl" class="flex items-center gap-2">
+                  <code class="flex-1 min-w-0 truncate text-xs bg-paper-deep rounded px-2 py-1 text-ink-soft">{{ shareUrl }}</code>
+                  <BaseButton variant="soft" size="sm" pill @click="copyShareUrl">复制</BaseButton>
+                </div>
+              </div>
+            </div>
+          </BaseCard>
         </template>
 
         <!-- Kid -->
