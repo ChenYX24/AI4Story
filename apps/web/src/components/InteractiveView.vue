@@ -716,10 +716,11 @@ defineExpose({
     </Transition>
 
     <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0 overflow-hidden" style="grid-template-rows: minmax(0, 1fr);">
-      <!-- 舞台 —— h-full + min-h-0 让 grid 严格不溢出 -->
+      <!-- 舞台 —— aspect-square 匹配背景图 1:1；w-full + max-h-full = 取 min(cellW, cellH) 的正方形；m-auto 居中 -->
       <div
         ref="stageRef"
-        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none h-full min-h-0"
+        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none w-full max-h-full m-auto"
+        style="aspect-ratio: 1 / 1;"
         @drop="onStageDrop"
         @dragover="allowDrop"
         @pointermove="onStagePointerMove"
