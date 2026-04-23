@@ -720,7 +720,7 @@ defineExpose({
       <div
         ref="stageRef"
         class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none w-full max-h-full m-auto"
-        style="aspect-ratio: 1 / 1;"
+        style="aspect-ratio: 1 / 1; touch-action: none;"
         @drop="onStageDrop"
         @dragover="allowDrop"
         @pointermove="onStagePointerMove"
@@ -728,7 +728,6 @@ defineExpose({
         @pointercancel="(e) => onStagePointerUp(e)"
         @pointerleave="() => onStagePointerUp()"
         @click.self="onStageBackgroundClick"
-        style="touch-action: none;"
       >
         <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="背景" />
 
