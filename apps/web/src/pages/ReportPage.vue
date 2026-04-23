@@ -94,6 +94,8 @@ async function runStream() {
 
 onMounted(() => {
   runStream();
+  // E3: 进入报告 = 本次 session 结束，清掉进行中快照
+  session.clearPlayState(props.id);
 });
 
 const reportTabs = [

@@ -90,7 +90,26 @@ type Preview =
 const preview = ref<Preview>(null);
 function openStory(s: PublicStoryCard) { preview.value = { kind: "story", data: s }; }
 function openAsset(a: PublicAsset) { preview.value = { kind: "asset", data: a }; }
-function openBundle(b: PublicAssetBundle) { preview.value = { kind: "bundle", data: b }; }
+function openBundle(b: PublicAssetBundle) {
+  preview.value = { kind: "bundle", data: b };
+  bundleSelected.value = new Set();
+}
+
+// 资产包下钻：multi-select 内部 asset
+const bundleSelected = ref<Set<string>>(new Set());
+function toggleBundleItem(aid: string) {
+  const s = new Set(bundleSelected.value);
+  if (s.has(aid)) s.delete(aid); else s.add(aid);
+  bundleSelected.value = s;
+}
+function favSelectedFromBundle() {
+  let count = 0;
+  for (const aid of bundleSelected.value) {
+    if (!assetShelf.hasAsset(aid)) { assetShelf.toggleAsset(aid); count++; }
+  }
+  toast.push(count ? `✨ 收藏了 ${count} 件` : "都已经在我的资产里了", "success");
+  bundleSelected.value = new Set();
+}
 
 function playStory(id: string) { preview.value = null; router.push({ name: "story", params: { id } }); }
 
@@ -482,14 +501,25 @@ async function submitSketch() {
           {{ preview.data.kind === 'character_pack' ? '人物包' : preview.data.kind === 'object_pack' ? '道具包' : '混合包' }}
           · 官方精选 · ❤ {{ preview.data.likes ?? 0 }}
         </div>
-        <p class="text-sm text-ink-soft leading-relaxed m-0 mb-3">{{ preview.data.description }}</p>
-        <!-- bundle 包含的资产缩略 -->
+        <p class="text-sm text-ink-soft leading-relaxed m-0 mb-2">{{ preview.data.description }}</p>
+        <div class="text-xs text-ink-mute mb-2 flex items-center justify-between">
+          <span>点击单件可多选收藏</span>
+          <span v-if="bundleSelected.size" class="text-accent-deep font-semibold">已选 {{ bundleSelected.size }} / {{ preview.data.asset_ids.length }}</span>
+        </div>
+        <!-- bundle 包含的资产缩略 —— D1 可多选 -->
         <div class="grid grid-cols-5 gap-2">
-          <div
+          <button
             v-for="aid in preview.data.asset_ids"
             :key="aid"
-            class="aspect-square bg-paper-deep rounded-lg grid place-items-center p-1 overflow-hidden"
+            type="button"
+            class="aspect-square rounded-lg grid place-items-center p-1 overflow-hidden relative border-2 transition"
+            :class="bundleSelected.has(aid)
+              ? 'border-accent bg-accent/10 shadow-[0_0_8px_rgba(255,122,61,0.25)]'
+              : assetShelf.hasAsset(aid)
+                ? 'border-good/50 bg-good/5'
+                : 'border-transparent bg-paper-deep hover:border-paper-edge'"
             :title="assetById.get(aid)?.name"
+            @click="toggleBundleItem(aid)"
           >
             <img
               v-if="assetById.get(aid)?.url"
@@ -497,7 +527,17 @@ async function submitSketch() {
               class="max-w-full max-h-full object-contain"
               alt=""
             />
-          </div>
+            <span
+              v-if="assetShelf.hasAsset(aid)"
+              class="absolute top-0.5 right-0.5 text-[9px] text-good bg-white/90 rounded px-1"
+            >★</span>
+            <span
+              v-if="bundleSelected.has(aid)"
+              class="absolute inset-0 grid place-items-center bg-accent/20"
+            >
+              <span class="text-white bg-accent rounded-full w-5 h-5 grid place-items-center text-xs">✓</span>
+            </span>
+          </button>
         </div>
       </template>
       <template #footer>
@@ -518,8 +558,14 @@ async function submitSketch() {
         </template>
         <template v-else-if="preview?.kind === 'bundle'">
           <BaseButton variant="soft" pill @click="preview = null">关闭</BaseButton>
+          <BaseButton
+            v-if="bundleSelected.size > 0"
+            variant="soft"
+            pill
+            @click="favSelectedFromBundle"
+          >☆ 收藏选中 ({{ bundleSelected.size }})</BaseButton>
           <BaseButton pill @click="toggleBundleFav((preview as any).data.id)">
-            {{ assetShelf.hasBundle((preview as any).data.id) ? "★ 取消收藏" : "☆ 收藏整包" }}
+            {{ assetShelf.hasBundle((preview as any).data.id) ? "★ 取消整包" : "☆ 收藏整包" }}
           </BaseButton>
         </template>
       </template>

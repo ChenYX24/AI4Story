@@ -16,7 +16,7 @@ const showTimeline = computed(() => route.name === "story" && story.flow?.length
 
 interface TimelineItem {
   sceneIdx: number;
-  type: "narrative" | "interactive";
+  type: "narrative" | "interactive" | "dynamic";
   visited?: boolean;
   dynamicThumb?: string;
 }
@@ -24,11 +24,13 @@ interface TimelineItem {
 const timelineItems = computed<TimelineItem[]>(() =>
   (story.flow || []).map((f) => {
     const dyn = story.dynamicByScene?.get?.(f.sceneIdx);
+    // 只有 dynamic type 的节点才用 dyn 缩略图覆盖；interactive 保留默认 bg，仅金色描边表示已玩过
+    const isDynamicNode = f.type === "dynamic";
     return {
       sceneIdx: f.sceneIdx,
       type: f.type,
       visited: f.visited,
-      dynamicThumb: dyn?.payload.thumbnail_url || dyn?.payload.comic_url,
+      dynamicThumb: isDynamicNode ? (dyn?.payload.thumbnail_url || dyn?.payload.comic_url) : undefined,
     };
   }),
 );

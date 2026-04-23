@@ -5,7 +5,10 @@ import BaseButton from "@/components/BaseButton.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import InteractiveView from "@/components/InteractiveView.vue";
 import { useStoryStore } from "@/stores/story";
+import { useSessionStore } from "@/stores/session";
+import { useInteractStore } from "@/stores/interact";
 import { useToastStore } from "@/stores/toast";
+import BaseModal from "@/components/BaseModal.vue";
 import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
@@ -15,6 +18,8 @@ import type { Scene, InteractResponse, Operation } from "@/api/types";
 const props = defineProps<{ id: string }>();
 const router = useRouter();
 const store = useStoryStore();
+const sess = useSessionStore();
+const interactStore = useInteractStore();
 const toast = useToastStore();
 const asr = useASR({ lang: "zh-CN" });
 const tts = useTTSPreload();
@@ -39,25 +44,35 @@ async function loadCursor(idx: number) {
   loading.value = true;
   try {
     const node = store.flow[idx];
-    const sc = await store.ensureScene(node.sceneIdx);
-    scene.value = sc;
-    store.trackComic(sc.comic_url);
     store.cursor = idx;
     store.highestUnlocked = Math.max(store.highestUnlocked, idx);
     node.visited = true;
     lineCursor.value = 0;
     chatLog.value = [];
 
-    // 动态节点持久化：如果这一 interactive 场景之前玩过，恢复生成结果供"回看"
-    const persisted = store.dynamicByScene.get(node.sceneIdx);
-    if (node.type === "interactive" && persisted) {
-      dynamicNode.value = persisted.payload;
-      interactiveOps.value = [];
-      // dynamic 段落预载 TTS（和 onInteractDone 保持一致）
-      if (persisted.payload.storyboard?.length) {
-        tts.preload(persisted.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+    if (node.type === "dynamic") {
+      // 独立的 dynamic 幕（互动后生成，已插入 flow）
+      const dyn = store.dynamicByScene.get(node.sceneIdx);
+      if (!dyn) {
+        toast.push("这一幕的创作丢了，回到上一幕吧", "error");
+        scene.value = null;
+        dynamicNode.value = null;
+      } else {
+        // 源 interactive 场景的 meta 仍然作为 scene.value 背景（供 summary 卡用），但 type 在模板分支里按 dynamicNode 优先
+        scene.value = await store.ensureScene(node.sceneIdx).catch(() => null as any);
+        dynamicNode.value = dyn.payload;
+        store.trackComic(dyn.payload.comic_url);
+        if (dyn.payload.storyboard?.length) {
+          tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+        } else {
+          tts.stop();
+        }
       }
     } else {
+      // narrative / interactive 正常路径
+      const sc = await store.ensureScene(node.sceneIdx);
+      scene.value = sc;
+      store.trackComic(sc.comic_url);
       dynamicNode.value = null;
       if (sc.type === "narrative" && sc.storyboard?.length) {
         tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
@@ -114,11 +129,16 @@ async function turnPage(direction: "next" | "prev") {
 
 function stopAudio() { tts.stop(); }
 
+// 当前幕的 storyboard —— dynamic 优先（也需要逐句播放）
+const activeStoryboard = computed(() =>
+  dynamicNode.value?.storyboard || scene.value?.storyboard || [],
+);
+
 async function advanceLine() {
-  const sb = scene.value?.storyboard || [];
+  const sb = activeStoryboard.value;
   // 讲完所有句子后再点"下一句" → 自动翻页（C3b：v2.1 α）
   if (lineCursor.value >= sb.length) {
-    if (dynamicNode.value || !isLast.value) {
+    if (!isLast.value) {
       turnPage("next");
     } else {
       router.push({ name: "report", params: { id: props.id } });
@@ -127,7 +147,6 @@ async function advanceLine() {
   }
   const idx = lineCursor.value;
   lineCursor.value += 1;
-  // 同时：文字展示 + 预载音频播放（音频已 preload, 这里立即 play）
   await tts.play(idx);
 }
 
@@ -202,56 +221,101 @@ async function startMic() {
   }
 }
 
-// 互动完成回调 — dynamic narrative 替代当前 scene 渲染（不动 flow）+ 记录 interaction 供报告用
+// 互动完成回调 — dynamic 幕 splice 到 flow 中（当前 interactive 之后），cursor 前进到新幕
 async function onInteractDone(
   payload: InteractResponse,
   snap: { ops: any[]; custom_props: any[] },
 ) {
-  // 写入 store 供 ReportPage 取
+  const sourceSceneIdx = scene.value?.index;
+  if (sourceSceneIdx === undefined) return;
   store.addInteraction({
-    scene_idx: scene.value?.index ?? 0,
+    scene_idx: sourceSceneIdx,
     interaction_goal: scene.value?.interaction_goal,
     ops: snap.ops,
     custom_props: snap.custom_props,
     dynamic_summary: payload.summary,
     comic_url: payload.comic_url,
   });
-  // 持久化这次 dynamic 生成结果，允许缩略图切换回看
-  if (scene.value?.index !== undefined) {
-    store.recordDynamic(scene.value.index, {
-      payload,
-      snapOps: snap.ops,
-      snapProps: snap.custom_props,
-    });
-  }
-
+  store.recordDynamic(sourceSceneIdx, {
+    payload,
+    snapOps: snap.ops,
+    snapProps: snap.custom_props,
+  });
+  // splice 到 flow：已有同源 dynamic 会先被清除
+  const insertedAt = store.insertDynamicAfter(store.cursor, sourceSceneIdx);
   flipping.value = "next";
   setTimeout(() => {
-    dynamicNode.value = payload;
-    lineCursor.value = 0;
-    chatLog.value = [];
     flipping.value = null;
-    flipIn.value = false;
-    requestAnimationFrame(() => { flipIn.value = true; });
-    // dynamic 段落的 storyboard 也预载音频（虽然用户不点下一句，但聊天可能需要 tts）
-    if (payload.storyboard?.length) {
-      tts.preload(payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
-    }
     toast.push("✨ 你的故事段落已经画好了", "success");
+    // 跳到新插入的 dynamic 幕
+    loadCursor(insertedAt);
   }, 420);
 }
 
+
+// E3：进行中 session 恢复弹窗
+const resumeModalOpen = ref(false);
+function onResumeContinue() {
+  const ps = sess.getPlayState(props.id);
+  if (!ps) { resumeModalOpen.value = false; return; }
+  // 恢复 flow / dynamicByScene / interactStore.states
+  store.flow = ps.flow.map((f) => ({ ...f }));
+  store.cursor = ps.cursor;
+  store.highestUnlocked = ps.highestUnlocked;
+  store.interactions = ps.interactions.map((i) => ({ ...i, ops: i.ops.map((o) => ({ ...o })), custom_props: i.custom_props.map((c) => ({ ...c })) }));
+  store.comicUrls = [...ps.comicUrls];
+  // dynamicByScene
+  const dynMap = new Map();
+  for (const k in ps.dynamicByScene) dynMap.set(Number(k), ps.dynamicByScene[k]);
+  store.dynamicByScene = dynMap;
+  // interactByScene
+  interactStore.clearAll();
+  for (const k in ps.interactByScene) {
+    interactStore.save(props.id, Number(k), ps.interactByScene[k] as any);
+  }
+  resumeModalOpen.value = false;
+  toast.push("已恢复上次进度", "success");
+  loadCursor(ps.cursor);
+}
+function onResumeOverwrite() {
+  sess.clearPlayState(props.id);
+  interactStore.clearAll();
+  store.reset();
+  resumeModalOpen.value = false;
+  (async () => {
+    await store.loadStory(props.id);
+    if (store.flow.length > 0) loadCursor(0);
+  })();
+}
+function onResumeCancel() {
+  resumeModalOpen.value = false;
+  router.push("/library");
+}
 
 onMounted(async () => {
   // 注册 TopBar 缩略图点击 → 走 loadCursor
   store.setJumpHandler((idx: number) => { loadCursor(idx); });
   try {
+    // 先判断有没有"进行中"快照
+    const inProgress = sess.hasInProgress(props.id);
+    if (inProgress) {
+      // 先 loadStory（拿标题等 meta 用于 modal 显示）
+      if (!store.current || store.current.id !== props.id) {
+        if (store.current && store.current.id !== props.id) store.reset();
+        await store.loadStory(props.id);
+      }
+      if (store.flow.length === 0) {
+        toast.push("这个故事暂未准备好", "error");
+        router.push("/library");
+        return;
+      }
+      resumeModalOpen.value = true;
+      return;  // 等用户在 modal 选择
+    }
+
     if (!store.current || store.current.id !== props.id) {
-      // 切换故事：清空上一个的 interactions / comicUrls / sceneCache
       if (store.current && store.current.id !== props.id) store.reset();
       await store.loadStory(props.id);
-    } else if (store.cursor === 0 && store.interactions.length === 0) {
-      // 同一故事但已结束 → 重新玩要清空
     }
     if (store.flow.length === 0) {
       toast.push("这个故事暂未准备好", "error");
@@ -265,6 +329,44 @@ onMounted(async () => {
   }
 });
 
+// 自动快照：cursor / flow / dynamicByScene / interactByScene 变 → 写 session playState
+watch(
+  [
+    () => store.cursor,
+    () => store.flow,
+    () => store.dynamicByScene,
+    () => interactStore.states,
+    () => store.interactions,
+    () => store.comicUrls,
+  ],
+  () => {
+    if (!store.current || store.current.id !== props.id) return;
+    // 已到终点（report 阶段）就不写快照了
+    if (store.cursor >= store.flow.length) return;
+    const dynObj: Record<string, any> = {};
+    store.dynamicByScene?.forEach?.((v, k) => { dynObj[String(k)] = v; });
+    const interactObj: Record<string, any> = {};
+    interactStore.states?.forEach?.((v, k) => {
+      const [sid, sidxStr] = k.split(":");
+      if (sid !== props.id) return;
+      interactObj[sidxStr] = v;
+    });
+    sess.savePlayState({
+      story_id: props.id,
+      story_title: store.current.title,
+      cursor: store.cursor,
+      highestUnlocked: store.highestUnlocked,
+      flow: store.flow.map((f) => ({ ...f })),
+      dynamicByScene: dynObj,
+      interactByScene: interactObj,
+      interactions: store.interactions.map((i) => ({ ...i })),
+      comicUrls: [...store.comicUrls],
+      updatedAt: new Date().toISOString(),
+    });
+  },
+  { deep: true, flush: "post" },
+);
+
 onBeforeUnmount(() => { store.setJumpHandler(null); });
 
 watch(() => props.id, async (v) => {
@@ -276,16 +378,9 @@ watch(() => props.id, async (v) => {
 
 const node = computed(() => store.flow[store.cursor]);
 const isLast = computed(() => store.cursor === store.flow.length - 1);
-const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lineCursor.value));
+const visibleLines = computed(() => activeStoryboard.value.slice(0, lineCursor.value));
 
 // TopBar 现在自读 store，无需传 timelineItems
-
-// 重玩当前已生成的 dynamic 幕（清 dynamicNode，进入互动态）
-function replayInteractive() {
-  dynamicNode.value = null;
-  interactiveOps.value = [];
-  tts.stop();
-}
 
 // 下一幕的 comic_url —— 传给互动页 loading 做背景图（用户 #6）
 const nextPreviewComicUrl = computed<string | undefined>(() => {
@@ -305,6 +400,21 @@ function removeInteractiveOp(i: number) {
 
 <template>
   <div class="min-h-[calc(100vh-3.5rem)]">
+    <!-- E3：进行中 session 恢复弹窗（取消 / 覆盖 / 继续） -->
+    <BaseModal :open="resumeModalOpen" title="继续上次的玩法？" :max-width="'460px'" @close="onResumeCancel">
+      <p class="text-sm text-ink-soft m-0 mb-2">
+        你之前玩这个故事到
+        <span class="font-semibold text-ink">第 {{ ((sess.getPlayState(props.id)?.cursor ?? 0) + 1) }} / {{ sess.getPlayState(props.id)?.flow.length ?? 0 }} 页</span>
+        ，所有摆放、道具和已生成的段落都保留了。
+      </p>
+      <p class="text-xs text-ink-mute m-0">选「覆盖」会清空上次进度从头开始。</p>
+      <template #footer>
+        <BaseButton variant="soft" pill @click="onResumeCancel">取消（回书架）</BaseButton>
+        <BaseButton variant="soft" pill @click="onResumeOverwrite">覆盖重玩</BaseButton>
+        <BaseButton pill @click="onResumeContinue">继续 →</BaseButton>
+      </template>
+    </BaseModal>
+
     <div class="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 grid gap-6 lg:grid-cols-[1fr_360px]">
       <!-- 书本区 -->
       <div
@@ -370,15 +480,8 @@ function removeInteractiveOp(i: number) {
                     alt="新段落"
                   />
                 </div>
-                <div class="mt-3 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30 flex items-center justify-between gap-2 flex-wrap">
-                  <span>✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span></span>
-                  <BaseButton
-                    v-if="node?.type === 'interactive'"
-                    variant="ghost"
-                    size="sm"
-                    pill
-                    @click="replayInteractive"
-                  >↻ 重玩此幕</BaseButton>
+                <div class="mt-3 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30">
+                  ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
                 </div>
               </template>
 
@@ -413,17 +516,17 @@ function removeInteractiveOp(i: number) {
                 class="mt-6 flex flex-wrap gap-2 justify-between items-center pt-4 border-t border-dashed border-paper-edge"
               >
                 <div class="flex gap-2 flex-wrap">
-                  <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0 && !dynamicNode" @click="turnPage('prev')">⬅ 上一页</BaseButton>
+                  <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0" @click="turnPage('prev')">⬅ 上一页</BaseButton>
                   <BaseButton
-                    v-if="!dynamicNode && node?.type === 'narrative'"
+                    v-if="activeStoryboard.length > 0"
                     variant="ghost"
                     size="sm"
                     pill
-                    :disabled="lineCursor <= 0"
+                    :disabled="lineCursor <= 1"
                     @click="retreatLine"
                   >◀ 上一句</BaseButton>
                   <BaseButton
-                    v-if="!dynamicNode && node?.type === 'narrative'"
+                    v-if="activeStoryboard.length > 0"
                     variant="ghost"
                     size="sm"
                     pill
@@ -431,7 +534,7 @@ function removeInteractiveOp(i: number) {
                   >🔊 下一句</BaseButton>
                 </div>
                 <BaseButton size="sm" pill @click="turnPage('next')">
-                  {{ dynamicNode ? "继续 ⏭" : isLast ? "📊 查看报告" : "翻下一页 ⏭" }}
+                  {{ isLast ? "📊 查看报告" : "翻下一页 ⏭" }}
                 </BaseButton>
               </div>
             </div>
@@ -479,50 +582,33 @@ function removeInteractiveOp(i: number) {
           </div>
         </BaseCard>
 
-        <!-- 旁白流（narrative / dynamic 时才显示） -->
+        <!-- 旁白流（narrative / dynamic 都用同一套逐句展开） -->
         <BaseCard
-          v-if="(node?.type === 'narrative' || dynamicNode) && (visibleLines.length || (dynamicNode?.storyboard?.length ?? 0) > 0)"
+          v-if="activeStoryboard.length > 0 && (node?.type === 'narrative' || dynamicNode)"
           class="p-5"
         >
           <div class="text-sm font-semibold mb-3 flex items-center gap-2">
             <span>📖 旁白</span>
-            <span v-if="node?.type === 'narrative' && !dynamicNode" class="text-xs text-ink-mute font-normal">
-              {{ lineCursor }} / {{ (scene?.storyboard || []).length }}
+            <span class="text-xs text-ink-mute font-normal">
+              {{ lineCursor }} / {{ activeStoryboard.length }}
             </span>
           </div>
           <div class="space-y-2">
-            <!-- 动态段落的所有 storyboard 一次性显示（可点击重播） -->
-            <template v-if="dynamicNode">
-              <div
-                v-for="(ln, i) in (dynamicNode.storyboard || [])"
-                :key="'d-' + i"
-                class="fade-in bg-paper-deep rounded-xl px-3 py-2 text-sm leading-relaxed cursor-pointer hover:bg-gold-mute transition"
-                :class="tts.playingIdx.value === i && 'ring-2 ring-gold/70 shadow-[0_0_16px_rgba(224,178,95,0.45)] bg-gold/10 tts-pulse'"
-                title="点击重播"
-                @click="replayLine(i)"
-              >
-                <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
-                <span v-if="tts.playingIdx.value === i" class="ml-1 text-gold">🔊</span>
-              </div>
-            </template>
-            <!-- 预置叙事：点"下一句"逐条展开，已展开的可点击重播；正在朗读的行脉冲高亮 -->
-            <template v-else>
-              <div
-                v-for="(ln, i) in visibleLines"
-                :key="'v-' + i"
-                class="fade-in bg-paper-deep rounded-xl px-3 py-2 text-sm leading-relaxed cursor-pointer hover:bg-gold-mute transition"
-                :class="[
-                  tts.playingIdx.value === i
-                    ? 'ring-2 ring-gold/70 shadow-[0_0_16px_rgba(224,178,95,0.45)] bg-gold/10 tts-pulse'
-                    : i === visibleLines.length - 1 ? 'ring-1 ring-gold/40' : '',
-                ]"
-                title="点击重播"
-                @click="replayLine(i)"
-              >
-                <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
-                <span v-if="tts.playingIdx.value === i" class="ml-1 text-gold">🔊</span>
-              </div>
-            </template>
+            <div
+              v-for="(ln, i) in visibleLines"
+              :key="'v-' + i"
+              class="fade-in bg-paper-deep rounded-xl px-3 py-2 text-sm leading-relaxed cursor-pointer hover:bg-gold-mute transition"
+              :class="[
+                tts.playingIdx.value === i
+                  ? 'ring-2 ring-gold/70 shadow-[0_0_16px_rgba(224,178,95,0.45)] bg-gold/10 tts-pulse'
+                  : i === visibleLines.length - 1 ? 'ring-1 ring-gold/40' : '',
+              ]"
+              title="点击重播"
+              @click="replayLine(i)"
+            >
+              <span class="text-ink-soft font-semibold">{{ ln.speaker }}：</span>{{ ln.text }}
+              <span v-if="tts.playingIdx.value === i" class="ml-1 text-gold">🔊</span>
+            </div>
           </div>
         </BaseCard>
         <BaseCard class="p-5 flex flex-col" style="min-height: 280px;">

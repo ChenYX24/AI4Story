@@ -14,8 +14,9 @@ export const useStoryStore = defineStore("story", () => {
   const current = ref<StoryDetail | null>(null);
   const sceneCache = ref<Map<number, Scene>>(new Map());
 
-  // 节点流：narrative + interactive 穿插
-  const flow = ref<Array<{ type: "narrative" | "interactive"; sceneIdx: number; visited: boolean }>>([]);
+  // 节点流：narrative + interactive 穿插；互动完成生成 dynamic 幕，splice 插入在 interactive 之后
+  // 对 dynamic 类型，sceneIdx 等于其源 interactive 场景的 sceneIdx（作为 dynamicByScene 的 key）
+  const flow = ref<Array<{ type: "narrative" | "interactive" | "dynamic"; sceneIdx: number; visited: boolean }>>([]);
   const cursor = ref(0);
   const highestUnlocked = ref(0);
 
@@ -33,6 +34,18 @@ export const useStoryStore = defineStore("story", () => {
       snapOps: record.snapOps.map((o) => ({ ...o })),
       snapProps: record.snapProps.map((p) => ({ ...p })),
     });
+  }
+
+  // 把 dynamic 幕 splice 到当前 interactive 节点之后
+  function insertDynamicAfter(afterIdx: number, sourceSceneIdx: number) {
+    // 先移除该 source 的旧 dynamic（重玩时避免重复）
+    flow.value = flow.value.filter(
+      (f) => !(f.type === "dynamic" && f.sceneIdx === sourceSceneIdx),
+    );
+    // 插到 afterIdx 后面
+    const insertAt = Math.min(afterIdx + 1, flow.value.length);
+    flow.value.splice(insertAt, 0, { type: "dynamic", sceneIdx: sourceSceneIdx, visited: true });
+    return insertAt;
   }
 
   // 顶栏跳转请求：StoryPage 在 mount 时注册自己的 loadCursor，TopBar 点击缩略图调 requestJump
@@ -115,7 +128,7 @@ export const useStoryStore = defineStore("story", () => {
     interactions, comicUrls,
     dynamicByScene,
     loadList, loadStory, ensureScene, reset,
-    addInteraction, trackComic, recordDynamic,
+    addInteraction, trackComic, recordDynamic, insertDynamicAfter,
     setJumpHandler, requestJump,
   };
 });

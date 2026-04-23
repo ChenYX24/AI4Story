@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 互动场景：拖拽角色/道具到背景 → 选两个 + 输入动作 → 加入 ops 序列 → 完成 → /api/interact
 // 保留与 web-legacy/js/interactive_view.js 一致的 contract，但用 Pointer Events + Vue reactivity 重写
-import { computed, onMounted, onBeforeUnmount, ref } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useToastStore } from "@/stores/toast";
 import { useSessionStore } from "@/stores/session";
 import { useAssetShelfStore } from "@/stores/assetShelf";
+import { useInteractStore } from "@/stores/interact";
 import { fetchPlacements, postInteract, createProp, uploadImage } from "@/api/endpoints";
 import type {
   Scene, SceneCharacter, SceneProp,
@@ -53,6 +54,7 @@ const ops = defineModel<Operation[]>("ops", { default: () => [] });
 const toast = useToastStore();
 const sessions = useSessionStore();
 const assetShelf = useAssetShelfStore();
+const interactStore = useInteractStore();
 
 interface PlacedItem {
   id: string;          // unique within this scene session
@@ -142,12 +144,33 @@ async function loadInitialPlacements() {
 }
 
 onMounted(() => {
-  void loadInitialPlacements();
+  // 先尝试恢复本幕之前的摆放 / ops / customProps（翻页回看 or 重玩都不丢）
+  const saved = interactStore.get(props.storyId, props.scene.index);
+  if (saved && (saved.placed.length || saved.ops.length || saved.customProps.length)) {
+    placed.value = saved.placed.map((p) => ({ ...p }));
+    ops.value = saved.ops.map((o) => ({ ...o }));
+    customProps.value = saved.customProps.map((c) => ({ ...c }));
+  } else {
+    void loadInitialPlacements();
+  }
   document.addEventListener("keydown", onStageKey);
 });
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onStageKey);
 });
+
+// 状态变化 → 持久化到 interact store（翻页离开再回来不丢）
+watch(
+  [placed, ops, customProps],
+  () => {
+    interactStore.save(props.storyId, props.scene.index, {
+      placed: placed.value,
+      ops: ops.value,
+      customProps: customProps.value,
+    });
+  },
+  { deep: true },
+);
 
 // ---- Drag from sidebar onto stage ----
 const stageRef = ref<HTMLDivElement | null>(null);

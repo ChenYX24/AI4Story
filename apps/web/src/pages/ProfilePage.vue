@@ -62,14 +62,16 @@ const tabs = [
   { key: "stories", label: "我的故事", icon: "📖" },
   { key: "sessions", label: "历史会话", icon: "🎮" },
   { key: "assets", label: "资产", icon: "🎨" },
+  { key: "growth", label: "成长报告", icon: "📈" },
 ];
 const tab = ref("stories");
 
 const assetSubs = [
+  { key: "mine",      label: "我的创作" },
   { key: "favorites", label: "我的收藏" },
   { key: "official",  label: "官方资产库" },
 ];
-const assetSub = ref<"favorites" | "official">("favorites");
+const assetSub = ref<"mine" | "favorites" | "official">("mine");
 
 // 真资产数据 — 从 /api/public/assets 拿
 const publicAssets = ref<PublicAsset[]>([]);
@@ -133,6 +135,61 @@ function onToggleBundleFav(id: string, e: MouseEvent) {
 const myStories = computed(() => store.list.filter((s) => s.is_custom));
 const shelfStories = computed(() => store.list.filter((s) => shelf.has(s.id)));
 // 历史会话按 story 分组
+// 取该 session 对应的缩略图：进行中 → 最近一张 comic；已完成 → 故事 cover（从 store.list 找）
+function sessionThumb(s: { story_id: string }): string | undefined {
+  const ps = sess.getPlayState(s.story_id);
+  if (ps?.comicUrls?.length) return ps.comicUrls[ps.comicUrls.length - 1];
+  const sc = store.list.find((x) => x.id === s.story_id);
+  return sc?.cover_url;
+}
+function sessionProgress(storyId: string): number {
+  const ps = sess.getPlayState(storyId);
+  if (!ps || ps.flow.length === 0) return 0;
+  return Math.round(((ps.cursor + 1) / ps.flow.length) * 100);
+}
+
+// E4 成长报告 —— 硬编码 + 轻量启发式（阶段 3 接后端 AI 聚合分析）
+const growthDims = computed(() => {
+  const total = sess.list.length;
+  const finished = sess.list.filter((s) => s.report_ready).length;
+  const myCount = assetShelf.myAssets.length;
+  const favCount = assetShelf.assetIds.length + assetShelf.bundleIds.length;
+  return [
+    { key: "imagination", label: "想象力", value: Math.min(100, 30 + myCount * 12) },
+    { key: "expression",  label: "表达",   value: Math.min(100, 25 + total * 10) },
+    { key: "empathy",     label: "共情",   value: Math.min(100, 30 + favCount * 6) },
+    { key: "logic",       label: "逻辑",   value: Math.min(100, 20 + finished * 15) },
+    { key: "aesthetic",   label: "审美",   value: Math.min(100, 35 + myCount * 5 + favCount * 3) },
+    { key: "perseverance",label: "坚持",   value: Math.min(100, 25 + finished * 18) },
+  ];
+});
+const growthAdvice = computed(() => {
+  const dims = growthDims.value;
+  const weakest = [...dims].sort((a, b) => a.value - b.value)[0];
+  const strongest = [...dims].sort((a, b) => b.value - a.value)[0];
+  return `「${strongest.label}」是你家孩子的小强项，不妨多安排一些需要${strongest.label}的桥段；「${weakest.label}」还可以通过多玩几个互动段落来慢慢练。`;
+});
+
+function hexPoints(radius: number): string[] {
+  const pts: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI * 2 * i) / 6 - Math.PI / 2;
+    pts.push(`${(Math.cos(a) * radius).toFixed(1)},${(Math.sin(a) * radius).toFixed(1)}`);
+  }
+  return pts;
+}
+function labelPoint(i: number, radius: number): { x: number; y: number } {
+  const a = (Math.PI * 2 * i) / 6 - Math.PI / 2;
+  return { x: Math.cos(a) * radius, y: Math.sin(a) * radius + 4 };
+}
+function radarPoints(): string[] {
+  return growthDims.value.map((d, i) => {
+    const a = (Math.PI * 2 * i) / 6 - Math.PI / 2;
+    const r = (d.value / 100) * 100;
+    return `${(Math.cos(a) * r).toFixed(1)},${(Math.sin(a) * r).toFixed(1)}`;
+  });
+}
+
 const sessionsByStory = computed(() => {
   const g: Record<string, typeof sess.list> = {};
   for (const s of sess.list) (g[s.story_title] ??= []).push(s);
@@ -307,23 +364,55 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
             <div class="flex items-center justify-between mb-2">
               <div class="font-bold text-ink">{{ title }} <span class="text-ink-mute text-sm font-normal">· {{ items.length }} 次</span></div>
             </div>
-            <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
               <BaseCard
                 v-for="s in items"
                 :key="s.id"
                 hover
-                class="p-4 relative group cursor-pointer"
+                class="p-0 relative group cursor-pointer overflow-hidden"
                 @click="s.report_ready ? openReport(s.story_id) : openStory(s.story_id)"
               >
-                <div class="flex items-center gap-2 mb-1">
-                  <div class="text-2xl">🎬</div>
-                  <div class="text-sm font-medium truncate">{{ new Date(s.started_at).toLocaleString() }}</div>
+                <!-- 缩略图（优先 playState 最近 comic，回落故事 cover） -->
+                <div class="h-24 bg-gradient-to-br from-paper-deep to-gold-mute grid place-items-center overflow-hidden relative">
+                  <img
+                    v-if="sessionThumb(s)"
+                    :src="sessionThumb(s) || ''"
+                    class="absolute inset-0 w-full h-full object-cover"
+                    alt=""
+                  />
+                  <span v-else class="text-4xl">🎬</span>
+                  <!-- 状态胶囊 -->
+                  <span
+                    v-if="s.report_ready"
+                    class="absolute top-1.5 right-1.5 px-2 py-0.5 text-[10px] rounded-full bg-good/90 text-white"
+                  >✓ 已完成</span>
+                  <span
+                    v-else-if="sess.hasInProgress(s.story_id)"
+                    class="absolute top-1.5 right-1.5 px-2 py-0.5 text-[10px] rounded-full bg-accent/90 text-white"
+                  >进行中</span>
                 </div>
-                <div class="text-xs" :class="s.report_ready ? 'text-good' : 'text-ink-mute'">
-                  {{ s.report_ready ? "✓ 报告已生成 — 点查看" : "进行中 — 点继续" }}
+                <div class="p-3">
+                  <div class="text-xs text-ink-mute mb-0.5">
+                    {{ new Date(s.started_at).toLocaleDateString() }}
+                    {{ new Date(s.started_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) }}
+                  </div>
+                  <!-- 进度条：in-progress -->
+                  <div v-if="!s.report_ready && sess.hasInProgress(s.story_id)" class="mt-1">
+                    <div class="h-1.5 bg-paper-deep rounded-full overflow-hidden">
+                      <div
+                        class="h-full bg-gradient-to-r from-accent-soft to-accent-deep transition-all"
+                        :style="{ width: sessionProgress(s.story_id) + '%' }"
+                      ></div>
+                    </div>
+                    <div class="text-[11px] text-ink-mute mt-1">
+                      第 {{ (sess.getPlayState(s.story_id)?.cursor ?? 0) + 1 }} / {{ sess.getPlayState(s.story_id)?.flow.length ?? '?' }} 页
+                    </div>
+                  </div>
+                  <div v-else-if="s.report_ready" class="text-xs text-good">点击查看报告</div>
+                  <div v-else class="text-xs text-ink-mute">点击继续</div>
                 </div>
                 <button
-                  class="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center text-xs"
+                  class="absolute top-1.5 left-1.5 w-6 h-6 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center text-xs"
                   title="删除会话"
                   @click="(e) => onRemoveSession(s.id, e)"
                 >✕</button>
@@ -333,11 +422,11 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
         </template>
       </div>
 
-      <div v-else>
+      <div v-else-if="tab === 'assets'">
         <div class="mb-4 flex items-center justify-between flex-wrap gap-3">
           <BaseTabs v-model="assetSub" :tabs="assetSubs" variant="underline" />
           <div class="text-xs text-ink-mute">
-            收藏 <span class="font-semibold text-ink">{{ assetShelf.total }}</span> 件
+            共 <span class="font-semibold text-ink">{{ assetShelf.total }}</span> 件
           </div>
         </div>
 
@@ -352,6 +441,41 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
             </div>
           </div>
         </div>
+
+        <!-- 我的创作（自创道具，含互动页 AI 生成 / 上传 / 画板） -->
+        <template v-else-if="assetSub === 'mine'">
+          <div v-if="assetShelf.myAssets.length === 0" class="text-center py-16 bg-white rounded-[var(--radius-card)] border border-paper-edge">
+            <div class="text-5xl mb-2">🎨</div>
+            <div class="font-bold text-ink">还没有自创道具</div>
+            <div class="text-sm text-ink-soft mt-1">在互动页"造个新道具"里，AI 画好的 / 上传的道具都会出现在这里</div>
+          </div>
+          <div v-else>
+            <div class="text-sm font-semibold text-ink-soft mb-2">✨ 我画的道具 · {{ assetShelf.myAssets.length }}</div>
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+              <BaseCard
+                v-for="a in assetShelf.myAssets"
+                :key="a.id"
+                hover
+                class="overflow-hidden cursor-default relative group"
+              >
+                <div class="h-24 grid place-items-center bg-gradient-to-br from-paper to-gold-mute">
+                  <img :src="a.url" :alt="a.name" loading="lazy" class="max-w-[88%] max-h-[88%] object-contain drop-shadow-sm" />
+                </div>
+                <div class="p-2.5">
+                  <div class="font-semibold text-ink text-sm truncate">{{ a.name }}</div>
+                  <div class="text-[11px] text-ink-mute mt-0.5 truncate">
+                    {{ a.kind === 'character' ? '人物' : '道具' }} · {{ new Date(a.created_at).toLocaleDateString() }}
+                  </div>
+                </div>
+                <button
+                  class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center text-xs"
+                  title="删除"
+                  @click.stop="assetShelf.removeMyAsset(a.id); toast.push('已删除', 'success')"
+                >✕</button>
+              </BaseCard>
+            </div>
+          </div>
+        </template>
 
         <!-- 我的收藏 -->
         <template v-else-if="assetSub === 'favorites'">
@@ -488,6 +612,67 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
             </div>
           </div>
         </template>
+      </div>
+
+      <!-- E4 成长报告 Tab —— 维度雷达图（占位实现：基于 sess.list 计算近似值；阶段 3 接后端聚合） -->
+      <div v-else-if="tab === 'growth'">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div>
+            <div class="font-bold text-ink text-lg">📈 成长报告</div>
+            <div class="text-xs text-ink-mute mt-0.5">基于你玩过的 {{ sess.list.length }} 次会话，AI 会分析小朋友在每个维度的表现</div>
+          </div>
+          <BaseButton variant="soft" size="sm" pill @click="toast.push('深度分析接入后端聚合后可用（阶段 3）', 'info')">
+            🔄 立即分析与建议
+          </BaseButton>
+        </div>
+        <BaseCard class="p-6">
+          <div class="grid md:grid-cols-[260px_1fr] gap-6 items-center">
+            <!-- SVG 六维雷达图 -->
+            <div class="grid place-items-center">
+              <svg viewBox="-130 -130 260 260" class="w-56 h-56">
+                <!-- 背景同心六边形 -->
+                <g v-for="(r, i) in [0.25, 0.5, 0.75, 1]" :key="i"
+                   :stroke-opacity="i === 3 ? 0.5 : 0.2" stroke="#d59339" fill="none">
+                  <polygon :points="hexPoints(100 * r).join(' ')" />
+                </g>
+                <!-- 轴线 -->
+                <g stroke="#d59339" stroke-opacity="0.25">
+                  <line v-for="(p, i) in hexPoints(100)" :key="i" :x1="0" :y1="0" :x2="p.split(',')[0]" :y2="p.split(',')[1]" />
+                </g>
+                <!-- 数据多边形 -->
+                <polygon
+                  :points="radarPoints().join(' ')"
+                  fill="rgba(255, 203, 99, 0.35)"
+                  stroke="#e35a1f"
+                  stroke-width="2"
+                />
+                <!-- 维度标签 -->
+                <g font-size="11" fill="#7a5f40" text-anchor="middle">
+                  <text v-for="(d, i) in growthDims" :key="i"
+                        :x="labelPoint(i, 116).x" :y="labelPoint(i, 116).y">{{ d.label }}</text>
+                </g>
+              </svg>
+            </div>
+            <!-- 维度列表 + 得分 -->
+            <div class="space-y-2">
+              <div
+                v-for="d in growthDims"
+                :key="d.key"
+                class="flex items-center gap-3"
+              >
+                <div class="w-20 text-sm text-ink font-semibold">{{ d.label }}</div>
+                <div class="flex-1 h-2 bg-paper-deep rounded-full overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-gold to-accent-deep transition-all"
+                       :style="{ width: d.value + '%' }"></div>
+                </div>
+                <div class="w-10 text-right text-sm text-ink-soft">{{ d.value }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-6 p-3 bg-paper rounded-lg text-sm text-ink-soft border border-dashed border-paper-edge">
+            💡 <span class="font-medium">小建议：</span>{{ growthAdvice }}
+          </div>
+        </BaseCard>
       </div>
     </div>
 
