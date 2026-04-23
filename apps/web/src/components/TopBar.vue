@@ -3,14 +3,12 @@ import { RouterLink, useRoute, useRouter } from "vue-router";
 import BaseButton from "./BaseButton.vue";
 import { useUserStore } from "@/stores/user";
 import { useStoryStore } from "@/stores/story";
-import { useToastStore } from "@/stores/toast";
 import { computed } from "vue";
 
 const route = useRoute();
 const router = useRouter();
 const user = useUserStore();
 const story = useStoryStore();
-const toast = useToastStore();
 
 const showTimeline = computed(() => route.name === "story" && story.flow?.length > 0);
 
@@ -50,9 +48,8 @@ function onJump(i: number) {
 }
 
 function onStoreClick() {
-  if (route.name === "library") return;
-  toast.push("资产商城即将上线，暂跳转到书架", "info");
-  router.push("/library");
+  if (route.name === "store") return;
+  router.push("/store");
 }
 </script>
 

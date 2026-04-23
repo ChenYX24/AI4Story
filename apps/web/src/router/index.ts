@@ -3,6 +3,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 const routes: RouteRecordRaw[] = [
   { path: "/", name: "landing", component: () => import("@/pages/LandingPage.vue") },
   { path: "/library", name: "library", component: () => import("@/pages/LibraryPage.vue") },
+  { path: "/store", name: "store", component: () => import("@/pages/StorePage.vue") },
   {
     path: "/story/:id",
     name: "story",

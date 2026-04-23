@@ -672,6 +672,13 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
 
 const sidebarChars = computed(() => props.scene.characters || []);
 const sidebarProps = computed(() => props.scene.props || []);
+
+// 暴露给父组件（StoryPage）—— 让它把"完成/清空"按钮放到 book card 底部固定位置
+defineExpose({
+  askComplete,
+  clearOps: () => { ops.value = []; },
+  isGenerating: () => generating.value,
+});
 </script>
 
 <template>
@@ -722,7 +729,7 @@ const sidebarProps = computed(() => props.scene.props || []);
         @click.self="onStageBackgroundClick"
         style="touch-action: none;"
       >
-        <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-contain pointer-events-none bg-paper-deep" alt="背景" />
+        <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="背景" />
 
         <!-- 已放置的物体 -->
         <div
@@ -984,13 +991,7 @@ const sidebarProps = computed(() => props.scene.props || []);
       </div>
     </Teleport>
 
-    <!-- 完成（ops 序列已移到右侧 aside） -->
-    <div class="mt-5 flex justify-end gap-2 pt-4 border-t border-dashed border-paper-edge">
-      <BaseButton variant="soft" size="sm" pill :disabled="generating || !ops.length" @click="ops = []">清空动作</BaseButton>
-      <BaseButton size="sm" pill :disabled="!ops.length || generating" @click="askComplete">
-        {{ generating ? "AI 正在画…" : `✨ 完成 (${ops.length}) 并生成下一幕` }}
-      </BaseButton>
-    </div>
+    <!-- 完成按钮已挪到 StoryPage 书本 card 底部（通过 defineExpose），确保永不被 overflow 截 -->
 
     <!-- 摄像头 modal -->
     <Teleport to="body">

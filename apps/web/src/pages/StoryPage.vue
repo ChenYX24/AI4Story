@@ -396,6 +396,12 @@ const interactiveOps = ref<Operation[]>([]);
 function removeInteractiveOp(i: number) {
   interactiveOps.value.splice(i, 1);
 }
+
+// ref 拿到 InteractiveView 以调用暴露方法（完成/清空）
+const interactiveRef = ref<{ askComplete: () => void; clearOps: () => void; isGenerating: () => boolean } | null>(null);
+function callInteractiveComplete() { interactiveRef.value?.askComplete(); }
+function callInteractiveClear() { interactiveRef.value?.clearOps(); }
+const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?.() ?? false);
 </script>
 
 <template>
@@ -501,6 +507,7 @@ function removeInteractiveOp(i: number) {
               <!-- 互动：拖拽 + ops + 调 /api/interact ;  loading 底图先用下一幕的叙事图 -->
               <template v-else>
                 <InteractiveView
+                  ref="interactiveRef"
                   v-model:ops="interactiveOps"
                   :scene="scene"
                   :story-id="props.id"
@@ -509,11 +516,8 @@ function removeInteractiveOp(i: number) {
                 />
               </template>
 
-              <!-- 底部操作条 — interactive 场景时由 InteractiveView 自带按钮，外层不再重复 -->
-              <div
-                v-if="dynamicNode || node?.type === 'narrative'"
-                class="mt-6 flex flex-wrap gap-2 justify-between items-center pt-4 border-t border-dashed border-paper-edge"
-              >
+              <!-- 底部操作条 —— 永远渲染，保证"完成"按钮在视口底部不被 overflow 截 -->
+              <div class="mt-3 flex flex-wrap gap-2 justify-between items-center pt-3 border-t border-dashed border-paper-edge">
                 <div class="flex gap-2 flex-wrap">
                   <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0" @click="turnPage('prev')">⬅ 上一页</BaseButton>
                   <BaseButton
@@ -532,9 +536,21 @@ function removeInteractiveOp(i: number) {
                     @click="advanceLine"
                   >🔊 下一句</BaseButton>
                 </div>
-                <BaseButton size="sm" pill @click="turnPage('next')">
-                  {{ isLast ? "📊 查看报告" : "翻下一页 ⏭" }}
-                </BaseButton>
+                <template v-if="node?.type === 'interactive' && !dynamicNode">
+                  <BaseButton
+                    size="sm"
+                    pill
+                    :disabled="interactiveOps.length === 0 || interactiveGenerating"
+                    @click="callInteractiveComplete"
+                  >
+                    {{ interactiveGenerating ? "AI 正在画…" : `✨ 完成 (${interactiveOps.length}) 并生成下一幕` }}
+                  </BaseButton>
+                </template>
+                <template v-else>
+                  <BaseButton size="sm" pill @click="turnPage('next')">
+                    {{ isLast ? "📊 查看报告" : "翻下一页 ⏭" }}
+                  </BaseButton>
+                </template>
               </div>
             </div>
           </div>
@@ -558,8 +574,14 @@ function removeInteractiveOp(i: number) {
         <!-- 互动节点：动作序列卡（从舞台侧挪过来，方便和对话一起看） -->
         <BaseCard v-if="node?.type === 'interactive' && !dynamicNode" class="p-4">
           <div class="text-sm font-semibold mb-2 flex items-center justify-between">
-            <span>🎬 动作序列</span>
-            <span v-if="interactiveOps.length" class="text-xs text-ink-mute font-normal">共 {{ interactiveOps.length }}</span>
+            <span>🎬 动作序列<span v-if="interactiveOps.length" class="text-xs text-ink-mute font-normal ml-1">· 共 {{ interactiveOps.length }}</span></span>
+            <button
+              v-if="interactiveOps.length > 0"
+              class="text-[11px] px-2 py-0.5 rounded-full bg-paper-deep hover:bg-warn/15 text-ink-soft hover:text-warn transition"
+              :disabled="interactiveGenerating"
+              title="清空所有动作"
+              @click="callInteractiveClear"
+            >🗑 清空</button>
           </div>
           <div v-if="!interactiveOps.length" class="text-xs text-ink-mute text-center py-3 border border-dashed border-paper-edge rounded">
             还没安排动作<br />选两个对象 → 写"做什么"
