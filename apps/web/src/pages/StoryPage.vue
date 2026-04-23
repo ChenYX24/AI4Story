@@ -469,52 +469,56 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
               style="background: linear-gradient(90deg, rgba(122,90,54,.35), transparent);"
             ></div>
 
-            <div class="p-4 sm:p-6 flex flex-col h-full min-h-0">
-              <div class="flex items-center justify-between mb-4">
+            <!-- grid 3 行：header(auto) / main(1fr) / footer(auto)；footer 永不被截 -->
+            <div class="p-4 sm:p-6 grid h-full min-h-0 gap-0" style="grid-template-rows: auto minmax(0,1fr) auto;">
+              <div class="flex items-center justify-between mb-3">
                 <div class="text-xs tracking-wider text-ink-mute">
                   第 {{ (node?.sceneIdx ?? 0) }} 页 · {{ node?.type === "narrative" ? "叙事" : "互动" }}
                 </div>
                 <div class="text-xs text-ink-mute">{{ store.cursor + 1 }} / {{ store.flow.length }}</div>
               </div>
 
-              <!-- ✨ Dynamic narrative —— absolute 填充 + object-contain 保证不溢出 -->
-              <template v-if="dynamicNode">
-                <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper narrative-magic">
-                  <img
-                    :src="dynamicNode.comic_url"
-                    class="absolute inset-0 w-full h-full object-contain z-10"
-                    alt="新段落"
-                  />
-                </div>
-                <div class="mt-2 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30">
-                  ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
-                </div>
-              </template>
+              <!-- 中间主区：占满剩余 1fr；内部 flex-col 让各分支填满 -->
+              <div class="min-h-0 flex flex-col overflow-hidden">
+                <!-- ✨ Dynamic narrative -->
+                <template v-if="dynamicNode">
+                  <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper narrative-magic">
+                    <img
+                      :src="dynamicNode.comic_url"
+                      class="absolute inset-0 w-full h-full object-contain z-10"
+                      alt="新段落"
+                    />
+                  </div>
+                  <div class="mt-2 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30 shrink-0">
+                    ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
+                  </div>
+                </template>
 
-              <!-- 叙事：absolute 填充 + object-contain —— 图一定完整显示不溢出 -->
-              <template v-else-if="node?.type === 'narrative'">
-                <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper">
-                  <img
-                    v-if="scene.comic_url"
-                    :src="scene.comic_url"
-                    alt="场景连环画"
-                    class="absolute inset-0 w-full h-full object-contain"
-                  />
-                  <div v-else class="absolute inset-0 grid place-items-center text-ink-mute">（此幕无图）</div>
-                </div>
-              </template>
+                <!-- 叙事 -->
+                <template v-else-if="node?.type === 'narrative'">
+                  <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper">
+                    <img
+                      v-if="scene.comic_url"
+                      :src="scene.comic_url"
+                      alt="场景连环画"
+                      class="absolute inset-0 w-full h-full object-contain"
+                    />
+                    <div v-else class="absolute inset-0 grid place-items-center text-ink-mute">（此幕无图）</div>
+                  </div>
+                </template>
 
-              <!-- 互动：拖拽 + ops + 调 /api/interact ;  loading 底图先用下一幕的叙事图 -->
-              <template v-else>
-                <InteractiveView
-                  ref="interactiveRef"
-                  v-model:ops="interactiveOps"
-                  :scene="scene"
-                  :story-id="props.id"
-                  :next-comic-url="nextPreviewComicUrl"
-                  @done="onInteractDone"
-                />
-              </template>
+                <!-- 互动 -->
+                <template v-else>
+                  <InteractiveView
+                    ref="interactiveRef"
+                    v-model:ops="interactiveOps"
+                    :scene="scene"
+                    :story-id="props.id"
+                    :next-comic-url="nextPreviewComicUrl"
+                    @done="onInteractDone"
+                  />
+                </template>
+              </div>
 
               <!-- 底部操作条 —— 永远渲染，保证"完成"按钮在视口底部不被 overflow 截 -->
               <div class="mt-3 flex flex-wrap gap-2 justify-between items-center pt-3 border-t border-dashed border-paper-edge">
@@ -558,7 +562,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
       </div>
 
       <!-- 右侧：摘要 + 旁白流 + 聊天 —— 占满 grid cell 高度，内部自滚动 -->
-      <aside class="space-y-3 h-full min-h-0 overflow-y-auto no-scrollbar aside-fade-mask pr-1">
+      <aside class="space-y-3 h-full min-h-0 overflow-y-auto no-scrollbar pr-1">
         <BaseCard class="p-5">
           <h2 class="font-display text-lg font-bold m-0 mb-1">{{ scene?.title || store.current?.title || "故事" }}</h2>
           <p class="text-sm text-ink-soft leading-relaxed m-0">
