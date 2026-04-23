@@ -716,10 +716,10 @@ defineExpose({
     </Transition>
 
     <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0 overflow-hidden" style="grid-template-rows: minmax(0, 1fr);">
-      <!-- 舞台 —— 图决定 stage 高度：图用 w-full + h-auto 保持原始 aspect；stage 顶部对齐于 grid cell -->
+      <!-- 舞台 —— 填满 grid cell，图 object-contain 完整显示，顶部对齐（留白在底部） -->
       <div
         ref="stageRef"
-        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none w-full max-h-full self-start"
+        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none h-full w-full min-h-0"
         style="touch-action: none;"
         @drop="onStageDrop"
         @dragover="allowDrop"
@@ -729,7 +729,7 @@ defineExpose({
         @pointerleave="() => onStagePointerUp()"
         @click.self="onStageBackgroundClick"
       >
-        <img v-if="scene.background_url" :src="scene.background_url" class="block w-full h-auto pointer-events-none" alt="背景" />
+        <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-contain object-top pointer-events-none" alt="背景" />
 
         <!-- 已放置的物体 -->
         <div
@@ -824,9 +824,8 @@ defineExpose({
         </div>
       </div>
 
-      <!-- 侧边：角色 / 道具 / 我造的道具（内部可滚动，永远能看到造新道具区） -->
-      <aside class="bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-auto flex flex-col gap-3 h-full min-h-0"
-             style="scrollbar-width: thin;">
+      <!-- 侧边：角色 / 道具 / 我造的道具（内部可滚动，显式滚动条） -->
+      <aside class="interact-aside bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-scroll flex flex-col gap-3 h-full min-h-0">
         <div class="text-xs font-bold text-ink-soft mb-2">👥 角色（拖到舞台）</div>
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
@@ -1078,4 +1077,17 @@ defineExpose({
 <style scoped>
 .modal-enter-active, .modal-leave-active { transition: all 0.25s ease; }
 .modal-enter-from, .modal-leave-to { opacity: 0; transform: scale(0.98); }
+
+/* 互动页侧边栏显式滚动条 —— 暗示"下面还有内容" */
+.interact-aside {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(213, 147, 57, 0.45) transparent;
+}
+.interact-aside::-webkit-scrollbar { width: 8px; }
+.interact-aside::-webkit-scrollbar-track { background: rgba(247, 231, 201, 0.3); border-radius: 4px; }
+.interact-aside::-webkit-scrollbar-thumb {
+  background: rgba(213, 147, 57, 0.55);
+  border-radius: 4px;
+}
+.interact-aside::-webkit-scrollbar-thumb:hover { background: rgba(213, 147, 57, 0.85); }
 </style>
