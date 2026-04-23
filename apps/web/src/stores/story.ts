@@ -1,7 +1,13 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { Scene, StoryCard, StoryDetail, Interaction, CustomProp, Operation } from "@/api/types";
+import type { Scene, StoryCard, StoryDetail, Interaction, CustomProp, Operation, InteractResponse } from "@/api/types";
 import { fetchStories, fetchStory, fetchScene } from "@/api/endpoints";
+
+export interface DynamicNodeRecord {
+  payload: InteractResponse;
+  snapOps: Operation[];
+  snapProps: CustomProp[];
+}
 
 export const useStoryStore = defineStore("story", () => {
   const list = ref<StoryCard[]>([]);
@@ -17,6 +23,16 @@ export const useStoryStore = defineStore("story", () => {
   const interactions = ref<Interaction[]>([]);
   // 当前 story 内累计 custom props + comic urls（共享 + 分享面板用）
   const comicUrls = ref<string[]>([]);
+  // 动态节点持久化：sceneIdx → 该 interactive 场景已生成的 dynamic 结果（可切换回看）
+  const dynamicByScene = ref<Map<number, DynamicNodeRecord>>(new Map());
+
+  function recordDynamic(sceneIdx: number, record: DynamicNodeRecord) {
+    dynamicByScene.value.set(sceneIdx, {
+      payload: record.payload,
+      snapOps: record.snapOps.map((o) => ({ ...o })),
+      snapProps: record.snapProps.map((p) => ({ ...p })),
+    });
+  }
 
   function addInteraction(snap: {
     scene_idx: number;
@@ -82,13 +98,15 @@ export const useStoryStore = defineStore("story", () => {
     sceneCache.value.clear();
     interactions.value = [];
     comicUrls.value = [];
+    dynamicByScene.value.clear();
   }
 
   return {
     list, current, flow, cursor, highestUnlocked,
     sceneCache,
     interactions, comicUrls,
+    dynamicByScene,
     loadList, loadStory, ensureScene, reset,
-    addInteraction, trackComic,
+    addInteraction, trackComic, recordDynamic,
   };
 });

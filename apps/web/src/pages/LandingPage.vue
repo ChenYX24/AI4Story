@@ -2,11 +2,11 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import CinemaHero from "@/components/CinemaHero.vue";
+import TopBar from "@/components/TopBar.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
 import BaseModal from "@/components/BaseModal.vue";
-import { useUserStore } from "@/stores/user";
 import { useToastStore } from "@/stores/toast";
 import { useShelfStore } from "@/stores/shelf";
 import { useAssetShelfStore } from "@/stores/assetShelf";
@@ -19,7 +19,6 @@ import {
 import type { PublicStoryCard, PublicAsset, PublicAssetBundle } from "@/api/types";
 
 const router = useRouter();
-const user = useUserStore();
 const toast = useToastStore();
 const shelf = useShelfStore();
 const assetShelf = useAssetShelfStore();
@@ -158,17 +157,10 @@ async function submitSketch() {
 </script>
 
 <template>
-  <div class="fade-in">
-    <!-- 胶片 hero -->
-    <CinemaHero @explore="scrollToCreate">
-      <template #overlay>
-        <!-- 右上 FAB：进入 profile -->
-        <button
-          class="absolute top-14 right-6 px-4 py-2 rounded-full text-sm font-semibold text-gold-mute border border-gold/60 bg-gold/10 hover:bg-gold/25 hover:text-white backdrop-blur transition z-10"
-          @click="router.push('/profile')"
-        >👤 {{ user.isAuthed ? user.user?.nickname : "我的" }}</button>
-      </template>
-    </CinemaHero>
+  <div class="fade-in pt-14">
+    <TopBar />
+    <!-- 胶片 hero（顶栏右侧已有"我的"，这里不再放 FAB） -->
+    <CinemaHero @explore="scrollToCreate" />
 
     <!-- 创作入口 -->
     <section id="landing-create" class="max-w-[960px] mx-auto px-5 -mt-10 relative z-10">

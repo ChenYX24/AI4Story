@@ -38,7 +38,7 @@ function stopLoadingHints() {
   loadingHint.value = "";
 }
 
-// nextComicUrl: 下一幕的叙事图，loading 时做模糊底图（后端未来会给"本幕对应的叙事补充图"，届时替换）
+// nextComicUrl: 下一幕的叙事图，loading 时做背景图（后端未来会给"本幕对应的叙事补充图"，届时替换）
 const props = defineProps<{ scene: Scene; storyId: string; nextComicUrl?: string }>();
 const emit = defineEmits<{
   (e: "done", payload: InteractResponse, snap: {
@@ -46,6 +46,8 @@ const emit = defineEmits<{
     custom_props: CustomProp[];
   }): void;
 }>();
+// 双向绑定 ops，让父组件（StoryPage 右侧对话栏）也能展示 + 删除
+const ops = defineModel<Operation[]>("ops", { default: () => [] });
 
 const toast = useToastStore();
 const sessions = useSessionStore();
@@ -62,10 +64,12 @@ interface PlacedItem {
   scale: number;
   rotation: number;
   isCustom?: boolean;
+  // 道具 AI 生成中：显示 spinner + 参考图占位
+  loading?: boolean;
+  refImage?: string;   // 占位期间展示的参考图（上传/画板/拍照的原图）
 }
 
 const placed = ref<PlacedItem[]>([]);
-const ops = ref<Operation[]>([]);
 const customProps = ref<CustomProp[]>([]);
 const generating = ref(false);
 // C7: 生成下一幕的二次确认
@@ -372,7 +376,6 @@ function addFreeformOp() {
   freeformText.value = "";
 }
 
-function removeOp(i: number) { ops.value.splice(i, 1); }
 function removePlaced(id: string) {
   placed.value = placed.value.filter((p) => p.id !== id);
   if (selA.value?.id === id) selA.value = null;
@@ -441,31 +444,43 @@ function onStageKey(e: KeyboardEvent) {
   }
 }
 
-// ---- 创建自定义道具 ----
+// ---- 创建自定义道具 —— 后台生成：立即占位，完成后原地替换 url ----
 async function addCustomProp() {
   const name = newPropName.value.trim();
   if (!name) return;
   newPropName.value = "";
+  const tempId = `custom-${name}-${Date.now()}`;
+  // 占位（无参考图）
+  placed.value.push({
+    id: tempId,
+    name,
+    kind: "object",
+    url: undefined,
+    x: 0.5, y: 0.5,
+    scale: 1, rotation: 0,
+    isCustom: true,
+    loading: true,
+  });
+  toast.push(`🎨 「${name}」正在后台作画…`, "info");
   try {
     const r = await createProp({
       session_id: sessionId.value,
       scene_idx: props.scene.index,
       name,
     });
+    const item = placed.value.find((p) => p.id === tempId);
+    if (item) {
+      item.url = r.url;
+      item.custom_url = r.url;
+      item.name = r.name;
+      item.loading = false;
+    }
     customProps.value.push({ name: r.name, url: r.url });
-    placed.value.push({
-      id: `custom-${r.name}-${Date.now()}`,
-      name: r.name,
-      kind: "object",
-      url: r.url,
-      custom_url: r.url,
-      x: 0.5, y: 0.5,
-      scale: 1, rotation: 0,
-      isCustom: true,
-    });
-    toast.push(`✨ 「${r.name}」造好啦`, "success");
+    toast.push(`✨ 「${r.name}」画好啦`, "success");
   } catch (e: any) {
-    toast.push(`新道具创建失败：${e.message}`, "error");
+    // 失败：移除占位
+    placed.value = placed.value.filter((p) => p.id !== tempId);
+    toast.push(`新道具创建失败：${e?.message || e}`, "error");
   }
 }
 
@@ -571,7 +586,6 @@ async function onSketchDone(dataUrl: string) {
 const propModalOpen = ref(false);
 const propModalRefUrl = ref("");
 const propModalDefaultName = ref("");
-const propModalBusy = ref(false);
 
 async function addCustomFromImage(dataUrl: string, defaultName: string) {
   try {
@@ -585,49 +599,61 @@ async function addCustomFromImage(dataUrl: string, defaultName: string) {
 }
 
 async function onPropModalSubmit(payload: { name: string; description: string; skipAi: boolean }) {
-  propModalBusy.value = true;
-  try {
-    if (payload.skipAi) {
-      // 直接用原图作为道具，不调 Seedream
-      customProps.value.push({ name: payload.name, url: propModalRefUrl.value });
-      placed.value.push({
-        id: `custom-raw-${Date.now()}`,
-        name: payload.name,
-        kind: "object",
-        url: propModalRefUrl.value,
-        custom_url: propModalRefUrl.value,
-        x: 0.5, y: 0.5, scale: 1, rotation: 0,
-        isCustom: true,
-      });
-      toast.push(`✅ 「${payload.name}」已加到道具库`, "success");
-      propModalOpen.value = false;
-      return;
-    }
-    // AI 再画一个（Seedream 走 text prompt + 参考提示）
-    const r = await createProp({
-      session_id: sessionId.value,
-      scene_idx: props.scene.index,
-      name: payload.name,
-      description: payload.description || undefined,
-      reference_image_url: propModalRefUrl.value,
-      skip_ai: false,
-    });
-    customProps.value.push({ name: r.name, url: r.url });
+  // skipAi：直接用原图，瞬间完成
+  if (payload.skipAi) {
+    customProps.value.push({ name: payload.name, url: propModalRefUrl.value });
     placed.value.push({
-      id: `custom-ai-${Date.now()}`,
-      name: r.name,
+      id: `custom-raw-${Date.now()}`,
+      name: payload.name,
       kind: "object",
-      url: r.url,
-      custom_url: r.url,
+      url: propModalRefUrl.value,
+      custom_url: propModalRefUrl.value,
       x: 0.5, y: 0.5, scale: 1, rotation: 0,
       isCustom: true,
     });
-    toast.push(`✨ AI 画的「${r.name}」好啦`, "success");
+    toast.push(`✅ 「${payload.name}」已加到道具库`, "success");
     propModalOpen.value = false;
+    return;
+  }
+  // AI 路径：立即关 modal + 占位卡进场，createProp 后台进行，完成后原地替换
+  const tempId = `custom-ai-${Date.now()}`;
+  const refImage = propModalRefUrl.value;
+  const name = payload.name;
+  const description = payload.description;
+  propModalOpen.value = false;
+  placed.value.push({
+    id: tempId,
+    name,
+    kind: "object",
+    url: undefined,
+    refImage,
+    x: 0.5, y: 0.5, scale: 1, rotation: 0,
+    isCustom: true,
+    loading: true,
+  });
+  toast.push(`🎨 「${name}」在后台作画，稍等片刻…`, "info");
+  try {
+    const r = await createProp({
+      session_id: sessionId.value,
+      scene_idx: props.scene.index,
+      name,
+      description: description || undefined,
+      reference_image_url: refImage,
+      skip_ai: false,
+    });
+    const item = placed.value.find((p) => p.id === tempId);
+    if (item) {
+      item.url = r.url;
+      item.custom_url = r.url;
+      item.name = r.name;
+      item.loading = false;
+      item.refImage = undefined;
+    }
+    customProps.value.push({ name: r.name, url: r.url });
+    toast.push(`✨ AI 画的「${r.name}」好啦`, "success");
   } catch (e: any) {
+    placed.value = placed.value.filter((p) => p.id !== tempId);
     toast.push(`生成失败：${e?.message || e}`, "error");
-  } finally {
-    propModalBusy.value = false;
   }
 }
 
@@ -645,29 +671,25 @@ const sidebarProps = computed(() => props.scene.props || []);
       <span class="hidden md:inline text-ink-mute">把侧边的道具拖进舞台 · 点选两个对象再写"做什么" · 多次安排后点完成</span>
     </div>
 
-    <!-- 生图 loading 覆盖：C5 — 叙事图作背景（模糊 + 暗化），保持孩子有东西可看 -->
+    <!-- 生图 loading 覆盖：显示下一幕叙事图原图（无蒙版），前景只叠一张小 loading 卡 -->
     <Transition name="modal">
       <div
         v-if="generating"
         class="absolute inset-0 z-30 rounded-xl overflow-hidden"
       >
-        <!-- 底层：优先用下一幕叙事图（loading 感更"剧情期待"）；回落到本幕 comic_url -->
         <img
           v-if="nextComicUrl || scene.comic_url"
           :src="nextComicUrl || scene.comic_url"
           class="absolute inset-0 w-full h-full object-cover"
-          style="filter: blur(14px) brightness(0.55) saturate(1.1);"
-          alt=""
+          alt="下一幕预览"
         />
         <div v-else class="absolute inset-0 bg-paper"></div>
-        <div class="absolute inset-0 bg-paper/55 backdrop-blur-sm"></div>
-        <!-- 前景卡片 -->
-        <div class="relative w-full h-full grid place-items-center">
-          <div class="text-center px-6 py-5 bg-white/95 rounded-2xl shadow-[var(--shadow-card-lg)] border border-paper-edge max-w-sm fade-in">
-            <div class="mx-auto mb-3 w-12 h-12 border-4 border-gold-mute border-t-accent rounded-full animate-spin"></div>
-            <div class="font-display font-bold text-lg">AI 正在作画…</div>
-            <div class="text-sm text-ink-soft mt-2 animate-pulse">{{ loadingHint }}</div>
-            <div class="text-xs text-ink-mute mt-3">预计 30-90 秒，保持网络通畅</div>
+        <!-- 前景 loading 小卡（底部居中，不遮挡剧情图） -->
+        <div class="absolute left-1/2 bottom-6 -translate-x-1/2 px-5 py-3 bg-white/92 rounded-full shadow-[var(--shadow-card-lg)] border border-paper-edge flex items-center gap-3 fade-in max-w-[90%]">
+          <div class="w-6 h-6 border-[3px] border-gold-mute border-t-accent rounded-full animate-spin shrink-0"></div>
+          <div class="min-w-0">
+            <div class="font-display font-bold text-sm leading-tight">AI 正在作画…</div>
+            <div class="text-[11px] text-ink-soft animate-pulse truncate">{{ loadingHint }}</div>
           </div>
         </div>
       </div>
@@ -714,8 +736,24 @@ const sidebarProps = computed(() => props.scene.props || []);
           ></div>
 
           <!-- 本体：旋转只作用到图片 / 标签，不动外框/工具条 -->
-          <div :style="{ transform: `rotate(${item.rotation}deg)` }">
-            <img v-if="item.url" :src="item.url" :alt="item.name" class="w-full h-auto pointer-events-none drop-shadow-md" />
+          <div :style="{ transform: `rotate(${item.rotation}deg)` }" class="relative">
+            <!-- 完成：最终 url -->
+            <img v-if="item.url && !item.loading" :src="item.url" :alt="item.name" class="w-full h-auto pointer-events-none drop-shadow-md" />
+            <!-- AI 作画中占位 -->
+            <div v-else-if="item.loading" class="w-full aspect-square relative rounded-xl overflow-hidden bg-white/80 shadow-md">
+              <img
+                v-if="item.refImage"
+                :src="item.refImage"
+                class="absolute inset-0 w-full h-full object-cover"
+                style="filter: blur(3px) saturate(0.5) opacity(0.6);"
+                alt=""
+              />
+              <div class="absolute inset-0 bg-white/50"></div>
+              <div class="absolute inset-0 grid place-items-center">
+                <div class="w-8 h-8 border-[3px] border-gold-mute border-t-accent rounded-full animate-spin"></div>
+              </div>
+              <div class="absolute bottom-0 inset-x-0 text-[9px] text-center text-ink-soft bg-white/80 py-0.5">AI 作画中…</div>
+            </div>
             <div v-else class="w-full aspect-square grid place-items-center text-3xl bg-white/80 rounded-full">
               {{ item.kind === "character" ? "🧑" : "🎁" }}
             </div>
@@ -794,31 +832,7 @@ const sidebarProps = computed(() => props.scene.props || []);
             <div class="text-[10px] mt-1 text-ink truncate w-full">{{ p.name }}</div>
           </div>
         </div>
-        <!-- 动作序列（C6：右侧，紧贴角色/道具库下方） -->
-        <div class="border-t border-paper-edge pt-2">
-          <div class="text-xs font-bold text-ink-soft mb-2 flex items-center justify-between">
-            <span>🎬 动作序列</span>
-            <span v-if="ops.length" class="text-[10px] text-ink-mute font-normal">共 {{ ops.length }}</span>
-          </div>
-          <div v-if="!ops.length" class="text-[11px] text-ink-mute text-center py-3 border border-dashed border-paper-edge rounded">
-            还没安排动作<br />选两个对象 → 写"做什么"
-          </div>
-          <div v-else class="space-y-1.5">
-            <div
-              v-for="(o, i) in ops"
-              :key="i"
-              class="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-accent/10 border border-accent/25 text-[11px] leading-snug"
-            >
-              <span class="font-semibold text-accent-deep shrink-0">{{ i + 1 }}.</span>
-              <span class="flex-1 text-ink break-words">
-                <template v-if="o.subject && o.target">「{{ o.subject }}」对「{{ o.target }}」：{{ o.action }}</template>
-                <template v-else-if="o.subject">「{{ o.subject }}」：{{ o.action }}</template>
-                <template v-else>{{ o.action }}</template>
-              </span>
-              <button class="text-warn hover:text-warn/70 shrink-0" @click="removeOp(i)">×</button>
-            </div>
-          </div>
-        </div>
+        <!-- 动作序列已挪到右侧对话栏（StoryPage aside） -->
 
         <!-- 创建新道具 -->
         <div class="border-t border-paper-edge pt-2 space-y-2">

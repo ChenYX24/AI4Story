@@ -109,7 +109,7 @@ async function onDelete(id: string, e: MouseEvent) {
 </script>
 
 <template>
-  <div>
+  <div class="pt-14">
     <TopBar />
     <div class="max-w-[1100px] mx-auto px-5 py-8 fade-in">
       <div class="flex items-center justify-between mb-6 flex-wrap gap-3">

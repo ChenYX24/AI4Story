@@ -11,7 +11,7 @@ import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import { postChat } from "@/api/endpoints";
-import type { Scene, InteractResponse } from "@/api/types";
+import type { Scene, InteractResponse, Operation } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -48,12 +48,25 @@ async function loadCursor(idx: number) {
     node.visited = true;
     lineCursor.value = 0;
     chatLog.value = [];
-    // narrative 幕：并发预载 TTS audio
-    if (sc.type === "narrative" && sc.storyboard?.length) {
-      tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+
+    // 动态节点持久化：如果这一 interactive 场景之前玩过，恢复生成结果供"回看"
+    const persisted = store.dynamicByScene.get(node.sceneIdx);
+    if (node.type === "interactive" && persisted) {
+      dynamicNode.value = persisted.payload;
+      interactiveOps.value = [];
+      // dynamic 段落预载 TTS（和 onInteractDone 保持一致）
+      if (persisted.payload.storyboard?.length) {
+        tts.preload(persisted.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+      }
     } else {
-      tts.stop();
+      dynamicNode.value = null;
+      if (sc.type === "narrative" && sc.storyboard?.length) {
+        tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+      } else {
+        tts.stop();
+      }
     }
+
     // 进入动画
     flipIn.value = false;
     requestAnimationFrame(() => { flipIn.value = true; });
@@ -204,6 +217,14 @@ async function onInteractDone(
     dynamic_summary: payload.summary,
     comic_url: payload.comic_url,
   });
+  // 持久化这次 dynamic 生成结果，允许缩略图切换回看
+  if (scene.value?.index !== undefined) {
+    store.recordDynamic(scene.value.index, {
+      payload,
+      snapOps: snap.ops,
+      snapProps: snap.custom_props,
+    });
+  }
 
   flipping.value = "next";
   setTimeout(() => {
@@ -254,7 +275,27 @@ const node = computed(() => store.flow[store.cursor]);
 const isLast = computed(() => store.cursor === store.flow.length - 1);
 const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lineCursor.value));
 
-// 下一幕的 comic_url —— 传给互动页 loading 做模糊背景（用户 #6）
+// TopBar 缩略条 props：把已生成 dynamic 的 interactive 节点的缩略图覆盖为 dynamic.thumbnail_url
+const timelineItems = computed(() =>
+  store.flow.map((f) => {
+    const dyn = store.dynamicByScene.get(f.sceneIdx);
+    return {
+      sceneIdx: f.sceneIdx,
+      type: f.type,
+      visited: f.visited,
+      dynamicThumb: dyn?.payload.thumbnail_url || dyn?.payload.comic_url,
+    };
+  }),
+);
+
+// 重玩当前已生成的 dynamic 幕（清 dynamicNode，进入互动态）
+function replayInteractive() {
+  dynamicNode.value = null;
+  interactiveOps.value = [];
+  tts.stop();
+}
+
+// 下一幕的 comic_url —— 传给互动页 loading 做背景图（用户 #6）
 const nextPreviewComicUrl = computed<string | undefined>(() => {
   const nextIdx = store.cursor + 1;
   if (nextIdx >= store.flow.length) return undefined;
@@ -262,15 +303,20 @@ const nextPreviewComicUrl = computed<string | undefined>(() => {
   const cached = store.sceneCache?.get?.(nextNode.sceneIdx);
   return cached?.comic_url;
 });
+
+// 互动场景的 ops —— 与 InteractiveView 双向绑定（defineModel），在右侧对话栏展示 + 删除
+const interactiveOps = ref<Operation[]>([]);
+function removeInteractiveOp(i: number) {
+  interactiveOps.value.splice(i, 1);
+}
 </script>
 
 <template>
-  <div class="min-h-screen">
+  <div class="min-h-screen pt-14">
     <TopBar
       :cursor="store.cursor"
       :highest-unlocked="store.highestUnlocked"
-      :flow-items="store.flow"
-      @home="() => router.push('/library')"
+      :flow-items="timelineItems"
       @jump="(idx: number) => loadCursor(idx)"
     />
 
@@ -339,8 +385,15 @@ const nextPreviewComicUrl = computed<string | undefined>(() => {
                     alt="新段落"
                   />
                 </div>
-                <div class="mt-3 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30">
-                  ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
+                <div class="mt-3 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30 flex items-center justify-between gap-2 flex-wrap">
+                  <span>✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span></span>
+                  <BaseButton
+                    v-if="node?.type === 'interactive'"
+                    variant="ghost"
+                    size="sm"
+                    pill
+                    @click="replayInteractive"
+                  >↻ 重玩此幕</BaseButton>
                 </div>
               </template>
 
@@ -361,6 +414,7 @@ const nextPreviewComicUrl = computed<string | undefined>(() => {
               <!-- 互动：拖拽 + ops + 调 /api/interact ;  loading 底图先用下一幕的叙事图 -->
               <template v-else>
                 <InteractiveView
+                  v-model:ops="interactiveOps"
                   :scene="scene"
                   :story-id="props.id"
                   :next-comic-url="nextPreviewComicUrl"
@@ -400,13 +454,39 @@ const nextPreviewComicUrl = computed<string | undefined>(() => {
         </Transition>
       </div>
 
-      <!-- 右侧：摘要 + 旁白流 + 聊天 —— P-S4 顶底渐隐遮罩暗示可滚 -->
-      <aside class="space-y-4 lg:max-h-[calc(100vh-6rem)] lg:sticky lg:top-20 lg:overflow-y-auto no-scrollbar aside-fade-mask">
+      <!-- 右侧：摘要 + 旁白流 + 聊天 —— P-S4 顶底渐隐遮罩暗示可滚；sticky 顶部预留 TopBar 高度 -->
+      <aside class="space-y-4 lg:max-h-[calc(100vh-5rem)] lg:sticky lg:top-16 lg:overflow-y-auto no-scrollbar aside-fade-mask">
         <BaseCard class="p-5">
           <h2 class="font-display text-lg font-bold m-0 mb-1">{{ scene?.title || store.current?.title || "故事" }}</h2>
           <p class="text-sm text-ink-soft leading-relaxed m-0">
             {{ scene?.summary || scene?.narration || store.current?.story_summary || "" }}
           </p>
+        </BaseCard>
+
+        <!-- 互动节点：动作序列卡（从舞台侧挪过来，方便和对话一起看） -->
+        <BaseCard v-if="node?.type === 'interactive' && !dynamicNode" class="p-4">
+          <div class="text-sm font-semibold mb-2 flex items-center justify-between">
+            <span>🎬 动作序列</span>
+            <span v-if="interactiveOps.length" class="text-xs text-ink-mute font-normal">共 {{ interactiveOps.length }}</span>
+          </div>
+          <div v-if="!interactiveOps.length" class="text-xs text-ink-mute text-center py-3 border border-dashed border-paper-edge rounded">
+            还没安排动作<br />选两个对象 → 写"做什么"
+          </div>
+          <div v-else class="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar pr-1">
+            <div
+              v-for="(o, i) in interactiveOps"
+              :key="i"
+              class="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-accent/10 border border-accent/25 text-xs leading-snug"
+            >
+              <span class="font-semibold text-accent-deep shrink-0">{{ i + 1 }}.</span>
+              <span class="flex-1 text-ink break-words">
+                <template v-if="o.subject && o.target">「{{ o.subject }}」对「{{ o.target }}」：{{ o.action }}</template>
+                <template v-else-if="o.subject">「{{ o.subject }}」：{{ o.action }}</template>
+                <template v-else>{{ o.action }}</template>
+              </span>
+              <button class="text-warn hover:text-warn/70 shrink-0" title="移除" @click="removeInteractiveOp(i)">×</button>
+            </div>
+          </div>
         </BaseCard>
 
         <!-- 旁白流（narrative / dynamic 时才显示） -->

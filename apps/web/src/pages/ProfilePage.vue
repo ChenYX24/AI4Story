@@ -178,7 +178,7 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
 </script>
 
 <template>
-  <div class="min-h-screen">
+  <div class="min-h-screen pt-14">
     <TopBar />
 
     <div v-if="user.isAuthed" class="max-w-[960px] mx-auto px-5 py-8 fade-in">
