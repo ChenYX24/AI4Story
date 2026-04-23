@@ -72,6 +72,41 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem ---- 前端构建：dist 不存在时自动 pnpm install + build ----
+set "WEB_DIR=%ROOT%apps\web"
+if not exist "%WEB_DIR%\dist\index.html" (
+  where pnpm >nul 2>&1
+  if errorlevel 1 (
+    echo [WARN] pnpm not found, trying npm instead...
+    where npm >nul 2>&1
+    if errorlevel 1 (
+      echo [ERROR] Neither pnpm nor npm found. Please install Node.js first.
+      pause
+      exit /b 1
+    )
+    echo [BUILD] Installing frontend dependencies...
+    pushd "%WEB_DIR%"
+    call npm install
+    if errorlevel 1 ( popd & echo [ERROR] npm install failed. & pause & exit /b 1 )
+    echo [BUILD] Building frontend...
+    call npm run build
+    if errorlevel 1 ( popd & echo [ERROR] npm run build failed. & pause & exit /b 1 )
+    popd
+  ) else (
+    echo [BUILD] Installing frontend dependencies...
+    pushd "%WEB_DIR%"
+    call pnpm install
+    if errorlevel 1 ( popd & echo [ERROR] pnpm install failed. & pause & exit /b 1 )
+    echo [BUILD] Building frontend...
+    call pnpm build
+    if errorlevel 1 ( popd & echo [ERROR] pnpm build failed. & pause & exit /b 1 )
+    popd
+  )
+  echo [BUILD] Frontend build complete.
+) else (
+  echo [BUILD] Frontend dist already exists, skipping build.
+)
+
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing '%URL%/healthz' -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 (
   echo AI4Story is already running. Opening %URL%
