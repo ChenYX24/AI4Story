@@ -59,6 +59,35 @@ def init_db() -> None:
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_token ON users(token)")
+        # 用户自创道具（互动页 AI / 上传 / 画板，登录后同步服务端）
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS user_assets (
+                id            TEXT PRIMARY KEY,
+                user_id       TEXT NOT NULL,
+                name          TEXT NOT NULL,
+                url           TEXT NOT NULL,
+                kind          TEXT NOT NULL,
+                origin_story_id   TEXT,
+                origin_scene_idx  INTEGER,
+                created_at    INTEGER NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_user_assets_user ON user_assets(user_id)")
+        # 分享码：把一个或多个 user_assets 打包，生成短码供他人导入
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS asset_packs (
+                code          TEXT PRIMARY KEY,
+                owner_user_id TEXT,
+                name          TEXT NOT NULL,
+                description   TEXT,
+                asset_ids     TEXT NOT NULL,
+                public        INTEGER NOT NULL DEFAULT 0,
+                created_at    INTEGER NOT NULL,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_asset_packs_public ON asset_packs(public)")
 
 
 # ---------- 账号操作 ----------
@@ -122,6 +151,131 @@ def logout_token(token: str) -> None:
         return
     with _conn() as c:
         c.execute("UPDATE users SET token = NULL WHERE token = ?", (token,))
+
+
+# ---------- 用户自创道具 (user_assets) ----------
+
+def list_user_assets(user_id: str) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, name, url, kind, origin_story_id, origin_scene_idx, created_at "
+            "FROM user_assets WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_user_asset(user_id: str, a: dict) -> dict:
+    aid = a.get("id") or ("ua_" + secrets.token_hex(6))
+    with _conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO user_assets "
+            "(id, user_id, name, url, kind, origin_story_id, origin_scene_idx, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (
+                aid, user_id,
+                a["name"], a["url"], a.get("kind", "object"),
+                a.get("origin_story_id"), a.get("origin_scene_idx"),
+                int(a.get("created_at") or _now() * 1000),
+            ),
+        )
+    return {
+        "id": aid, "name": a["name"], "url": a["url"], "kind": a.get("kind", "object"),
+        "origin_story_id": a.get("origin_story_id"),
+        "origin_scene_idx": a.get("origin_scene_idx"),
+        "created_at": int(a.get("created_at") or _now() * 1000),
+    }
+
+
+def delete_user_asset(user_id: str, asset_id: str) -> bool:
+    with _conn() as c:
+        cur = c.execute(
+            "DELETE FROM user_assets WHERE user_id = ? AND id = ?",
+            (user_id, asset_id),
+        )
+        return cur.rowcount > 0
+
+
+def user_assets_by_ids(ids: list[str]) -> dict[str, dict]:
+    if not ids:
+        return {}
+    placeholders = ",".join(["?"] * len(ids))
+    with _conn() as c:
+        rows = c.execute(
+            f"SELECT id, name, url, kind, origin_story_id, origin_scene_idx, created_at "
+            f"FROM user_assets WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+    return {r["id"]: dict(r) for r in rows}
+
+
+# ---------- 分享码 (asset_packs) ----------
+
+import json as _json
+
+
+def _gen_share_code() -> str:
+    # 6 位大写字母+数字；简单避免易混字（0/O/1/I）
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(6))
+
+
+def create_asset_pack(owner_user_id: Optional[str], name: str, description: str,
+                     asset_ids: list[str], public: bool = False) -> dict:
+    # 生成不冲突的 6 位码
+    for _ in range(10):
+        code = _gen_share_code()
+        with _conn() as c:
+            existing = c.execute("SELECT 1 FROM asset_packs WHERE code = ?", (code,)).fetchone()
+            if existing:
+                continue
+            c.execute(
+                "INSERT INTO asset_packs (code, owner_user_id, name, description, asset_ids, public, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (code, owner_user_id, name, description or "",
+                 _json.dumps(asset_ids, ensure_ascii=False), 1 if public else 0, _now()),
+            )
+            return {
+                "code": code, "name": name, "description": description or "",
+                "asset_ids": list(asset_ids), "public": bool(public), "created_at": _now(),
+            }
+    raise RuntimeError("无法生成唯一分享码，请稍后重试")
+
+
+def get_asset_pack(code: str) -> Optional[dict]:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT code, owner_user_id, name, description, asset_ids, public, created_at "
+            "FROM asset_packs WHERE code = ?",
+            (code.upper(),),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "code": row["code"], "owner_user_id": row["owner_user_id"],
+        "name": row["name"], "description": row["description"],
+        "asset_ids": _json.loads(row["asset_ids"] or "[]"),
+        "public": bool(row["public"]),
+        "created_at": row["created_at"],
+    }
+
+
+def list_public_packs(limit: int = 50) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT code, owner_user_id, name, description, asset_ids, public, created_at "
+            "FROM asset_packs WHERE public = 1 ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    out = []
+    for row in rows:
+        out.append({
+            "code": row["code"], "owner_user_id": row["owner_user_id"],
+            "name": row["name"], "description": row["description"],
+            "asset_ids": _json.loads(row["asset_ids"] or "[]"),
+            "public": True, "created_at": row["created_at"],
+        })
+    return out
 
 
 # 启动时自动建表

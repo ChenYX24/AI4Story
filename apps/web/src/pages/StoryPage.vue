@@ -399,7 +399,8 @@ function removeInteractiveOp(i: number) {
 </script>
 
 <template>
-  <div class="min-h-[calc(100vh-3.5rem)]">
+  <!-- 宽屏（lg+）：严格 viewport 高度免整体滚动；窄屏：让页面自然滚动 -->
+  <div class="min-h-[calc(100vh-3.5rem)] lg:h-[calc(100vh-3.5rem)] lg:overflow-hidden">
     <!-- E3：进行中 session 恢复弹窗（取消 / 覆盖 / 继续） -->
     <BaseModal :open="resumeModalOpen" title="继续上次的玩法？" :max-width="'460px'" @close="onResumeCancel">
       <p class="text-sm text-ink-soft m-0 mb-2">
@@ -415,17 +416,17 @@ function removeInteractiveOp(i: number) {
       </template>
     </BaseModal>
 
-    <div class="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-      <!-- 书本区 -->
+    <div class="max-w-[1400px] mx-auto h-full px-4 sm:px-6 py-4 grid gap-4 lg:grid-cols-[1fr_360px]">
+      <!-- 书本区：占满可用高度，永不溢出 -->
       <div
-        class="relative"
+        class="relative h-full min-h-0"
         :style="{ perspective: '1800px' }"
       >
         <!-- 骨架（scene 未加载时） -->
         <div
           v-if="!scene"
-          class="bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] p-6 sm:p-10 flex flex-col"
-          style="box-shadow: var(--shadow-book); height: calc(100vh - 7rem); min-height: 380px; max-height: 820px;"
+          class="bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] p-4 sm:p-6 flex flex-col h-full"
+          style="box-shadow: var(--shadow-book);"
         >
           <div class="flex justify-between mb-4">
             <div class="w-24 h-4 rounded bg-paper-deep relative overflow-hidden">
@@ -448,7 +449,7 @@ function removeInteractiveOp(i: number) {
           <div
             v-if="scene"
             :key="store.cursor"
-            class="relative bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] overflow-hidden"
+            class="relative bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] overflow-hidden h-full"
             :style="{
               boxShadow: 'var(--shadow-book)',
               transformOrigin: 'left center',
@@ -462,7 +463,7 @@ function removeInteractiveOp(i: number) {
               style="background: linear-gradient(90deg, rgba(122,90,54,.35), transparent);"
             ></div>
 
-            <div class="p-6 sm:p-10 flex flex-col" style="height: calc(100vh - 7rem); min-height: 380px; max-height: 820px;">
+            <div class="p-4 sm:p-6 flex flex-col h-full min-h-0">
               <div class="flex items-center justify-between mb-4">
                 <div class="text-xs tracking-wider text-ink-mute">
                   第 {{ (node?.sceneIdx ?? 0) }} 页 · {{ node?.type === "narrative" ? "叙事" : "互动" }}
@@ -470,32 +471,30 @@ function removeInteractiveOp(i: number) {
                 <div class="text-xs text-ink-mute">{{ store.cursor + 1 }} / {{ store.flow.length }}</div>
               </div>
 
-              <!-- ✨ Dynamic narrative（互动后生成的新段落）优先 —— P-S5 金色纸纹 + 星点 -->
+              <!-- ✨ Dynamic narrative —— absolute 填充 + object-contain 保证不溢出 -->
               <template v-if="dynamicNode">
-                <div class="flex-1 grid place-items-center rounded-xl overflow-hidden bg-paper relative narrative-magic">
+                <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper narrative-magic">
                   <img
                     :src="dynamicNode.comic_url"
-                    class="max-w-full object-contain relative z-10"
-                    style="max-height: min(62vh, 560px);"
+                    class="absolute inset-0 w-full h-full object-contain z-10"
                     alt="新段落"
                   />
                 </div>
-                <div class="mt-3 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30">
+                <div class="mt-2 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30">
                   ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
                 </div>
               </template>
 
-              <!-- 叙事：只显示 comic，旁白在右侧 aside（C2/C11 不上下滚动即可看整张图） -->
+              <!-- 叙事：absolute 填充 + object-contain —— 图一定完整显示不溢出 -->
               <template v-else-if="node?.type === 'narrative'">
-                <div class="flex-1 grid place-items-center rounded-xl overflow-hidden bg-paper">
+                <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper">
                   <img
                     v-if="scene.comic_url"
                     :src="scene.comic_url"
                     alt="场景连环画"
-                    class="max-w-full object-contain"
-                    style="max-height: min(62vh, 560px);"
+                    class="absolute inset-0 w-full h-full object-contain"
                   />
-                  <div v-else class="py-20 text-ink-mute">（此幕无图）</div>
+                  <div v-else class="absolute inset-0 grid place-items-center text-ink-mute">（此幕无图）</div>
                 </div>
               </template>
 
@@ -542,8 +541,8 @@ function removeInteractiveOp(i: number) {
         </Transition>
       </div>
 
-      <!-- 右侧：摘要 + 旁白流 + 聊天 —— P-S4 顶底渐隐遮罩暗示可滚；sticky 顶部预留 TopBar 高度 -->
-      <aside class="space-y-4 lg:max-h-[calc(100vh-5rem)] lg:sticky lg:top-16 lg:overflow-y-auto no-scrollbar aside-fade-mask">
+      <!-- 右侧：摘要 + 旁白流 + 聊天 —— 占满 grid cell 高度，内部自滚动 -->
+      <aside class="space-y-3 h-full min-h-0 overflow-y-auto no-scrollbar aside-fade-mask pr-1">
         <BaseCard class="p-5">
           <h2 class="font-display text-lg font-bold m-0 mb-1">{{ scene?.title || store.current?.title || "故事" }}</h2>
           <p class="text-sm text-ink-soft leading-relaxed m-0">

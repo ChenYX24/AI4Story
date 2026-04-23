@@ -66,3 +66,44 @@ export const fetchPublicAssets  = () => apiGet<PublicAssetsResponse>("/api/publi
 // ---- 上传 ----
 export const uploadImage = (body: UploadImageRequest) =>
   apiPost<UploadImageResponse>("/api/upload/image", body);
+
+// ---- 用户自创道具（需登录）----
+export interface UserAssetOut {
+  id: string;
+  name: string;
+  url: string;
+  kind: string;
+  origin_story_id?: string;
+  origin_scene_idx?: number;
+  created_at: number;
+}
+export const fetchMyAssets = () =>
+  apiGet<{ assets: UserAssetOut[] }>("/api/user/assets");
+export const createMyAsset = (a: Partial<UserAssetOut> & { name: string; url: string }) =>
+  apiPost<UserAssetOut>("/api/user/assets", a);
+export const deleteMyAsset = (id: string) =>
+  apiDelete<{ ok: boolean }>(`/api/user/assets/${encodeURIComponent(id)}`);
+export const syncMyAssets = (assets: Array<Partial<UserAssetOut> & { name: string; url: string }>) =>
+  apiPost<{ assets: UserAssetOut[] }>("/api/user/assets/sync", { assets });
+
+// ---- 分享码 + 打包 ----
+export interface PackAssetItem {
+  id: string; name: string; url: string; kind: string;
+  origin_story_id?: string; origin_scene_idx?: number;
+}
+export interface PackOut {
+  code: string;
+  name: string;
+  description: string;
+  public: boolean;
+  asset_ids: string[];
+  assets: PackAssetItem[];
+  created_at: number;
+  owner_user_id?: string;
+}
+export const createPack = (body: { name: string; description?: string; asset_ids: string[]; public?: boolean }) =>
+  apiPost<PackOut>("/api/packs", body);
+export const fetchPack = (code: string) =>
+  apiGet<PackOut>(`/api/packs/${encodeURIComponent(code.toUpperCase())}`);
+export const fetchPublicPacks = () =>
+  apiGet<{ packs: PackOut[] }>("/api/packs/");

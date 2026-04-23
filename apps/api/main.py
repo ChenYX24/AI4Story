@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import APPS_DIR, FRONTEND_DIR, OUTPUTS_ROOT, SCENES_DIR
 from .routers import (
+    asset_packs,
     auth,
     chat,
     create_prop,
@@ -17,6 +18,7 @@ from .routers import (
     story,
     tts,
     upload,
+    user_assets,
 )
 
 
@@ -42,6 +44,8 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api")
     app.include_router(public.router, prefix="/api")
     app.include_router(upload.router, prefix="/api")
+    app.include_router(user_assets.router, prefix="/api")
+    app.include_router(asset_packs.router, prefix="/api")
 
     @app.get("/view/{share_id}")
     def share_view_page(share_id: str) -> HTMLResponse:

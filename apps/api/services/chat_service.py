@@ -2,14 +2,14 @@ import logging
 
 from ..config import DASHSCOPE_API_KEY
 from ..scene_loader import _load_scene_json, load_story
-from .qwen_service import DEFAULT_MODEL
+from .qwen_service import QwenError, call_text
 
 log = logging.getLogger(__name__)
 
 
 class ChatServiceError(RuntimeError):
     """Chat 无法生成回复时抛出（API key 缺失 / 远端异常 / 返回格式错误）。
-    路由层应转为 HTTP 502，前端弹 toast 告知用户，而不是伪造一个"正常"回复。"""
+    路由层转为 HTTP 502；前端 toast 告知用户，而不是伪造"正常"回复。"""
 
 
 def _build_char_notes(global_chars: list[dict]) -> str:
@@ -23,12 +23,9 @@ def _build_char_notes(global_chars: list[dict]) -> str:
 
 def reply_to(scene_idx: int, user_text: str, story_id: str | None = None) -> str:
     if not user_text.strip():
-        # 空输入就别调模型了
         return "我没听清呢，再说一遍好吗？"
     if not DASHSCOPE_API_KEY:
         raise ChatServiceError("DASHSCOPE_API_KEY 未配置；无法调用讲故事大模型。")
-
-    import dashscope  # type: ignore
 
     try:
         story = load_story(story_id)
@@ -68,33 +65,10 @@ def reply_to(scene_idx: int, user_text: str, story_id: str | None = None) -> str
         "- 回答简短有趣，适合 5 岁儿童理解，不超过 2 句"
     )
 
+    # 统一走 qwen_service.call_text —— 和其他 pipeline 同一条 HTTP 通道
+    # （OpenAI 兼容 endpoint），不再依赖 dashscope SDK，避免 URL/模型 ID 不一致的 400。
     try:
-        resp = dashscope.Generation.call(
-            api_key=DASHSCOPE_API_KEY,
-            model=DEFAULT_MODEL,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_text},
-            ],
-            result_format="message",
-        )
-    except Exception as e:
-        log.exception("[chat] dashscope call raised")
-        raise ChatServiceError(f"讲故事大模型调用失败：{e}") from e
-
-    if getattr(resp, "status_code", None) != 200:
-        code = getattr(resp, "code", "unknown")
-        msg = getattr(resp, "message", "unknown")
-        log.warning("[chat] dashscope non-200 status=%s code=%s msg=%s model=%s",
-                    getattr(resp, "status_code", None), code, msg, DEFAULT_MODEL)
-        raise ChatServiceError(f"模型返回错误：status={resp.status_code} code={code} {msg}")
-
-    choices = (resp.output or {}).get("choices") or []
-    if not choices:
-        log.warning("[chat] dashscope empty choices: %s", resp.output)
-        raise ChatServiceError("模型返回为空，请稍后重试。")
-
-    content = choices[0].get("message", {}).get("content", "").strip()
-    if not content:
-        raise ChatServiceError("模型返回为空字符串。")
-    return content
+        return call_text(user_text, system=system, temperature=0.7, timeout=60)
+    except QwenError as e:
+        log.warning("[chat] call_text failed: %s", e)
+        raise ChatServiceError(str(e)) from e

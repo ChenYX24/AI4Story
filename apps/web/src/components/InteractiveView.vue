@@ -708,11 +708,11 @@ const sidebarProps = computed(() => props.scene.props || []);
       </div>
     </Transition>
 
-    <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0">
-      <!-- 舞台 -->
+    <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0 overflow-hidden" style="grid-template-rows: minmax(0, 1fr);">
+      <!-- 舞台 —— h-full + min-h-0 让 grid 严格不溢出 -->
       <div
         ref="stageRef"
-        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none"
+        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none h-full min-h-0"
         @drop="onStageDrop"
         @dragover="allowDrop"
         @pointermove="onStagePointerMove"
@@ -722,7 +722,7 @@ const sidebarProps = computed(() => props.scene.props || []);
         @click.self="onStageBackgroundClick"
         style="touch-action: none;"
       >
-        <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="背景" />
+        <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-contain pointer-events-none bg-paper-deep" alt="背景" />
 
         <!-- 已放置的物体 -->
         <div
@@ -817,8 +817,9 @@ const sidebarProps = computed(() => props.scene.props || []);
         </div>
       </div>
 
-      <!-- 侧边：可拖入的角色 / 道具 + 我造的道具（占位） -->
-      <aside class="bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-auto no-scrollbar flex flex-col gap-3 min-h-0">
+      <!-- 侧边：角色 / 道具 / 我造的道具（内部可滚动，永远能看到造新道具区） -->
+      <aside class="bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-auto flex flex-col gap-3 h-full min-h-0"
+             style="scrollbar-width: thin;">
         <div class="text-xs font-bold text-ink-soft mb-2">👥 角色（拖到舞台）</div>
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
