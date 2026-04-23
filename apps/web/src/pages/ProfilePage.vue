@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import TopBar from "@/components/TopBar.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
@@ -178,8 +177,7 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
 </script>
 
 <template>
-  <div class="min-h-screen pt-14">
-    <TopBar />
+  <div class="min-h-screen">
 
     <div v-if="user.isAuthed" class="max-w-[960px] mx-auto px-5 py-8 fade-in">
       <!-- 用户头部 -->

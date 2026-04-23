@@ -4,6 +4,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import { useToastStore } from "@/stores/toast";
 import { useSessionStore } from "@/stores/session";
+import { useAssetShelfStore } from "@/stores/assetShelf";
 import { fetchPlacements, postInteract, createProp, uploadImage } from "@/api/endpoints";
 import type {
   Scene, SceneCharacter, SceneProp,
@@ -51,6 +52,7 @@ const ops = defineModel<Operation[]>("ops", { default: () => [] });
 
 const toast = useToastStore();
 const sessions = useSessionStore();
+const assetShelf = useAssetShelfStore();
 
 interface PlacedItem {
   id: string;          // unique within this scene session
@@ -72,6 +74,14 @@ interface PlacedItem {
 const placed = ref<PlacedItem[]>([]);
 const customProps = ref<CustomProp[]>([]);
 const generating = ref(false);
+
+// 新造道具：作画中占位（在 aside "✨ 我造的道具" 区域显示 spinner），完成后搬到 customProps
+interface PendingProp {
+  tempId: string;
+  name: string;
+  refImage?: string;
+}
+const pendingProps = ref<PendingProp[]>([]);
 // C7: 生成下一幕的二次确认
 const confirmingComplete = ref(false);
 
@@ -444,23 +454,13 @@ function onStageKey(e: KeyboardEvent) {
   }
 }
 
-// ---- 创建自定义道具 —— 后台生成：立即占位，完成后原地替换 url ----
+// ---- 创建自定义道具 —— 后台生成：占位在 aside 道具栏（不自动上舞台），完成后可手动拖入 ----
 async function addCustomProp() {
   const name = newPropName.value.trim();
   if (!name) return;
   newPropName.value = "";
-  const tempId = `custom-${name}-${Date.now()}`;
-  // 占位（无参考图）
-  placed.value.push({
-    id: tempId,
-    name,
-    kind: "object",
-    url: undefined,
-    x: 0.5, y: 0.5,
-    scale: 1, rotation: 0,
-    isCustom: true,
-    loading: true,
-  });
+  const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  pendingProps.value.push({ tempId, name });
   toast.push(`🎨 「${name}」正在后台作画…`, "info");
   try {
     const r = await createProp({
@@ -468,18 +468,19 @@ async function addCustomProp() {
       scene_idx: props.scene.index,
       name,
     });
-    const item = placed.value.find((p) => p.id === tempId);
-    if (item) {
-      item.url = r.url;
-      item.custom_url = r.url;
-      item.name = r.name;
-      item.loading = false;
-    }
+    // 完成：从 pendingProps 移除，加入 customProps（aside 展示 + API 发送）+ 写入 assetShelf 持久化
+    pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     customProps.value.push({ name: r.name, url: r.url });
-    toast.push(`✨ 「${r.name}」画好啦`, "success");
+    assetShelf.addMyAsset({
+      name: r.name,
+      url: r.url,
+      kind: "object",
+      origin_story_id: props.storyId,
+      origin_scene_idx: props.scene.index,
+    });
+    toast.push(`✨ 「${r.name}」画好啦，拖到舞台就能用～`, "success");
   } catch (e: any) {
-    // 失败：移除占位
-    placed.value = placed.value.filter((p) => p.id !== tempId);
+    pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     toast.push(`新道具创建失败：${e?.message || e}`, "error");
   }
 }
@@ -599,38 +600,27 @@ async function addCustomFromImage(dataUrl: string, defaultName: string) {
 }
 
 async function onPropModalSubmit(payload: { name: string; description: string; skipAi: boolean }) {
-  // skipAi：直接用原图，瞬间完成
+  // skipAi：直接用原图，瞬间完成；加入 customProps + 持久化 myAssets，不自动上舞台
   if (payload.skipAi) {
     customProps.value.push({ name: payload.name, url: propModalRefUrl.value });
-    placed.value.push({
-      id: `custom-raw-${Date.now()}`,
+    assetShelf.addMyAsset({
       name: payload.name,
-      kind: "object",
       url: propModalRefUrl.value,
-      custom_url: propModalRefUrl.value,
-      x: 0.5, y: 0.5, scale: 1, rotation: 0,
-      isCustom: true,
+      kind: "object",
+      origin_story_id: props.storyId,
+      origin_scene_idx: props.scene.index,
     });
-    toast.push(`✅ 「${payload.name}」已加到道具库`, "success");
+    toast.push(`✅ 「${payload.name}」已加到道具库，拖到舞台即可使用`, "success");
     propModalOpen.value = false;
     return;
   }
-  // AI 路径：立即关 modal + 占位卡进场，createProp 后台进行，完成后原地替换
-  const tempId = `custom-ai-${Date.now()}`;
+  // AI 路径：立即关 modal + 占位进 aside，createProp 后台进行，完成后加入 customProps 并持久化
+  const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
   const refImage = propModalRefUrl.value;
   const name = payload.name;
   const description = payload.description;
   propModalOpen.value = false;
-  placed.value.push({
-    id: tempId,
-    name,
-    kind: "object",
-    url: undefined,
-    refImage,
-    x: 0.5, y: 0.5, scale: 1, rotation: 0,
-    isCustom: true,
-    loading: true,
-  });
+  pendingProps.value.push({ tempId, name, refImage });
   toast.push(`🎨 「${name}」在后台作画，稍等片刻…`, "info");
   try {
     const r = await createProp({
@@ -641,18 +631,18 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
       reference_image_url: refImage,
       skip_ai: false,
     });
-    const item = placed.value.find((p) => p.id === tempId);
-    if (item) {
-      item.url = r.url;
-      item.custom_url = r.url;
-      item.name = r.name;
-      item.loading = false;
-      item.refImage = undefined;
-    }
+    pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     customProps.value.push({ name: r.name, url: r.url });
-    toast.push(`✨ AI 画的「${r.name}」好啦`, "success");
+    assetShelf.addMyAsset({
+      name: r.name,
+      url: r.url,
+      kind: "object",
+      origin_story_id: props.storyId,
+      origin_scene_idx: props.scene.index,
+    });
+    toast.push(`✨ 「${r.name}」画好啦，拖到舞台就能用～`, "success");
   } catch (e: any) {
-    placed.value = placed.value.filter((p) => p.id !== tempId);
+    pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     toast.push(`生成失败：${e?.message || e}`, "error");
   }
 }
@@ -695,7 +685,7 @@ const sidebarProps = computed(() => props.scene.props || []);
       </div>
     </Transition>
 
-    <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-[420px]">
+    <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0">
       <!-- 舞台 -->
       <div
         ref="stageRef"
@@ -804,8 +794,8 @@ const sidebarProps = computed(() => props.scene.props || []);
         </div>
       </div>
 
-      <!-- 侧边：可拖入的角色 / 道具 + 动作序列（C6：放右侧） -->
-      <aside class="bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-auto no-scrollbar flex flex-col gap-3" style="max-height: min(80vh, 720px);">
+      <!-- 侧边：可拖入的角色 / 道具 + 我造的道具（占位） -->
+      <aside class="bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-auto no-scrollbar flex flex-col gap-3 min-h-0">
         <div class="text-xs font-bold text-ink-soft mb-2">👥 角色（拖到舞台）</div>
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
@@ -832,7 +822,51 @@ const sidebarProps = computed(() => props.scene.props || []);
             <div class="text-[10px] mt-1 text-ink truncate w-full">{{ p.name }}</div>
           </div>
         </div>
-        <!-- 动作序列已挪到右侧对话栏（StoryPage aside） -->
+        <!-- 动作序列已挪到 StoryPage 右侧对话栏 -->
+
+        <!-- ✨ 我造的道具（当前 session 造的 + 作画中占位） -->
+        <div v-if="pendingProps.length || customProps.length" class="border-t border-paper-edge pt-2">
+          <div class="text-xs font-bold text-ink-soft mb-2 flex items-center justify-between">
+            <span>✨ 我造的道具</span>
+            <span v-if="pendingProps.length" class="text-[10px] text-ink-mute font-normal">作画中 {{ pendingProps.length }}</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <!-- 已完成：可拖入舞台 -->
+            <div
+              v-for="cp in customProps"
+              :key="cp.url"
+              draggable="true"
+              class="bg-gold-mute/40 rounded-lg p-1.5 grid place-items-center text-center cursor-grab active:cursor-grabbing relative border border-gold/30"
+              :title="`${cp.name} —— 拖到舞台使用`"
+              @dragstart="(e) => onSidebarDragStart(e, { name: cp.name, url: cp.url } as any, 'object')"
+            >
+              <img v-if="cp.url" :src="cp.url" class="w-10 h-10 object-contain" :alt="cp.name" />
+              <div class="text-[10px] mt-0.5 text-ink truncate w-full">{{ cp.name }}</div>
+            </div>
+            <!-- 作画中：spinner 占位 -->
+            <div
+              v-for="p in pendingProps"
+              :key="p.tempId"
+              class="bg-white/80 rounded-lg p-1.5 grid place-items-center text-center relative border border-paper-edge overflow-hidden"
+              :title="`${p.name} —— 正在后台 AI 作画`"
+            >
+              <div class="relative w-10 h-10">
+                <img
+                  v-if="p.refImage"
+                  :src="p.refImage"
+                  class="absolute inset-0 w-full h-full object-cover rounded"
+                  style="filter: blur(2px) saturate(0.4) opacity(0.5);"
+                  alt=""
+                />
+                <div class="absolute inset-0 grid place-items-center">
+                  <div class="w-5 h-5 border-[2px] border-gold-mute border-t-accent rounded-full animate-spin"></div>
+                </div>
+              </div>
+              <div class="text-[10px] mt-0.5 text-ink-soft truncate w-full">{{ p.name }}</div>
+              <div class="text-[9px] text-accent animate-pulse">作画中…</div>
+            </div>
+          </div>
+        </div>
 
         <!-- 创建新道具 -->
         <div class="border-t border-paper-edge pt-2 space-y-2">
@@ -882,47 +916,49 @@ const sidebarProps = computed(() => props.scene.props || []);
       </aside>
     </div>
 
-    <!-- 操作输入区 -->
-    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-      <div class="bg-white/70 border border-paper-edge rounded-xl p-3">
-        <div class="text-xs font-semibold text-ink-soft mb-2">📌 让两个对象做点什么</div>
-        <div class="text-xs text-ink-mute mb-2">
-          {{ selA ? `主语：${selA.name}` : "先点一个对象作为主语" }}
-          {{ selB ? `· 对象：${selB.name}` : (selA ? "（可选：再点一个作为对象）" : "") }}
+    <!-- 操作输入区 —— 通过 Teleport 送到 StoryPage 右侧对话栏（左边免滚动） -->
+    <Teleport to="#interact-inputs-slot" defer>
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs font-semibold text-ink-soft mb-1.5">📌 让两个对象做点什么</div>
+          <div class="text-[11px] text-ink-mute mb-2 min-h-[14px]">
+            {{ selA ? `主语：${selA.name}` : "先点舞台上一个对象作为主语" }}
+            {{ selB ? `· 对象：${selB.name}` : (selA ? "（可选：再点一个作为对象）" : "") }}
+          </div>
+          <div class="flex gap-2">
+            <input
+              v-model="actionText"
+              type="text"
+              placeholder="例如：把鲜花送给"
+              class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+              @keydown.enter="addPairOp"
+            />
+            <button
+              class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
+              :disabled="!selA || !actionText.trim()"
+              @click="addPairOp"
+            >＋</button>
+          </div>
         </div>
-        <div class="flex gap-2">
-          <input
-            v-model="actionText"
-            type="text"
-            placeholder="例如：把鲜花送给"
-            class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-            @keydown.enter="addPairOp"
-          />
-          <button
-            class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
-            :disabled="!selA || !actionText.trim()"
-            @click="addPairOp"
-          >＋</button>
+        <div class="border-t border-dashed border-paper-edge pt-3">
+          <div class="text-xs font-semibold text-ink-soft mb-1.5">💭 自由描述一件场景里发生的事</div>
+          <div class="flex gap-2">
+            <input
+              v-model="freeformText"
+              type="text"
+              placeholder="例如：天上下起了花瓣雨"
+              class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+              @keydown.enter="addFreeformOp"
+            />
+            <button
+              class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
+              :disabled="!freeformText.trim()"
+              @click="addFreeformOp"
+            >＋</button>
+          </div>
         </div>
       </div>
-      <div class="bg-white/70 border border-paper-edge rounded-xl p-3">
-        <div class="text-xs font-semibold text-ink-soft mb-2">💭 自由描述一件场景里发生的事</div>
-        <div class="flex gap-2">
-          <input
-            v-model="freeformText"
-            type="text"
-            placeholder="例如：天上下起了花瓣雨"
-            class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-            @keydown.enter="addFreeformOp"
-          />
-          <button
-            class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
-            :disabled="!freeformText.trim()"
-            @click="addFreeformOp"
-          >＋</button>
-        </div>
-      </div>
-    </div>
+    </Teleport>
 
     <!-- 完成（ops 序列已移到右侧 aside） -->
     <div class="mt-5 flex justify-end gap-2 pt-4 border-t border-dashed border-paper-edge">

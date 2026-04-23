@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import TopBar from "@/components/TopBar.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import InteractiveView from "@/components/InteractiveView.vue";
@@ -244,6 +243,8 @@ async function onInteractDone(
 
 
 onMounted(async () => {
+  // 注册 TopBar 缩略图点击 → 走 loadCursor
+  store.setJumpHandler((idx: number) => { loadCursor(idx); });
   try {
     if (!store.current || store.current.id !== props.id) {
       // 切换故事：清空上一个的 interactions / comicUrls / sceneCache
@@ -264,6 +265,8 @@ onMounted(async () => {
   }
 });
 
+onBeforeUnmount(() => { store.setJumpHandler(null); });
+
 watch(() => props.id, async (v) => {
   if (store.current?.id !== v) {
     await store.loadStory(v);
@@ -275,18 +278,7 @@ const node = computed(() => store.flow[store.cursor]);
 const isLast = computed(() => store.cursor === store.flow.length - 1);
 const visibleLines = computed(() => (scene.value?.storyboard || []).slice(0, lineCursor.value));
 
-// TopBar 缩略条 props：把已生成 dynamic 的 interactive 节点的缩略图覆盖为 dynamic.thumbnail_url
-const timelineItems = computed(() =>
-  store.flow.map((f) => {
-    const dyn = store.dynamicByScene.get(f.sceneIdx);
-    return {
-      sceneIdx: f.sceneIdx,
-      type: f.type,
-      visited: f.visited,
-      dynamicThumb: dyn?.payload.thumbnail_url || dyn?.payload.comic_url,
-    };
-  }),
-);
+// TopBar 现在自读 store，无需传 timelineItems
 
 // 重玩当前已生成的 dynamic 幕（清 dynamicNode，进入互动态）
 function replayInteractive() {
@@ -312,14 +304,7 @@ function removeInteractiveOp(i: number) {
 </script>
 
 <template>
-  <div class="min-h-screen pt-14">
-    <TopBar
-      :cursor="store.cursor"
-      :highest-unlocked="store.highestUnlocked"
-      :flow-items="timelineItems"
-      @jump="(idx: number) => loadCursor(idx)"
-    />
-
+  <div class="min-h-[calc(100vh-3.5rem)]">
     <div class="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 grid gap-6 lg:grid-cols-[1fr_360px]">
       <!-- 书本区 -->
       <div
@@ -329,8 +314,8 @@ function removeInteractiveOp(i: number) {
         <!-- 骨架（scene 未加载时） -->
         <div
           v-if="!scene"
-          class="bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] p-6 sm:p-10 min-h-[420px] sm:min-h-[520px] flex flex-col"
-          style="box-shadow: var(--shadow-book);"
+          class="bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] p-6 sm:p-10 flex flex-col"
+          style="box-shadow: var(--shadow-book); height: calc(100vh - 7rem); min-height: 380px; max-height: 820px;"
         >
           <div class="flex justify-between mb-4">
             <div class="w-24 h-4 rounded bg-paper-deep relative overflow-hidden">
@@ -367,7 +352,7 @@ function removeInteractiveOp(i: number) {
               style="background: linear-gradient(90deg, rgba(122,90,54,.35), transparent);"
             ></div>
 
-            <div class="p-6 sm:p-10 min-h-[420px] sm:min-h-[520px] flex flex-col">
+            <div class="p-6 sm:p-10 flex flex-col" style="height: calc(100vh - 7rem); min-height: 380px; max-height: 820px;">
               <div class="flex items-center justify-between mb-4">
                 <div class="text-xs tracking-wider text-ink-mute">
                   第 {{ (node?.sceneIdx ?? 0) }} 页 · {{ node?.type === "narrative" ? "叙事" : "互动" }}
@@ -461,6 +446,11 @@ function removeInteractiveOp(i: number) {
           <p class="text-sm text-ink-soft leading-relaxed m-0">
             {{ scene?.summary || scene?.narration || store.current?.story_summary || "" }}
           </p>
+        </BaseCard>
+
+        <!-- 互动节点：操作输入区（Teleport 自 InteractiveView） -->
+        <BaseCard v-if="node?.type === 'interactive' && !dynamicNode" class="p-4">
+          <div id="interact-inputs-slot"></div>
         </BaseCard>
 
         <!-- 互动节点：动作序列卡（从舞台侧挪过来，方便和对话一起看） -->

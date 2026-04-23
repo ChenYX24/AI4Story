@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { RouterView } from "vue-router";
 import AppToast from "@/components/AppToast.vue";
+import TopBar from "@/components/TopBar.vue";
 </script>
 
 <template>
   <div class="min-h-screen bg-paper text-ink antialiased">
-    <RouterView v-slot="{ Component, route }">
-      <Transition name="fade" mode="out-in">
-        <component :is="Component" :key="route.fullPath" />
-      </Transition>
-    </RouterView>
+    <!-- 全站常驻 TopBar（fixed，始终在顶，不随页面 Transition 卸载） -->
+    <TopBar />
+    <!-- 页面内容：pt-14 预留 TopBar 高度 -->
+    <main class="pt-14">
+      <RouterView v-slot="{ Component, route }">
+        <Transition name="fade" mode="out-in">
+          <component :is="Component" :key="route.fullPath" />
+        </Transition>
+      </RouterView>
+    </main>
     <AppToast />
   </div>
 </template>

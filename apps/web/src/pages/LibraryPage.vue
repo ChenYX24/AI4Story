@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocalStorage } from "@vueuse/core";
-import TopBar from "@/components/TopBar.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseModal from "@/components/BaseModal.vue";
@@ -109,8 +108,7 @@ async function onDelete(id: string, e: MouseEvent) {
 </script>
 
 <template>
-  <div class="pt-14">
-    <TopBar />
+  <div>
     <div class="max-w-[1100px] mx-auto px-5 py-8 fade-in">
       <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>

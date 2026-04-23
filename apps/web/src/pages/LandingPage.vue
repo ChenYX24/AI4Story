@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import CinemaHero from "@/components/CinemaHero.vue";
-import TopBar from "@/components/TopBar.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
@@ -157,8 +156,7 @@ async function submitSketch() {
 </script>
 
 <template>
-  <div class="fade-in pt-14">
-    <TopBar />
+  <div class="fade-in">
     <!-- 胶片 hero（顶栏右侧已有"我的"，这里不再放 FAB） -->
     <CinemaHero @explore="scrollToCreate" />
 

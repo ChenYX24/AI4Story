@@ -27,11 +27,19 @@ export const useStoryStore = defineStore("story", () => {
   const dynamicByScene = ref<Map<number, DynamicNodeRecord>>(new Map());
 
   function recordDynamic(sceneIdx: number, record: DynamicNodeRecord) {
+    if (!dynamicByScene.value) dynamicByScene.value = new Map();
     dynamicByScene.value.set(sceneIdx, {
       payload: record.payload,
       snapOps: record.snapOps.map((o) => ({ ...o })),
       snapProps: record.snapProps.map((p) => ({ ...p })),
     });
+  }
+
+  // 顶栏跳转请求：StoryPage 在 mount 时注册自己的 loadCursor，TopBar 点击缩略图调 requestJump
+  const _jumpHandler = ref<((idx: number) => void) | null>(null);
+  function setJumpHandler(fn: ((idx: number) => void) | null) { _jumpHandler.value = fn; }
+  function requestJump(idx: number) {
+    if (_jumpHandler.value) _jumpHandler.value(idx);
   }
 
   function addInteraction(snap: {
@@ -108,5 +116,6 @@ export const useStoryStore = defineStore("story", () => {
     dynamicByScene,
     loadList, loadStory, ensureScene, reset,
     addInteraction, trackComic, recordDynamic,
+    setJumpHandler, requestJump,
   };
 });
