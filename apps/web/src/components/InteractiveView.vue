@@ -38,7 +38,8 @@ function stopLoadingHints() {
   loadingHint.value = "";
 }
 
-const props = defineProps<{ scene: Scene; storyId: string; }>();
+// nextComicUrl: 下一幕的叙事图，loading 时做模糊底图（后端未来会给"本幕对应的叙事补充图"，届时替换）
+const props = defineProps<{ scene: Scene; storyId: string; nextComicUrl?: string }>();
 const emit = defineEmits<{
   (e: "done", payload: InteractResponse, snap: {
     ops: Operation[];
@@ -67,6 +68,8 @@ const placed = ref<PlacedItem[]>([]);
 const ops = ref<Operation[]>([]);
 const customProps = ref<CustomProp[]>([]);
 const generating = ref(false);
+// C7: 生成下一幕的二次确认
+const confirmingComplete = ref(false);
 
 // 选两个对象做交互
 const selA = ref<PlacedItem | null>(null);
@@ -467,11 +470,17 @@ async function addCustomProp() {
 }
 
 // ---- 完成 → /api/interact ----
-async function complete() {
+// 入口：点"完成"按钮 → 弹确认框；确认后调 doComplete（C7）
+function askComplete() {
   if (!ops.value.length) {
     toast.push("先安排至少一个动作", "warn");
     return;
   }
+  confirmingComplete.value = true;
+}
+
+async function doComplete() {
+  confirmingComplete.value = false;
   generating.value = true;
   startLoadingHints();
   try {
@@ -636,17 +645,30 @@ const sidebarProps = computed(() => props.scene.props || []);
       <span class="hidden md:inline text-ink-mute">把侧边的道具拖进舞台 · 点选两个对象再写"做什么" · 多次安排后点完成</span>
     </div>
 
-    <!-- 生图 loading 覆盖 -->
+    <!-- 生图 loading 覆盖：C5 — 叙事图作背景（模糊 + 暗化），保持孩子有东西可看 -->
     <Transition name="modal">
       <div
         v-if="generating"
-        class="absolute inset-0 z-30 grid place-items-center bg-paper/85 backdrop-blur rounded-xl"
+        class="absolute inset-0 z-30 rounded-xl overflow-hidden"
       >
-        <div class="text-center px-6 py-5 bg-white rounded-2xl shadow-[var(--shadow-card-lg)] border border-paper-edge max-w-sm">
-          <div class="mx-auto mb-3 w-12 h-12 border-4 border-gold-mute border-t-accent rounded-full animate-spin"></div>
-          <div class="font-display font-bold text-lg">AI 正在作画…</div>
-          <div class="text-sm text-ink-soft mt-2 animate-pulse">{{ loadingHint }}</div>
-          <div class="text-xs text-ink-mute mt-3">预计 30-90 秒，保持网络通畅</div>
+        <!-- 底层：优先用下一幕叙事图（loading 感更"剧情期待"）；回落到本幕 comic_url -->
+        <img
+          v-if="nextComicUrl || scene.comic_url"
+          :src="nextComicUrl || scene.comic_url"
+          class="absolute inset-0 w-full h-full object-cover"
+          style="filter: blur(14px) brightness(0.55) saturate(1.1);"
+          alt=""
+        />
+        <div v-else class="absolute inset-0 bg-paper"></div>
+        <div class="absolute inset-0 bg-paper/55 backdrop-blur-sm"></div>
+        <!-- 前景卡片 -->
+        <div class="relative w-full h-full grid place-items-center">
+          <div class="text-center px-6 py-5 bg-white/95 rounded-2xl shadow-[var(--shadow-card-lg)] border border-paper-edge max-w-sm fade-in">
+            <div class="mx-auto mb-3 w-12 h-12 border-4 border-gold-mute border-t-accent rounded-full animate-spin"></div>
+            <div class="font-display font-bold text-lg">AI 正在作画…</div>
+            <div class="text-sm text-ink-soft mt-2 animate-pulse">{{ loadingHint }}</div>
+            <div class="text-xs text-ink-mute mt-3">预计 30-90 秒，保持网络通畅</div>
+          </div>
         </div>
       </div>
     </Transition>
@@ -744,8 +766,8 @@ const sidebarProps = computed(() => props.scene.props || []);
         </div>
       </div>
 
-      <!-- 侧边：可拖入的角色 / 道具 -->
-      <aside class="bg-white/60 border border-paper-edge rounded-xl p-3 max-h-[440px] overflow-y-auto no-scrollbar">
+      <!-- 侧边：可拖入的角色 / 道具 + 动作序列（C6：放右侧） -->
+      <aside class="bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-auto no-scrollbar flex flex-col gap-3" style="max-height: min(80vh, 720px);">
         <div class="text-xs font-bold text-ink-soft mb-2">👥 角色（拖到舞台）</div>
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
@@ -772,6 +794,32 @@ const sidebarProps = computed(() => props.scene.props || []);
             <div class="text-[10px] mt-1 text-ink truncate w-full">{{ p.name }}</div>
           </div>
         </div>
+        <!-- 动作序列（C6：右侧，紧贴角色/道具库下方） -->
+        <div class="border-t border-paper-edge pt-2">
+          <div class="text-xs font-bold text-ink-soft mb-2 flex items-center justify-between">
+            <span>🎬 动作序列</span>
+            <span v-if="ops.length" class="text-[10px] text-ink-mute font-normal">共 {{ ops.length }}</span>
+          </div>
+          <div v-if="!ops.length" class="text-[11px] text-ink-mute text-center py-3 border border-dashed border-paper-edge rounded">
+            还没安排动作<br />选两个对象 → 写"做什么"
+          </div>
+          <div v-else class="space-y-1.5">
+            <div
+              v-for="(o, i) in ops"
+              :key="i"
+              class="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-accent/10 border border-accent/25 text-[11px] leading-snug"
+            >
+              <span class="font-semibold text-accent-deep shrink-0">{{ i + 1 }}.</span>
+              <span class="flex-1 text-ink break-words">
+                <template v-if="o.subject && o.target">「{{ o.subject }}」对「{{ o.target }}」：{{ o.action }}</template>
+                <template v-else-if="o.subject">「{{ o.subject }}」：{{ o.action }}</template>
+                <template v-else>{{ o.action }}</template>
+              </span>
+              <button class="text-warn hover:text-warn/70 shrink-0" @click="removeOp(i)">×</button>
+            </div>
+          </div>
+        </div>
+
         <!-- 创建新道具 -->
         <div class="border-t border-paper-edge pt-2 space-y-2">
           <div class="text-xs font-bold text-ink-soft">✨ 造个新道具</div>
@@ -862,27 +910,10 @@ const sidebarProps = computed(() => props.scene.props || []);
       </div>
     </div>
 
-    <!-- ops 序列 -->
-    <div v-if="ops.length" class="mt-3 flex flex-wrap gap-2">
-      <div
-        v-for="(o, i) in ops"
-        :key="i"
-        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/10 text-ink text-xs border border-accent/30"
-      >
-        <span class="font-semibold text-accent-deep">{{ i + 1 }}.</span>
-        <span>
-          <template v-if="o.subject && o.target">让「{{ o.subject }}」对「{{ o.target }}」: {{ o.action }}</template>
-          <template v-else-if="o.subject">让「{{ o.subject }}」: {{ o.action }}</template>
-          <template v-else>{{ o.action }}</template>
-        </span>
-        <button class="text-warn hover:text-warn/70" @click="removeOp(i)">×</button>
-      </div>
-    </div>
-
-    <!-- 完成 -->
+    <!-- 完成（ops 序列已移到右侧 aside） -->
     <div class="mt-5 flex justify-end gap-2 pt-4 border-t border-dashed border-paper-edge">
-      <BaseButton variant="soft" size="sm" pill :disabled="generating" @click="ops = []">清空动作</BaseButton>
-      <BaseButton size="sm" pill :disabled="!ops.length || generating" @click="complete">
+      <BaseButton variant="soft" size="sm" pill :disabled="generating || !ops.length" @click="ops = []">清空动作</BaseButton>
+      <BaseButton size="sm" pill :disabled="!ops.length || generating" @click="askComplete">
         {{ generating ? "AI 正在画…" : `✨ 完成 (${ops.length}) 并生成下一幕` }}
       </BaseButton>
     </div>
@@ -923,6 +954,49 @@ const sidebarProps = computed(() => props.scene.props || []);
       @close="propModalOpen = false"
       @submit="onPropModalSubmit"
     />
+
+    <!-- 生成下一幕二次确认（C7） -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div
+          v-if="confirmingComplete"
+          class="fixed inset-0 z-[70] bg-cinema/70 backdrop-blur-sm grid place-items-center p-4"
+          @click.self="confirmingComplete = false"
+        >
+          <div class="bg-white rounded-2xl p-6 max-w-[440px] w-full shadow-[var(--shadow-card-lg)] fade-in">
+            <div class="flex items-start gap-3">
+              <div class="text-4xl">✨</div>
+              <div class="flex-1">
+                <h3 class="font-display font-bold text-lg m-0 mb-1">确认推进到下一幕？</h3>
+                <p class="text-sm text-ink-soft m-0">
+                  当前的 <span class="text-accent-deep font-semibold">{{ ops.length }}</span> 个动作
+                  和所有道具摆放将被锁定，交给 AI 作画。稍后不能再修改这一幕。
+                </p>
+              </div>
+            </div>
+            <!-- ops 摘要 -->
+            <div v-if="ops.length" class="mt-3 max-h-36 overflow-y-auto no-scrollbar bg-paper rounded-lg p-2 text-[11px] space-y-1">
+              <div
+                v-for="(o, i) in ops"
+                :key="i"
+                class="flex gap-1.5"
+              >
+                <span class="text-accent-deep font-semibold shrink-0">{{ i + 1 }}.</span>
+                <span class="text-ink">
+                  <template v-if="o.subject && o.target">「{{ o.subject }}」对「{{ o.target }}」：{{ o.action }}</template>
+                  <template v-else-if="o.subject">「{{ o.subject }}」：{{ o.action }}</template>
+                  <template v-else>{{ o.action }}</template>
+                </span>
+              </div>
+            </div>
+            <div class="mt-5 flex justify-end gap-2">
+              <BaseButton variant="soft" size="sm" pill @click="confirmingComplete = false">再想想</BaseButton>
+              <BaseButton size="sm" pill @click="doComplete">✨ 确认生成</BaseButton>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 

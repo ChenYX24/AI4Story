@@ -75,8 +75,15 @@ body {
 .animate-glow-pulse { animation: glow-pulse 3s ease-in-out infinite alternate; }
 .fade-in            { animation: soft-fade-in 0.45s ease-out both; }
 
+/* 旁白气泡 "正在朗读" 金色光晕呼吸 */
+@keyframes tts-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(224, 178, 95, 0.25); }
+  50%      { box-shadow: 0 0 20px rgba(224, 178, 95, 0.65); }
+}
+.tts-pulse { animation: tts-pulse 1.8s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-floaty, .animate-glow-pulse, .fade-in { animation: none !important; }
+  .animate-floaty, .animate-glow-pulse, .fade-in, .tts-pulse { animation: none !important; }
 }
 
 /* ---------- 全局滚动条柔化 ---------- */

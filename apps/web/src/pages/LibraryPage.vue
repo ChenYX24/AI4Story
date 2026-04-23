@@ -117,7 +117,8 @@ async function onDelete(id: string, e: MouseEvent) {
           <h1 class="font-display text-2xl sm:text-3xl font-bold m-0">📚 我的书架</h1>
           <p class="text-ink-soft text-sm mt-1">选一本书开始冒险，或者创造一本新的</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-ink-mute mr-1">共 {{ filteredList.length }} 个</span>
           <BaseButton variant="soft" size="sm" pill @click="refresh" :disabled="loading">
             {{ loading ? "加载中…" : "🔄 刷新" }}
           </BaseButton>
@@ -128,7 +129,6 @@ async function onDelete(id: string, e: MouseEvent) {
       <!-- 筛选 tabs -->
       <div class="mb-5">
         <BaseTabs v-model="filter" :tabs="filterTabs" />
-        <span class="text-xs text-ink-mute ml-3 align-middle">共 {{ filteredList.length }} 个</span>
       </div>
 
       <!-- 骨架屏：首次加载（list 还没来 + loading=true） -->
@@ -148,15 +148,20 @@ async function onDelete(id: string, e: MouseEvent) {
 
       <div
         v-else-if="!loading && filteredList.length === 0"
-        class="text-center py-16"
+        class="text-center py-20"
       >
-        <div class="text-5xl mb-3">📖</div>
-        <div class="text-ink-soft">
-          {{ filter === "shelf" ? "书架里还没有故事，去首页公共平台加几本吧" :
-             filter === "custom" ? "还没自己创建过故事" :
-             "书架是空的 — 回到首页输入一段故事开始吧" }}
+        <div class="text-6xl mb-4">📖</div>
+        <div class="font-display text-xl sm:text-2xl font-bold text-ink mb-1">
+          {{ filter === "shelf" ? "书架空空的" :
+             filter === "custom" ? "还没有原创故事" :
+             "书架空空的" }}
         </div>
-        <div class="mt-4 flex gap-2 justify-center">
+        <div class="text-ink-soft text-sm">
+          {{ filter === "shelf" ? "去首页公共平台加几本吧" :
+             filter === "custom" ? "回首页写点什么，AI 会帮你生成" :
+             "回首页写点什么开始" }}
+        </div>
+        <div class="mt-5 flex gap-2 justify-center">
           <BaseButton v-if="filter === 'shelf'" variant="soft" pill @click="router.push('/')">去首页发现</BaseButton>
           <BaseButton pill @click="router.push('/')">回首页创建</BaseButton>
         </div>

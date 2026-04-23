@@ -24,11 +24,12 @@ const toast = useToastStore();
 const shelf = useShelfStore();
 const assetShelf = useAssetShelfStore();
 
+// 就绪的 tab 放前面（文字、手绘已可用；语音、视频开发中 🔒）—— P-L1
 const landingTabs = [
   { key: "text",   label: "文字描述", icon: "✍️" },
-  { key: "video",  label: "视频导入", icon: "🎬" },
-  { key: "voice",  label: "语音讲述", icon: "🎙️" },
   { key: "sketch", label: "手绘上传", icon: "🎨" },
+  { key: "voice",  label: "语音讲述 🔒", icon: "🎙️" },
+  { key: "video",  label: "视频导入 🔒", icon: "🎬" },
 ];
 const activeTab = ref("text");
 const title = ref("");
@@ -59,7 +60,6 @@ function scrollToCreate() {
 const plazaTabs = [
   { key: "stories",  label: "热门故事" },
   { key: "assets",   label: "精选资产" },
-  { key: "official", label: "官方精选" },
 ];
 const plazaTab = ref("stories");
 const plazaStories = ref<PublicStoryCard[]>([]);
@@ -96,9 +96,10 @@ function openBundle(b: PublicAssetBundle) { preview.value = { kind: "bundle", da
 
 function playStory(id: string) { preview.value = null; router.push({ name: "story", params: { id } }); }
 
-function addToShelf(id: string) {
-  shelf.add(id);
-  toast.push("已加到书架", "success");
+function toggleStoryShelf(id: string) {
+  const wasIn = shelf.has(id);
+  shelf.toggle(id);
+  toast.push(wasIn ? "已从书架移除" : "已加到书架", "success");
 }
 
 function toggleAssetFav(id: string) {
@@ -319,18 +320,15 @@ async function submitSketch() {
         </div>
       </div>
 
-      <!-- Stories / Official -->
+      <!-- Stories -->
       <div
-        v-else-if="plazaTab === 'stories' || plazaTab === 'official'"
+        v-else-if="plazaTab === 'stories'"
         class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4"
       >
         <BaseCard
-          v-for="s in (plazaTab === 'official'
-            ? plazaStories.filter((x) => x.official)
-            : [...plazaStories].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0)))"
+          v-for="s in [...plazaStories].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))"
           :key="s.id"
           hover
-          :glow="!!s.official"
           class="overflow-hidden cursor-pointer"
           @click="openStory(s)"
         >
@@ -413,19 +411,25 @@ async function submitSketch() {
               v-for="a in plazaAssets"
               :key="a.id"
               hover
-              class="overflow-hidden cursor-pointer relative"
+              class="overflow-hidden cursor-pointer relative group"
               @click="openAsset(a)"
             >
-              <div class="h-28 grid place-items-center bg-gradient-to-br from-paper-deep to-gold-mute">
-                <img :src="a.url" :alt="a.name" loading="lazy" class="max-w-[78%] max-h-[80%] object-contain drop-shadow-sm" />
+              <div class="h-28 grid place-items-center bg-gradient-to-br from-paper-deep to-gold-mute relative">
+                <img :src="a.url" :alt="a.name" loading="lazy" class="max-w-[88%] max-h-[88%] object-contain drop-shadow-sm" />
+                <!-- P-P2：悬浮快速收藏 -->
+                <button
+                  class="absolute top-1.5 right-1.5 w-7 h-7 rounded-full grid place-items-center backdrop-blur transition text-sm"
+                  :class="assetShelf.hasAsset(a.id)
+                    ? 'bg-accent text-white shadow-[0_2px_8px_rgba(255,122,61,0.45)] opacity-100'
+                    : 'bg-white/85 text-ink-soft opacity-0 group-hover:opacity-100 hover:bg-gold-mute'"
+                  :title="assetShelf.hasAsset(a.id) ? '从收藏移除' : '收藏到我的资产'"
+                  @click.stop="toggleAssetFav(a.id)"
+                >{{ assetShelf.hasAsset(a.id) ? "★" : "☆" }}</button>
               </div>
               <div class="p-3">
                 <div class="font-semibold text-ink text-sm truncate">{{ a.name }}</div>
                 <div class="text-xs text-ink-mute mt-0.5">
                   {{ a.kind === 'character' ? '人物' : '道具' }} · 官方
-                </div>
-                <div v-if="assetShelf.hasAsset(a.id)" class="mt-1">
-                  <span class="px-2 py-0.5 text-[10px] bg-good/15 text-good rounded-full">✓ 已收藏</span>
                 </div>
               </div>
             </BaseCard>
@@ -436,10 +440,9 @@ async function submitSketch() {
         </div>
       </div>
 
-      <div class="text-center mt-8">
-        <BaseButton variant="soft" pill @click="toast.push('完整社区功能依赖账号 + 分享码系统，阶段 2 开放 ')">
-          看更多 →
-        </BaseButton>
+      <!-- "看更多" 在分享码 + 账号系统就绪前隐藏（P-L3） -->
+      <div class="text-center mt-10 text-xs text-ink-mute">
+        更多社区内容将在账号与分享码系统上线后开放 ✨
       </div>
     </section>
 
@@ -513,9 +516,8 @@ async function submitSketch() {
           <BaseButton
             variant="soft"
             pill
-            :disabled="shelf.has(preview.data.id)"
-            @click="addToShelf(preview.data.id)"
-          >{{ shelf.has(preview.data.id) ? "✓ 已在书架" : "加到书架" }}</BaseButton>
+            @click="toggleStoryShelf((preview as any).data.id)"
+          >{{ shelf.has(preview.data.id) ? "★ 从书架移除" : "☆ 加到书架" }}</BaseButton>
           <BaseButton pill @click="playStory(preview.data.id)">开始玩 →</BaseButton>
         </template>
         <template v-else-if="preview?.kind === 'asset'">

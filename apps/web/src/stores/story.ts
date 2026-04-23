@@ -86,6 +86,7 @@ export const useStoryStore = defineStore("story", () => {
 
   return {
     list, current, flow, cursor, highestUnlocked,
+    sceneCache,
     interactions, comicUrls,
     loadList, loadStory, ensureScene, reset,
     addInteraction, trackComic,
