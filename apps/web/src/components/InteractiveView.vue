@@ -682,7 +682,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col relative">
+  <div class="flex-1 flex flex-col relative min-h-0">
     <!-- 互动目标提示 -->
     <div class="mb-3 text-xs text-ink-soft px-1 flex items-center gap-2 flex-wrap">
       <span class="inline-flex items-center gap-1 bg-gold/15 px-2 py-1 rounded-full border border-gold/30 text-ink">

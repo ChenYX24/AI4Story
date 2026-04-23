@@ -571,7 +571,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
         </BaseCard>
 
         <!-- 互动节点：操作输入区（Teleport 自 InteractiveView） -->
-        <BaseCard v-if="node?.type === 'interactive' && !dynamicNode" class="p-4">
+        <BaseCard v-show="node?.type === 'interactive' && !dynamicNode" class="p-4">
           <div id="interact-inputs-slot"></div>
         </BaseCard>
 
