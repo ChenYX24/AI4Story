@@ -88,6 +88,20 @@ def init_db() -> None:
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_asset_packs_public ON asset_packs(public)")
+        # 游玩会话（混合存储：前端 localStorage 缓存 + 后端持久化）
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id            TEXT PRIMARY KEY,
+                user_id       TEXT NOT NULL,
+                story_id      TEXT NOT NULL,
+                play_state    TEXT NOT NULL DEFAULT '{}',
+                status        TEXT NOT NULL DEFAULT 'playing',
+                created_at    INTEGER NOT NULL,
+                updated_at    INTEGER NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_story ON sessions(user_id, story_id)")
 
 
 # ---------- 账号操作 ----------
@@ -276,6 +290,106 @@ def list_public_packs(limit: int = 50) -> list[dict]:
             "public": True, "created_at": row["created_at"],
         })
     return out
+
+
+def list_user_packs(user_id: str) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT code, owner_user_id, name, description, asset_ids, public, created_at "
+            "FROM asset_packs WHERE owner_user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [{
+        "code": r["code"], "owner_user_id": r["owner_user_id"],
+        "name": r["name"], "description": r["description"],
+        "asset_ids": _json.loads(r["asset_ids"] or "[]"),
+        "public": bool(r["public"]), "created_at": r["created_at"],
+    } for r in rows]
+
+
+def update_asset_pack(code: str, owner_user_id: str, *,
+                      name: Optional[str] = None, description: Optional[str] = None,
+                      asset_ids: Optional[list[str]] = None, public: Optional[bool] = None) -> bool:
+    pack = get_asset_pack(code)
+    if not pack or pack.get("owner_user_id") != owner_user_id:
+        return False
+    sets, vals = [], []
+    if name is not None:
+        sets.append("name = ?"); vals.append(name)
+    if description is not None:
+        sets.append("description = ?"); vals.append(description)
+    if asset_ids is not None:
+        sets.append("asset_ids = ?"); vals.append(_json.dumps(asset_ids, ensure_ascii=False))
+    if public is not None:
+        sets.append("public = ?"); vals.append(1 if public else 0)
+    if not sets:
+        return True
+    vals.append(code)
+    with _conn() as c:
+        c.execute(f"UPDATE asset_packs SET {', '.join(sets)} WHERE code = ?", vals)
+    return True
+
+
+def delete_asset_pack(code: str, owner_user_id: str) -> bool:
+    with _conn() as c:
+        cur = c.execute(
+            "DELETE FROM asset_packs WHERE code = ? AND owner_user_id = ?",
+            (code, owner_user_id),
+        )
+        return cur.rowcount > 0
+
+
+# ---------- 游玩会话 (sessions) ----------
+
+def create_session(user_id: str, story_id: str, play_state: str) -> dict:
+    sid = "sess_" + secrets.token_hex(8)
+    now = _now()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO sessions (id, user_id, story_id, play_state, status, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (sid, user_id, story_id, play_state, "playing", now, now),
+        )
+    return {"id": sid, "user_id": user_id, "story_id": story_id,
+            "play_state": _json.loads(play_state), "status": "playing",
+            "created_at": now, "updated_at": now}
+
+
+def update_session(session_id: str, user_id: str, play_state: str,
+                   status: Optional[str] = None) -> bool:
+    sets = ["play_state = ?", "updated_at = ?"]
+    vals: list = [play_state, _now()]
+    if status:
+        sets.append("status = ?"); vals.append(status)
+    vals += [session_id, user_id]
+    with _conn() as c:
+        cur = c.execute(
+            f"UPDATE sessions SET {', '.join(sets)} WHERE id = ? AND user_id = ?", vals,
+        )
+        return cur.rowcount > 0
+
+
+def get_sessions_for_story(user_id: str, story_id: str) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, user_id, story_id, play_state, status, created_at, updated_at "
+            "FROM sessions WHERE user_id = ? AND story_id = ? ORDER BY updated_at DESC",
+            (user_id, story_id),
+        ).fetchall()
+    return [{
+        "id": r["id"], "user_id": r["user_id"], "story_id": r["story_id"],
+        "play_state": _json.loads(r["play_state"] or "{}"),
+        "status": r["status"], "created_at": r["created_at"], "updated_at": r["updated_at"],
+    } for r in rows]
+
+
+def delete_session(session_id: str, user_id: str) -> bool:
+    with _conn() as c:
+        cur = c.execute(
+            "DELETE FROM sessions WHERE id = ? AND user_id = ?",
+            (session_id, user_id),
+        )
+        return cur.rowcount > 0
 
 
 # 启动时自动建表

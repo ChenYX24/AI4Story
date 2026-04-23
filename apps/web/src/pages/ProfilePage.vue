@@ -24,7 +24,7 @@ const shelf = useShelfStore();
 const assetShelf = useAssetShelfStore();
 const toast = useToastStore();
 
-const showLogin = ref(!user.isAuthed);
+const showLogin = ref(false);
 const authMode = ref<"login" | "register">("login");
 const nick = ref("");
 const password = ref("");
@@ -56,8 +56,8 @@ async function submitAuth() {
 
 async function logout() {
   await user.logout();
-  showLogin.value = true;
   toast.push("已登出", "info");
+  router.push("/");
 }
 
 const tabs = [
@@ -865,45 +865,5 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
       </template>
     </BaseModal>
 
-    <!-- 登录 / 注册 Modal -->
-    <BaseModal :open="showLogin" :title="authMode === 'login' ? '👋 欢迎回来' : '✨ 创建新账号'" @close="router.push('/')">
-      <div class="flex gap-1 p-1 rounded-full bg-paper-deep mb-4 text-sm">
-        <button
-          class="flex-1 py-2 rounded-full transition font-medium"
-          :class="authMode === 'login' ? 'bg-white shadow text-accent-deep' : 'text-ink-soft'"
-          @click="authMode = 'login'"
-        >登录</button>
-        <button
-          class="flex-1 py-2 rounded-full transition font-medium"
-          :class="authMode === 'register' ? 'bg-white shadow text-accent-deep' : 'text-ink-soft'"
-          @click="authMode = 'register'"
-        >注册</button>
-      </div>
-      <input
-        v-model="nick"
-        type="text"
-        maxlength="20"
-        placeholder="昵称"
-        class="w-full px-4 py-3 mb-3 rounded-xl border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-        @keydown.enter="submitAuth"
-      />
-      <input
-        v-model="password"
-        type="password"
-        maxlength="40"
-        placeholder="密码（至少 4 位）"
-        class="w-full px-4 py-3 rounded-xl border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-        @keydown.enter="submitAuth"
-      />
-      <div class="text-xs text-ink-mute mt-2">
-        {{ authMode === 'login' ? '后续资产、会话、报告都会记到你的账户下。' : '注册后昵称即账号名，请记住密码。' }}
-      </div>
-      <template #footer>
-        <BaseButton variant="soft" pill @click="router.push('/')">稍后</BaseButton>
-        <BaseButton pill :disabled="authBusy" @click="submitAuth">
-          {{ authBusy ? "处理中…" : authMode === 'login' ? '登录' : '注册' }}
-        </BaseButton>
-      </template>
-    </BaseModal>
   </div>
 </template>

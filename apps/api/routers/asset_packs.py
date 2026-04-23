@@ -7,8 +7,11 @@ from pydantic import BaseModel
 
 from ..db import (
     create_asset_pack,
+    delete_asset_pack,
     get_asset_pack,
     list_public_packs,
+    list_user_packs,
+    update_asset_pack,
     user_assets_by_ids,
     user_by_token,
 )
@@ -51,6 +54,10 @@ class PackOut(BaseModel):
     owner_user_id: Optional[str] = None
 
 
+class PublicPacksResp(BaseModel):
+    packs: list[PackOut]
+
+
 @router.post("", response_model=PackOut)
 def create_pack(payload: PackCreateReq,
                 authorization: Optional[str] = Header(default=None)) -> PackOut:
@@ -70,6 +77,67 @@ def create_pack(payload: PackCreateReq,
     )
 
 
+@router.get("/mine", response_model=PublicPacksResp)
+def my_packs(authorization: Optional[str] = Header(default=None)) -> PublicPacksResp:
+    u = _current_user(authorization)
+    if not u:
+        raise HTTPException(401, "请先登录")
+    raw = list_user_packs(u["id"])
+    all_ids: list[str] = []
+    for p in raw:
+        all_ids.extend(p["asset_ids"])
+    assets_map = user_assets_by_ids(all_ids)
+    packs = [
+        PackOut(
+            code=p["code"], name=p["name"], description=p["description"],
+            public=p["public"], asset_ids=p["asset_ids"],
+            assets=[AssetItem(**assets_map[aid]) for aid in p["asset_ids"] if aid in assets_map],
+            created_at=p["created_at"], owner_user_id=p["owner_user_id"],
+        )
+        for p in raw
+    ]
+    return PublicPacksResp(packs=packs)
+
+
+class PackUpdateReq(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    asset_ids: Optional[list[str]] = None
+    public: Optional[bool] = None
+
+
+@router.put("/{code}", response_model=PackOut)
+def update_pack_endpoint(code: str, payload: PackUpdateReq,
+                         authorization: Optional[str] = Header(default=None)) -> PackOut:
+    u = _current_user(authorization)
+    if not u:
+        raise HTTPException(401, "请先登录")
+    ok = update_asset_pack(code.upper(), u["id"],
+                           name=payload.name, description=payload.description,
+                           asset_ids=payload.asset_ids, public=payload.public)
+    if not ok:
+        raise HTTPException(404, "资产包不存在或无权修改")
+    r = get_asset_pack(code)
+    assets_map = user_assets_by_ids(r["asset_ids"]) if r else {}
+    return PackOut(
+        code=r["code"], name=r["name"], description=r["description"],
+        public=r["public"], asset_ids=r["asset_ids"],
+        assets=[AssetItem(**assets_map[aid]) for aid in r["asset_ids"] if aid in assets_map],
+        created_at=r["created_at"], owner_user_id=r["owner_user_id"],
+    )
+
+
+@router.delete("/{code}")
+def delete_pack_endpoint(code: str, authorization: Optional[str] = Header(default=None)):
+    u = _current_user(authorization)
+    if not u:
+        raise HTTPException(401, "请先登录")
+    ok = delete_asset_pack(code.upper(), u["id"])
+    if not ok:
+        raise HTTPException(404, "资产包不存在或无权删除")
+    return {"ok": True}
+
+
 @router.get("/{code}", response_model=PackOut)
 def get_pack(code: str) -> PackOut:
     r = get_asset_pack(code)
@@ -82,10 +150,6 @@ def get_pack(code: str) -> PackOut:
         assets=[AssetItem(**assets_map[aid]) for aid in r["asset_ids"] if aid in assets_map],
         created_at=r["created_at"], owner_user_id=r["owner_user_id"],
     )
-
-
-class PublicPacksResp(BaseModel):
-    packs: list[PackOut]
 
 
 @router.get("/", response_model=PublicPacksResp)

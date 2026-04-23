@@ -67,6 +67,15 @@ export async function apiPatch<T = unknown>(path: string, body?: unknown): Promi
   return handle(r) as Promise<T>;
 }
 
+export async function apiPut<T = unknown>(path: string, body?: unknown): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  return handle(r) as Promise<T>;
+}
+
 export async function apiDelete<T = unknown>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`, {
     method: "DELETE",

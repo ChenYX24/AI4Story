@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete, apiPatch } from "./client";
+import { apiGet, apiPost, apiDelete, apiPatch, apiPut } from "./client";
 import type {
   StoriesResponse,
   StoryDetail,
@@ -107,3 +107,30 @@ export const fetchPack = (code: string) =>
   apiGet<PackOut>(`/api/packs/${encodeURIComponent(code.toUpperCase())}`);
 export const fetchPublicPacks = () =>
   apiGet<{ packs: PackOut[] }>("/api/packs/");
+
+// ---- 游玩会话（后端持久化）----
+export interface SessionOut {
+  id: string;
+  user_id: string;
+  story_id: string;
+  play_state: Record<string, unknown>;
+  status: "playing" | "finished";
+  created_at: number;
+  updated_at: number;
+}
+export const createSessionApi = (body: { story_id: string; play_state: object }) =>
+  apiPost<SessionOut>("/api/sessions", body);
+export const updateSessionApi = (id: string, body: { play_state: object; status?: string }) =>
+  apiPut<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, body);
+export const fetchSessionsApi = (storyId: string) =>
+  apiGet<{ sessions: SessionOut[] }>(`/api/sessions?story_id=${encodeURIComponent(storyId)}`);
+export const deleteSessionApi = (id: string) =>
+  apiDelete<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`);
+
+// ---- 资产包管理（需登录）----
+export const fetchMyPacks = () =>
+  apiGet<{ packs: PackOut[] }>("/api/packs/mine");
+export const updatePack = (code: string, body: { name?: string; description?: string; asset_ids?: string[]; public?: boolean }) =>
+  apiPut<PackOut>(`/api/packs/${encodeURIComponent(code)}`, body);
+export const deletePack = (code: string) =>
+  apiDelete<{ ok: boolean }>(`/api/packs/${encodeURIComponent(code)}`);

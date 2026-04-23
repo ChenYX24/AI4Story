@@ -564,7 +564,7 @@ async function onUploadPick(e: Event) {
   const fr = new FileReader();
   fr.onload = async () => {
     const dataUrl = String(fr.result || "");
-    await addCustomFromImage(dataUrl, file.name.replace(/\.[^.]+$/, "") || "我的图片");
+    await addCustomFromImage(dataUrl, "");
   };
   fr.readAsDataURL(file);
 }
@@ -598,12 +598,12 @@ async function snap() {
   ctx.drawImage(v, 0, 0);
   const dataUrl = cvs.toDataURL("image/png");
   closeCamera();
-  await addCustomFromImage(dataUrl, "拍的照片");
+  await addCustomFromImage(dataUrl, "");
 }
 
 async function onSketchDone(dataUrl: string) {
   showSketchPad.value = false;
-  await addCustomFromImage(dataUrl, "手绘道具");
+  await addCustomFromImage(dataUrl, "");
 }
 
 // 上传/拍照/画板完成 → 先存盘 → 弹 CustomPropCreateModal 让用户填名称/描述 → 再决定 AI 画或直接用

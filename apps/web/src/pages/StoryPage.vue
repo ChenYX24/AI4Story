@@ -31,10 +31,11 @@ const flipIn = ref(true);
 const lineCursor = ref(0);
 const inputText = ref("");
 
-// 聊天记录 — 单幕内的对话（切换幕时重置）
+// 聊天记录 — 按场景持久化
 interface ChatMsg { role: "user" | "assistant"; text: string; }
 const chatLog = ref<ChatMsg[]>([]);
 const chatBusy = ref(false);
+const chatLogByScene = ref<Record<string, ChatMsg[]>>({});
 
 // 互动场景生成的动态 narrative payload — 在切换到下一节点时插入到 flow
 const dynamicNode = ref<InteractResponse | null>(null);
@@ -47,8 +48,16 @@ async function loadCursor(idx: number) {
     store.cursor = idx;
     store.highestUnlocked = Math.max(store.highestUnlocked, idx);
     node.visited = true;
+    // 保存当前场景的聊天记录，再切换
+    if (scene.value && chatLog.value.length) {
+      chatLogByScene.value = { ...chatLogByScene.value, [String(scene.value.index)]: [...chatLog.value] };
+    }
     lineCursor.value = 0;
     chatLog.value = [];
+
+    // 恢复该场景的聊天记录
+    const savedChat = chatLogByScene.value[String(node.sceneIdx)];
+    if (savedChat?.length) chatLog.value = [...savedChat];
 
     if (node.type === "dynamic") {
       // 独立的 dynamic 幕（互动后生成，已插入 flow）
@@ -273,6 +282,10 @@ function onResumeContinue() {
   for (const k in ps.interactByScene) {
     interactStore.save(props.id, Number(k), ps.interactByScene[k] as any);
   }
+  // chatLogByScene
+  if (ps.chatLogByScene) {
+    chatLogByScene.value = { ...ps.chatLogByScene };
+  }
   resumeModalOpen.value = false;
   toast.push("已恢复上次进度", "success");
   loadCursor(ps.cursor);
@@ -293,13 +306,15 @@ function onResumeCancel() {
 }
 
 onMounted(async () => {
-  // 注册 TopBar 缩略图点击 → 走 loadCursor
   store.setJumpHandler((idx: number) => { loadCursor(idx); });
   try {
-    // 先判断有没有"进行中"快照
-    const inProgress = sess.hasInProgress(props.id);
+    // 先判断有没有"进行中"快照（本地 + 远程）
+    let inProgress = sess.hasInProgress(props.id);
+    if (!inProgress) {
+      const remote = await sess.fetchRemoteSession(props.id);
+      if (remote && remote.cursor < remote.flow.length - 1) inProgress = true;
+    }
     if (inProgress) {
-      // 先 loadStory（拿标题等 meta 用于 modal 显示）
       if (!store.current || store.current.id !== props.id) {
         if (store.current && store.current.id !== props.id) store.reset();
         await store.loadStory(props.id);
@@ -310,7 +325,7 @@ onMounted(async () => {
         return;
       }
       resumeModalOpen.value = true;
-      return;  // 等用户在 modal 选择
+      return;
     }
 
     if (!store.current || store.current.id !== props.id) {
@@ -329,7 +344,7 @@ onMounted(async () => {
   }
 });
 
-// 自动快照：cursor / flow / dynamicByScene / interactByScene 变 → 写 session playState
+// 自动快照：cursor / flow / dynamicByScene / interactByScene / chatLog 变 → 写 session playState
 watch(
   [
     () => store.cursor,
@@ -338,11 +353,15 @@ watch(
     () => interactStore.states,
     () => store.interactions,
     () => store.comicUrls,
+    chatLog,
   ],
   () => {
     if (!store.current || store.current.id !== props.id) return;
-    // 已到终点（report 阶段）就不写快照了
     if (store.cursor >= store.flow.length) return;
+    // 保存当前场景的聊天到 chatLogByScene
+    if (scene.value && chatLog.value.length) {
+      chatLogByScene.value = { ...chatLogByScene.value, [String(scene.value.index)]: [...chatLog.value] };
+    }
     const dynObj: Record<string, any> = {};
     store.dynamicByScene?.forEach?.((v, k) => { dynObj[String(k)] = v; });
     const interactObj: Record<string, any> = {};
@@ -361,6 +380,7 @@ watch(
       interactByScene: interactObj,
       interactions: store.interactions.map((i) => ({ ...i })),
       comicUrls: [...store.comicUrls],
+      chatLogByScene: { ...chatLogByScene.value },
       updatedAt: new Date().toISOString(),
     });
   },

@@ -1,27 +1,31 @@
 <script setup lang="ts">
 // D8 资产商城 —— 公共资产库 + 公共分享包
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
 import BaseModal from "@/components/BaseModal.vue";
-import { fetchPublicAssets, fetchPublicPacks, fetchPack } from "@/api/endpoints";
+import { fetchPublicAssets, fetchPublicPacks, fetchPack, fetchMyPacks, deletePack } from "@/api/endpoints";
 import type { PublicAsset, PublicAssetBundle } from "@/api/types";
 import type { PackOut } from "@/api/endpoints";
 import { useAssetShelfStore } from "@/stores/assetShelf";
 import { useToastStore } from "@/stores/toast";
+import { useUserStore } from "@/stores/user";
+import PackEditModal from "@/components/PackEditModal.vue";
 
 const router = useRouter();
 const assetShelf = useAssetShelfStore();
 const toast = useToastStore();
+const user = useUserStore();
 
 const tabs = [
   { key: "assets",  label: "单件资产", icon: "🎭" },
   { key: "bundles", label: "资产包",   icon: "📦" },
   { key: "shared",  label: "用户分享", icon: "✨" },
+  { key: "mine",    label: "我的资产包", icon: "📁" },
 ];
-const tab = ref<"assets" | "bundles" | "shared">("assets");
+const tab = ref<"assets" | "bundles" | "shared" | "mine">("assets");
 
 const assets  = ref<PublicAsset[]>([]);
 const bundles = ref<PublicAssetBundle[]>([]);
@@ -79,7 +83,54 @@ async function loadAll() {
 }
 onMounted(loadAll);
 
+// ---- 我的资产包 ----
+const myPacks = ref<PackOut[]>([]);
+const myPacksLoading = ref(false);
+const selectedPack = ref<PackOut | null>(null);
+const packModalOpen = ref(false);
+const editingPack = ref<PackOut | null>(null);
+
+async function loadMyPacks() {
+  if (!user.isAuthed) return;
+  myPacksLoading.value = true;
+  try {
+    const r = await fetchMyPacks();
+    myPacks.value = r.packs;
+  } catch { /* silent */ }
+  finally { myPacksLoading.value = false; }
+}
+
+function openCreatePack() {
+  editingPack.value = null;
+  packModalOpen.value = true;
+}
+function openEditPack(p: PackOut) {
+  editingPack.value = p;
+  packModalOpen.value = true;
+}
+function onPackSaved(p: PackOut) {
+  packModalOpen.value = false;
+  loadMyPacks();
+}
+async function onDeletePack(p: PackOut) {
+  if (!confirm(`确定删除「${p.name}」？`)) return;
+  try {
+    await deletePack(p.code);
+    myPacks.value = myPacks.value.filter((x) => x.code !== p.code);
+    if (selectedPack.value?.code === p.code) selectedPack.value = null;
+    toast.push("已删除", "success");
+  } catch (e: any) {
+    toast.push(e?.message || "删除失败", "error");
+  }
+}
+function copyCode(code: string) {
+  try { navigator.clipboard.writeText(code); toast.push(`码 ${code} 已复制`, "success"); }
+  catch { toast.push(`码：${code}`, "info"); }
+}
+
 const filteredAssets = computed(() => assets.value);
+
+watch(tab, (v) => { if (v === "mine" && myPacks.value.length === 0) loadMyPacks(); });
 </script>
 
 <template>
@@ -191,7 +242,7 @@ const filteredAssets = computed(() => assets.value);
     </template>
 
     <!-- 用户分享（后端 /packs/ public） -->
-    <template v-else>
+    <template v-else-if="tab === 'shared'">
       <div v-if="shared.length === 0" class="text-center py-16 text-ink-mute">
         <div class="text-5xl mb-3">✨</div>
         <div>还没有用户分享的资产包<br />在"我的资产"多选后点"打包分享到公共库"</div>
@@ -224,6 +275,84 @@ const filteredAssets = computed(() => assets.value);
         </BaseCard>
       </div>
     </template>
+
+    <!-- 我的资产包 -->
+    <template v-else-if="tab === 'mine'">
+      <div v-if="!user.isAuthed" class="text-center py-16 text-ink-mute">
+        请先登录后查看我的资产包
+      </div>
+      <template v-else>
+        <div class="flex items-center justify-between mb-4">
+          <div class="text-sm text-ink-soft">共 {{ myPacks.length }} 个包</div>
+          <BaseButton size="sm" pill @click="openCreatePack">+ 创建资产包</BaseButton>
+        </div>
+
+        <!-- 包详情展开 -->
+        <BaseCard v-if="selectedPack" class="p-5 mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="font-bold text-ink text-lg">{{ selectedPack.name }}</div>
+              <div class="text-xs text-ink-mute mt-0.5">
+                码 <span class="font-mono text-accent-deep cursor-pointer" @click="copyCode(selectedPack.code)">{{ selectedPack.code }}</span>
+                · {{ selectedPack.asset_ids.length }} 件
+                · {{ selectedPack.public ? '公开' : '私有' }}
+              </div>
+              <div v-if="selectedPack.description" class="text-sm text-ink-soft mt-1">{{ selectedPack.description }}</div>
+            </div>
+            <div class="flex gap-2">
+              <BaseButton variant="soft" size="sm" pill @click="openEditPack(selectedPack!)">编辑</BaseButton>
+              <BaseButton variant="soft" size="sm" pill @click="onDeletePack(selectedPack!)">删除</BaseButton>
+              <BaseButton variant="soft" size="sm" pill @click="selectedPack = null">收起</BaseButton>
+            </div>
+          </div>
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-2">
+            <div v-for="a in selectedPack.assets" :key="a.id"
+                 class="aspect-square rounded-lg bg-paper-deep p-1.5 grid place-items-center overflow-hidden" :title="a.name">
+              <img :src="a.url" class="max-w-full max-h-full object-contain" :alt="a.name" />
+              <div class="text-[10px] text-ink-mute truncate w-full text-center mt-0.5">{{ a.name }}</div>
+            </div>
+          </div>
+        </BaseCard>
+
+        <div v-if="myPacksLoading" class="text-center py-8 text-ink-mute">加载中…</div>
+        <div v-else-if="myPacks.length === 0" class="text-center py-16 bg-white rounded-[var(--radius-card)] border border-paper-edge">
+          <div class="text-5xl mb-2">📁</div>
+          <div class="font-bold text-ink">还没有资产包</div>
+          <div class="text-sm text-ink-soft mt-1">创建资产包来整理你的道具，还能分享给朋友</div>
+        </div>
+        <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+          <BaseCard
+            v-for="p in myPacks"
+            :key="p.code"
+            hover
+            class="overflow-hidden cursor-pointer relative group"
+            :class="selectedPack?.code === p.code && 'ring-2 ring-accent'"
+            @click="selectedPack = selectedPack?.code === p.code ? null : p"
+          >
+            <div class="h-24 grid place-items-center bg-gradient-to-br from-paper-deep to-gold-mute relative overflow-hidden">
+              <div v-if="p.assets.length" class="grid grid-cols-3 gap-1 p-2">
+                <div v-for="a in p.assets.slice(0, 6)" :key="a.id"
+                     class="w-7 h-7 bg-white/70 rounded overflow-hidden grid place-items-center">
+                  <img :src="a.url" class="max-w-full max-h-full object-contain" alt="" />
+                </div>
+              </div>
+              <div v-else class="text-4xl">📁</div>
+              <div class="absolute bottom-1 right-2 px-2 py-0.5 text-[11px] rounded-full bg-white/90 text-ink font-semibold">× {{ p.asset_ids.length }}</div>
+              <span v-if="p.public" class="absolute top-1 left-1 px-1.5 py-0.5 text-[10px] rounded-full bg-good/90 text-white">公开</span>
+            </div>
+            <div class="p-3">
+              <div class="font-semibold text-ink text-sm truncate">{{ p.name }}</div>
+              <div class="text-xs text-ink-mute mt-0.5 flex items-center justify-between">
+                <span class="font-mono text-accent-deep">{{ p.code }}</span>
+                <span>{{ p.asset_ids.length }} 件</span>
+              </div>
+            </div>
+          </BaseCard>
+        </div>
+      </template>
+    </template>
+
+    <PackEditModal :open="packModalOpen" :edit-pack="editingPack" @close="packModalOpen = false" @saved="onPackSaved" />
 
     <!-- 分享码查询结果 modal -->
     <BaseModal :open="!!importedPack" title="分享包内容" :max-width="'520px'" @close="importedPack = null">
