@@ -716,11 +716,11 @@ defineExpose({
     </Transition>
 
     <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0 overflow-hidden" style="grid-template-rows: minmax(0, 1fr);">
-      <!-- 舞台 —— aspect-square 匹配背景图 1:1；w-full + max-h-full = 取 min(cellW, cellH) 的正方形；m-auto 居中 -->
+      <!-- 舞台 —— 图决定 stage 高度：图用 w-full + h-auto 保持原始 aspect；stage 顶部对齐于 grid cell -->
       <div
         ref="stageRef"
-        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none w-full max-h-full m-auto"
-        style="aspect-ratio: 1 / 1; touch-action: none;"
+        class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none w-full max-h-full self-start"
+        style="touch-action: none;"
         @drop="onStageDrop"
         @dragover="allowDrop"
         @pointermove="onStagePointerMove"
@@ -729,7 +729,7 @@ defineExpose({
         @pointerleave="() => onStagePointerUp()"
         @click.self="onStageBackgroundClick"
       >
-        <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="背景" />
+        <img v-if="scene.background_url" :src="scene.background_url" class="block w-full h-auto pointer-events-none" alt="背景" />
 
         <!-- 已放置的物体 -->
         <div
