@@ -715,7 +715,7 @@ defineExpose({
       </div>
     </Transition>
 
-    <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0 overflow-hidden" style="grid-template-rows: minmax(0, 1fr);">
+    <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0" style="grid-template-rows: minmax(0, 1fr);">
       <!-- 舞台 —— 填满 grid cell，图 object-contain 完整显示，顶部对齐（留白在底部） -->
       <div
         ref="stageRef"
