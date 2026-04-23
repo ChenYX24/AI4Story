@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import BaseCard from "@/components/BaseCard.vue";
+import { createPack, fetchPack } from "@/api/endpoints";
+import type { PackOut } from "@/api/endpoints";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
 import BaseModal from "@/components/BaseModal.vue";
@@ -146,6 +148,94 @@ function sessionProgress(storyId: string): number {
   const ps = sess.getPlayState(storyId);
   if (!ps || ps.flow.length === 0) return 0;
   return Math.round(((ps.cursor + 1) / ps.flow.length) * 100);
+}
+
+// D4/D5 我的资产 —— 多选 + 打包分享 + 分享码导入
+const mineSelected = ref<Set<string>>(new Set());
+function toggleMineSelect(id: string) {
+  const s = new Set(mineSelected.value);
+  if (s.has(id)) s.delete(id); else s.add(id);
+  mineSelected.value = s;
+}
+function clearMineSelect() { mineSelected.value = new Set(); }
+
+const shareModalOpen = ref(false);
+const sharePackName = ref("");
+const sharePackDesc = ref("");
+const sharePackPublic = ref(false);
+const sharePackBusy = ref(false);
+const createdPack = ref<PackOut | null>(null);
+
+function openShareModal() {
+  if (!mineSelected.value.size) { toast.push("先选几件要打包的道具", "warn"); return; }
+  sharePackName.value = `我的道具包 · ${new Date().toLocaleDateString()}`;
+  sharePackDesc.value = "";
+  sharePackPublic.value = false;
+  createdPack.value = null;
+  shareModalOpen.value = true;
+}
+
+async function doCreatePack() {
+  if (!sharePackName.value.trim()) { toast.push("给包取个名字", "warn"); return; }
+  sharePackBusy.value = true;
+  try {
+    const p = await createPack({
+      name: sharePackName.value.trim(),
+      description: sharePackDesc.value.trim(),
+      asset_ids: Array.from(mineSelected.value),
+      public: sharePackPublic.value,
+    });
+    createdPack.value = p;
+    clearMineSelect();
+    toast.push(`✨ 分享码 ${p.code} 已生成`, "success");
+  } catch (e: any) {
+    toast.push(e?.message || "打包失败", "error");
+  } finally {
+    sharePackBusy.value = false;
+  }
+}
+
+function copyShareCode() {
+  if (!createdPack.value) return;
+  const code = createdPack.value.code;
+  try {
+    navigator.clipboard.writeText(code);
+    toast.push(`码 ${code} 已复制`, "success");
+  } catch {
+    toast.push(`码：${code}`, "info");
+  }
+}
+
+// 分享码导入（Profile 我的资产页的入口，和 StorePage 独立）
+const importCodeInput = ref("");
+const importBusy = ref(false);
+const importedPackInProfile = ref<PackOut | null>(null);
+async function doImportByCode() {
+  const code = importCodeInput.value.trim().toUpperCase();
+  if (code.length !== 6) { toast.push("分享码是 6 位", "warn"); return; }
+  importBusy.value = true;
+  try {
+    importedPackInProfile.value = await fetchPack(code);
+  } catch (e: any) {
+    toast.push(e?.message || "找不到这个分享码", "error");
+  } finally { importBusy.value = false; }
+}
+function importPackToMine() {
+  if (!importedPackInProfile.value) return;
+  let count = 0;
+  for (const a of importedPackInProfile.value.assets) {
+    if (assetShelf.myAssets.find((m) => m.id === a.id)) continue;
+    assetShelf.addMyAsset({
+      id: a.id, name: a.name, url: a.url,
+      kind: (a.kind as "character" | "object"),
+      origin_story_id: a.origin_story_id,
+      origin_scene_idx: a.origin_scene_idx,
+    });
+    count++;
+  }
+  toast.push(count ? `✨ 导入了 ${count} 件` : "全部已经在我的资产里了", "success");
+  importCodeInput.value = "";
+  importedPackInProfile.value = null;
 }
 
 // E4 成长报告 —— 硬编码 + 轻量启发式（阶段 3 接后端 AI 聚合分析）
@@ -442,24 +532,62 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
           </div>
         </div>
 
-        <!-- 我的创作（自创道具，含互动页 AI 生成 / 上传 / 画板） -->
+        <!-- 我的创作（自创道具 + 多选打包分享 + 分享码导入） -->
         <template v-else-if="assetSub === 'mine'">
+          <!-- 工具栏：分享选中 + 分享码导入 -->
+          <div class="mb-4 flex items-center gap-3 flex-wrap">
+            <BaseButton
+              size="sm"
+              pill
+              :disabled="mineSelected.size === 0"
+              @click="openShareModal"
+            >📤 打包分享 ({{ mineSelected.size }})</BaseButton>
+            <BaseButton
+              v-if="mineSelected.size > 0"
+              variant="soft"
+              size="sm"
+              pill
+              @click="clearMineSelect"
+            >清空选择</BaseButton>
+            <div class="flex-1"></div>
+            <input
+              v-model="importCodeInput"
+              type="text"
+              maxlength="6"
+              placeholder="分享码导入"
+              class="px-3 py-1.5 text-sm rounded-lg border border-paper-edge bg-white w-28 font-mono uppercase tracking-wider focus:outline-none focus:border-accent-soft"
+              @keydown.enter="doImportByCode"
+            />
+            <BaseButton size="sm" pill variant="soft" :disabled="importBusy || importCodeInput.length !== 6" @click="doImportByCode">
+              {{ importBusy ? "查找…" : "查找" }}
+            </BaseButton>
+          </div>
+
           <div v-if="assetShelf.myAssets.length === 0" class="text-center py-16 bg-white rounded-[var(--radius-card)] border border-paper-edge">
             <div class="text-5xl mb-2">🎨</div>
             <div class="font-bold text-ink">还没有自创道具</div>
             <div class="text-sm text-ink-soft mt-1">在互动页"造个新道具"里，AI 画好的 / 上传的道具都会出现在这里</div>
           </div>
           <div v-else>
-            <div class="text-sm font-semibold text-ink-soft mb-2">✨ 我画的道具 · {{ assetShelf.myAssets.length }}</div>
+            <div class="text-sm font-semibold text-ink-soft mb-2">
+              ✨ 我画的道具 · {{ assetShelf.myAssets.length }}
+              <span v-if="mineSelected.size" class="text-accent-deep font-normal ml-2">已选 {{ mineSelected.size }}</span>
+            </div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <BaseCard
                 v-for="a in assetShelf.myAssets"
                 :key="a.id"
                 hover
-                class="overflow-hidden cursor-default relative group"
+                class="overflow-hidden cursor-pointer relative group border-2"
+                :class="mineSelected.has(a.id) ? '!border-accent shadow-[0_0_12px_rgba(255,122,61,0.3)]' : '!border-transparent'"
+                @click="toggleMineSelect(a.id)"
               >
-                <div class="h-24 grid place-items-center bg-gradient-to-br from-paper to-gold-mute">
+                <div class="h-24 grid place-items-center bg-gradient-to-br from-paper to-gold-mute relative">
                   <img :src="a.url" :alt="a.name" loading="lazy" class="max-w-[88%] max-h-[88%] object-contain drop-shadow-sm" />
+                  <span
+                    v-if="mineSelected.has(a.id)"
+                    class="absolute top-1.5 left-1.5 w-6 h-6 grid place-items-center bg-accent text-white rounded-full text-xs shadow"
+                  >✓</span>
                 </div>
                 <div class="p-2.5">
                   <div class="font-semibold text-ink text-sm truncate">{{ a.name }}</div>
@@ -675,6 +803,67 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
         </BaseCard>
       </div>
     </div>
+
+    <!-- D4/D5 打包分享 modal -->
+    <BaseModal :open="shareModalOpen" :title="createdPack ? '✨ 分享码已生成' : '📤 打包分享道具'" :max-width="'460px'" @close="shareModalOpen = false; createdPack = null">
+      <template v-if="!createdPack">
+        <p class="text-sm text-ink-soft m-0 mb-3">把你画的 {{ mineSelected.size }} 件道具打包，生成一个 6 位码发给朋友。</p>
+        <label class="block mb-3">
+          <span class="text-xs text-ink-soft block mb-1">包名</span>
+          <input v-model="sharePackName" maxlength="30" type="text"
+                 class="w-full px-3 py-2 rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft" />
+        </label>
+        <label class="block mb-3">
+          <span class="text-xs text-ink-soft block mb-1">描述（可选）</span>
+          <textarea v-model="sharePackDesc" rows="2" maxlength="120"
+                    class="w-full px-3 py-2 rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft resize-y"></textarea>
+        </label>
+        <label class="flex items-center gap-2 text-sm text-ink-soft">
+          <input type="checkbox" v-model="sharePackPublic" class="accent-accent" />
+          同时发布到公共资产商城（其他人能看到）
+        </label>
+      </template>
+      <template v-else>
+        <div class="text-center py-4">
+          <div class="text-ink-soft text-sm mb-1">把这个码发给朋友</div>
+          <div class="font-mono text-3xl font-bold text-accent-deep tracking-[0.3em] my-3">{{ createdPack.code }}</div>
+          <div class="text-xs text-ink-mute">包含 {{ createdPack.asset_ids.length }} 件道具 · {{ createdPack.public ? '公共可见' : '仅靠码访问' }}</div>
+        </div>
+      </template>
+      <template #footer>
+        <template v-if="!createdPack">
+          <BaseButton variant="soft" pill @click="shareModalOpen = false">取消</BaseButton>
+          <BaseButton pill :disabled="sharePackBusy" @click="doCreatePack">{{ sharePackBusy ? '生成中…' : '生成分享码' }}</BaseButton>
+        </template>
+        <template v-else>
+          <BaseButton variant="soft" pill @click="copyShareCode">📋 复制码</BaseButton>
+          <BaseButton pill @click="shareModalOpen = false; createdPack = null">完成</BaseButton>
+        </template>
+      </template>
+    </BaseModal>
+
+    <!-- 分享码导入结果 modal（Profile 我的资产入口） -->
+    <BaseModal :open="!!importedPackInProfile" :title="'分享包内容'" :max-width="'480px'" @close="importedPackInProfile = null">
+      <template v-if="importedPackInProfile">
+        <div class="font-bold text-ink">{{ importedPackInProfile.name }}</div>
+        <div class="text-xs text-ink-mute mt-0.5">
+          码 <span class="font-mono text-accent-deep">{{ importedPackInProfile.code }}</span>
+          · {{ importedPackInProfile.asset_ids.length }} 件
+        </div>
+        <p v-if="importedPackInProfile.description" class="text-sm text-ink-soft mt-2 mb-2">{{ importedPackInProfile.description }}</p>
+        <div class="grid grid-cols-5 gap-2 mt-2">
+          <div v-for="a in importedPackInProfile.assets" :key="a.id"
+               class="aspect-square rounded-lg bg-paper-deep p-1 grid place-items-center overflow-hidden"
+               :title="a.name">
+            <img :src="a.url" class="max-w-full max-h-full object-contain" alt="" />
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <BaseButton variant="soft" pill @click="importedPackInProfile = null">取消</BaseButton>
+        <BaseButton pill @click="importPackToMine">全部加到我的资产 →</BaseButton>
+      </template>
+    </BaseModal>
 
     <!-- 登录 / 注册 Modal -->
     <BaseModal :open="showLogin" :title="authMode === 'login' ? '👋 欢迎回来' : '✨ 创建新账号'" @close="router.push('/')">

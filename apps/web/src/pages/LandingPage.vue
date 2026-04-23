@@ -136,35 +136,48 @@ const assetById = computed(() => {
 });
 
 // 手绘上传
-const sketchFile = ref<File | null>(null);
-const sketchDataUrl = ref<string>("");
+// B5：手绘支持多图上传
+interface SketchImage { dataUrl: string; name: string; size: number; }
+const sketchImages = ref<SketchImage[]>([]);
 const sketchTitle = ref("");
 const sketchDesc = ref("");
 const sketchUploading = ref(false);
 
 function onSketchPick(e: Event) {
-  const f = (e.target as HTMLInputElement).files?.[0];
-  if (!f) return;
-  if (!f.type.startsWith("image/")) { toast.push("请选择图片", "warn"); return; }
-  if (f.size > 6 * 1024 * 1024) { toast.push("图片不能超过 6MB", "warn"); return; }
-  sketchFile.value = f;
-  const fr = new FileReader();
-  fr.onload = () => { sketchDataUrl.value = String(fr.result || ""); };
-  fr.readAsDataURL(f);
+  const files = (e.target as HTMLInputElement).files;
+  if (!files || !files.length) return;
+  const MAX_TOTAL = 9;
+  for (const f of Array.from(files)) {
+    if (sketchImages.value.length >= MAX_TOTAL) { toast.push(`最多 ${MAX_TOTAL} 张`, "warn"); break; }
+    if (!f.type.startsWith("image/")) { toast.push(`${f.name} 不是图片`, "warn"); continue; }
+    if (f.size > 6 * 1024 * 1024) { toast.push(`${f.name} 超过 6MB`, "warn"); continue; }
+    const fr = new FileReader();
+    fr.onload = () => {
+      sketchImages.value = [...sketchImages.value, { dataUrl: String(fr.result || ""), name: f.name, size: f.size }];
+    };
+    fr.readAsDataURL(f);
+  }
+  (e.target as HTMLInputElement).value = "";
+}
+function removeSketchImage(idx: number) {
+  sketchImages.value = sketchImages.value.filter((_, i) => i !== idx);
 }
 
 async function submitSketch() {
-  if (!sketchDataUrl.value) { toast.push("先选一张图片", "warn"); return; }
+  if (!sketchImages.value.length) { toast.push("先上传至少一张图", "warn"); return; }
   const desc = sketchDesc.value.trim();
   if (!desc) { toast.push("用几句话描述你画了什么，AI 才能接着往下编 ✏️", "warn"); return; }
   sketchUploading.value = true;
   try {
-    const up = await uploadImage({ data: sketchDataUrl.value, kind: "sketch" });
-    // 把描述 + 图 URL 打包送给 create custom story
-    const text = `${desc}\n（参考一张小朋友自己画的图：${up.url}）`;
+    // 所有图并行上传
+    const uploaded = await Promise.all(sketchImages.value.map((img) =>
+      uploadImage({ data: img.dataUrl, kind: "sketch" }),
+    ));
+    const urlLines = uploaded.map((u, i) => `  ${i + 1}. ${u.url}`).join("\n");
+    const text = `${desc}\n（小朋友上传了 ${uploaded.length} 张参考图：\n${urlLines}\n）`;
     await createCustomStory({ text, title: sketchTitle.value.trim() || "我的手绘故事" });
-    toast.push("手绘故事已进入后台生成 ✨", "success");
-    sketchFile.value = null; sketchDataUrl.value = ""; sketchDesc.value = ""; sketchTitle.value = "";
+    toast.push(`手绘故事已进入后台生成 ✨ (${uploaded.length} 张参考图)`, "success");
+    sketchImages.value = []; sketchDesc.value = ""; sketchTitle.value = "";
     router.push("/library");
   } catch (e: any) {
     toast.push(`创建失败：${e.message}`, "error");
@@ -227,20 +240,35 @@ async function submitSketch() {
             class="w-full px-4 py-3 mb-3 rounded-xl border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
           />
           <div class="grid md:grid-cols-2 gap-3">
+            <!-- B5：多图上传 -->
             <div>
-              <label
-                class="block aspect-square border-2 border-dashed border-paper-edge rounded-xl cursor-pointer grid place-items-center bg-paper hover:bg-paper-deep/50 transition overflow-hidden relative"
-              >
-                <img v-if="sketchDataUrl" :src="sketchDataUrl" class="absolute inset-0 w-full h-full object-contain bg-white" alt="" />
-                <div v-else class="text-center text-ink-soft p-4">
-                  <div class="text-5xl mb-2">🎨</div>
-                  <div class="text-sm">点这里上传一张图</div>
-                  <div class="text-xs text-ink-mute mt-1">照片 / 截图 / 扫描 都可以</div>
+              <div class="grid grid-cols-3 gap-2">
+                <div
+                  v-for="(img, i) in sketchImages"
+                  :key="i"
+                  class="aspect-square rounded-xl overflow-hidden relative bg-white border border-paper-edge group"
+                >
+                  <img :src="img.dataUrl" class="w-full h-full object-contain" alt="" />
+                  <button
+                    class="absolute top-1 right-1 w-6 h-6 bg-white/90 rounded-full text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center text-xs"
+                    title="移除"
+                    @click="removeSketchImage(i)"
+                  >✕</button>
                 </div>
-                <input type="file" accept="image/*" class="hidden" @change="onSketchPick" />
-              </label>
-              <div v-if="sketchFile" class="text-xs text-ink-mute mt-1 truncate">
-                {{ sketchFile.name }} · {{ Math.round(sketchFile.size / 1024) }} KB
+                <label
+                  v-if="sketchImages.length < 9"
+                  class="aspect-square border-2 border-dashed border-paper-edge rounded-xl cursor-pointer grid place-items-center bg-paper hover:bg-paper-deep/50 transition"
+                >
+                  <div class="text-center text-ink-soft p-2">
+                    <div class="text-3xl mb-1">＋</div>
+                    <div class="text-[11px]">添加图片</div>
+                    <div class="text-[10px] text-ink-mute">最多 9 张</div>
+                  </div>
+                  <input type="file" accept="image/*" multiple class="hidden" @change="onSketchPick" />
+                </label>
+              </div>
+              <div v-if="sketchImages.length" class="text-xs text-ink-mute mt-2">
+                已添加 {{ sketchImages.length }} 张（AI 会同时参考所有图）
               </div>
             </div>
             <textarea
