@@ -112,7 +112,7 @@ if errorlevel 1 (
   goto fail
 )
 node --version
-npm --version
+call npm --version
 
 echo [CHECK] Locating pnpm...
 where pnpm >nul 2>&1
@@ -131,7 +131,7 @@ if errorlevel 1 (
   echo [ERROR] pnpm not found. Install it with: npm install -g pnpm
   goto fail
 )
-pnpm --version
+call pnpm --version
 
 echo [CHECK] Installing/verifying frontend packages...
 pushd "%WEB_DIR%"
