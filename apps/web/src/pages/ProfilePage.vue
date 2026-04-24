@@ -149,7 +149,18 @@ function sessionThumb(s: { story_id: string }): string | undefined {
 function sessionProgress(storyId: string): number {
   const ps = sess.getPlayState(storyId);
   if (!ps || ps.flow.length === 0) return 0;
-  return Math.round(((ps.cursor + 1) / ps.flow.length) * 100);
+  const baseFlow = ps.flow.filter((f) => f.type !== "dynamic");
+  const baseTotal = baseFlow.length || ps.flow.length;
+  const currentBase = ps.flow.slice(0, ps.cursor + 1).filter((f) => f.type !== "dynamic").length || 1;
+  return Math.round((currentBase / baseTotal) * 100);
+}
+function sessionProgressText(storyId: string): string {
+  const ps = sess.getPlayState(storyId);
+  if (!ps || ps.flow.length === 0) return "? / ?";
+  const baseFlow = ps.flow.filter((f) => f.type !== "dynamic");
+  const baseTotal = baseFlow.length || ps.flow.length;
+  const currentBase = ps.flow.slice(0, ps.cursor + 1).filter((f) => f.type !== "dynamic").length || 1;
+  return `${currentBase} / ${baseTotal}`;
 }
 const profileSessions = computed(() => {
   const merged = [...sess.list];
@@ -480,6 +491,11 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                 class="p-0 relative group cursor-pointer overflow-hidden"
                 @click="s.report_ready ? openReport(s.story_id) : openStory(s.story_id)"
               >
+                <span
+                  v-if="sess.hasGeneratedNotice(s.story_id)"
+                  class="absolute top-1.5 right-1.5 z-10 w-2.5 h-2.5 rounded-full bg-warn shadow-[0_0_0_2px_white]"
+                  title="有新的场景或道具生成"
+                ></span>
                 <!-- 缩略图（优先 playState 最近 comic，回落故事 cover） -->
                 <div class="h-24 bg-gradient-to-br from-paper-deep to-gold-mute grid place-items-center overflow-hidden relative">
                   <img
@@ -492,11 +508,11 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                   <!-- 状态胶囊 -->
                   <span
                     v-if="s.report_ready"
-                    class="absolute top-1.5 right-1.5 px-2 py-0.5 text-[10px] rounded-full bg-good/90 text-white"
+                    class="absolute top-1.5 right-4 px-2 py-0.5 text-[10px] rounded-full bg-good/90 text-white"
                   >✓ 已完成</span>
                   <span
                     v-else-if="sess.hasInProgress(s.story_id)"
-                    class="absolute top-1.5 right-1.5 px-2 py-0.5 text-[10px] rounded-full bg-accent/90 text-white"
+                    class="absolute top-1.5 right-4 px-2 py-0.5 text-[10px] rounded-full bg-accent/90 text-white"
                   >进行中</span>
                 </div>
                 <div class="p-3">
@@ -513,7 +529,7 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                       ></div>
                     </div>
                     <div class="text-[11px] text-ink-mute mt-1">
-                      第 {{ (sess.getPlayState(s.story_id)?.cursor ?? 0) + 1 }} / {{ sess.getPlayState(s.story_id)?.flow.length ?? '?' }} 页
+                      第 {{ sessionProgressText(s.story_id) }} 页
                     </div>
                   </div>
                   <div v-else-if="s.report_ready" class="text-xs text-good">点击查看报告</div>

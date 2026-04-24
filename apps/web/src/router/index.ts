@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import { getAuthToken } from "@/api/client";
+import { useStoryStore } from "@/stores/story";
 
 declare module "vue-router" {
   interface RouteMeta { requiresAuth?: boolean; }
@@ -33,7 +34,17 @@ const router = createRouter({
   scrollBehavior: (_to, _from, saved) => saved ?? { top: 0 },
 });
 
-router.beforeEach((to) => {
+router.beforeEach((to, from) => {
+  if (from.name === "story" && to.name !== "story" && to.name !== "report") {
+    const story = useStoryStore();
+    const storyId = String(from.params.id || "");
+    if (story.hasPendingWork(storyId)) {
+      const leave = window.confirm(
+        "当前还有道具或新场景正在生成。退出后会继续在后台生成。\n\n选择“确定”退出，选择“取消”继续故事。",
+      );
+      if (!leave) return false;
+    }
+  }
   if (to.meta.requiresAuth && !getAuthToken()) {
     return { name: "landing", query: { login: "1", redirect: to.fullPath } };
   }

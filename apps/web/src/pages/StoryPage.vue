@@ -70,12 +70,14 @@ async function loadCursor(idx: number) {
         dynamicNode.value = null;
         pendingDynamicPreview.value = pending?.previewUrl || null;
         pendingDynamicError.value = pending?.error || null;
+        interactiveOps.value = [];
       } else {
         // 源 interactive 场景的 meta 仍然作为 scene.value 背景（供 summary 卡用），但 type 在模板分支里按 dynamicNode 优先
         scene.value = await store.ensureScene(node.sceneIdx).catch(() => null as any);
         dynamicNode.value = dyn.payload;
         pendingDynamicPreview.value = null;
         pendingDynamicError.value = null;
+        interactiveOps.value = [];
         store.trackComic(dyn.payload.comic_url);
         if (dyn.payload.storyboard?.length) {
           tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
@@ -91,6 +93,8 @@ async function loadCursor(idx: number) {
       dynamicNode.value = null;
       pendingDynamicPreview.value = null;
       pendingDynamicError.value = null;
+      const savedInteract = sc.type === "interactive" ? interactStore.get(props.id, sc.index) : undefined;
+      interactiveOps.value = savedInteract?.ops?.map((o) => ({ ...o })) || [];
       if (sc.type === "narrative" && sc.storyboard?.length) {
         tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
       } else {
@@ -130,6 +134,8 @@ async function turnPage(direction: "next" | "prev") {
   }
   if (dynamicNode.value && direction === "prev") {
     dynamicNode.value = null;
+    flipping.value = "prev";
+    setTimeout(() => loadCursor(Math.max(0, store.cursor - 1)), 420);
     return;
   }
   const to = store.cursor + (direction === "next" ? 1 : -1);
@@ -301,6 +307,7 @@ function onInteractGenerate(request: InteractRequest) {
       snapOps: request.ops,
       snapProps: request.custom_props,
     });
+    sess.markGeneratedNotice(props.id);
     toast.push("Generated new story scene", "success");
     const active = store.flow[store.cursor];
     if (active?.type === "dynamic" && active.sceneIdx === sourceSceneIdx) {
@@ -364,6 +371,7 @@ function onResumeCancel() {
 }
 
 onMounted(async () => {
+  sess.clearGeneratedNotice(props.id);
   store.setJumpHandler((idx: number) => { loadCursor(idx); });
   try {
     // 先判断有没有"进行中"快照（本地 + 远程）

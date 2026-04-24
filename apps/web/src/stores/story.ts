@@ -41,6 +41,7 @@ export const useStoryStore = defineStore("story", () => {
   // 动态节点持久化：sceneIdx → 该 interactive 场景已生成的 dynamic 结果（可切换回看）
   const dynamicByScene = ref<Map<number, DynamicNodeRecord>>(new Map());
   const pendingDynamicByScene = ref<Map<number, PendingDynamicRecord>>(new Map());
+  const pendingPropCounts = ref<Record<string, number>>({});
 
   function recordDynamic(sceneIdx: number, record: DynamicNodeRecord) {
     if (!dynamicByScene.value) dynamicByScene.value = new Map();
@@ -66,6 +67,23 @@ export const useStoryStore = defineStore("story", () => {
     const current = pendingDynamicByScene.value.get(sceneIdx);
     if (!current) return;
     pendingDynamicByScene.value.set(sceneIdx, { ...current, error });
+  }
+
+  function startPendingProp(storyId: string) {
+    pendingPropCounts.value = {
+      ...pendingPropCounts.value,
+      [storyId]: (pendingPropCounts.value[storyId] || 0) + 1,
+    };
+  }
+
+  function finishPendingProp(storyId: string) {
+    const next = Math.max(0, (pendingPropCounts.value[storyId] || 0) - 1);
+    pendingPropCounts.value = { ...pendingPropCounts.value, [storyId]: next };
+  }
+
+  function hasPendingWork(storyId?: string): boolean {
+    if (!storyId) return false;
+    return pendingDynamicByScene.value.size > 0 || (pendingPropCounts.value[storyId] || 0) > 0;
   }
 
   // 把 dynamic 幕 splice 到当前 interactive 节点之后
@@ -153,16 +171,18 @@ export const useStoryStore = defineStore("story", () => {
     comicUrls.value = [];
     dynamicByScene.value.clear();
     pendingDynamicByScene.value.clear();
+    pendingPropCounts.value = {};
   }
 
   return {
     list, current, flow, cursor, highestUnlocked,
     sceneCache,
     interactions, comicUrls,
-    dynamicByScene, pendingDynamicByScene,
+    dynamicByScene, pendingDynamicByScene, pendingPropCounts,
     loadList, loadStory, ensureScene, reset,
     addInteraction, trackComic,
     recordDynamic, recordPendingDynamic, failPendingDynamic, insertDynamicAfter,
+    startPendingProp, finishPendingProp, hasPendingWork,
     setJumpHandler, requestJump,
   };
 });

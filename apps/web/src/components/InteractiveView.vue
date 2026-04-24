@@ -6,6 +6,7 @@ import { useToastStore } from "@/stores/toast";
 import { useSessionStore } from "@/stores/session";
 import { useAssetShelfStore } from "@/stores/assetShelf";
 import { useInteractStore } from "@/stores/interact";
+import { useStoryStore } from "@/stores/story";
 import { fetchPlacements, createProp, uploadImage } from "@/api/endpoints";
 import type {
   Scene, SceneCharacter, SceneProp,
@@ -58,6 +59,7 @@ const toast = useToastStore();
 const sessions = useSessionStore();
 const assetShelf = useAssetShelfStore();
 const interactStore = useInteractStore();
+const storyStore = useStoryStore();
 
 interface PlacedItem {
   id: string;          // unique within this scene session
@@ -487,6 +489,7 @@ async function addCustomProp() {
   newPropName.value = "";
   const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
   pendingProps.value.push({ tempId, name });
+  storyStore.startPendingProp(props.storyId);
   toast.push(`🎨 「${name}」正在后台作画…`, "info");
   try {
     const r = await createProp({
@@ -504,10 +507,13 @@ async function addCustomProp() {
       origin_story_id: props.storyId,
       origin_scene_idx: props.scene.index,
     });
+    sessions.markGeneratedNotice(props.storyId);
     toast.push(`✨ 「${r.name}」画好啦，拖到舞台就能用～`, "success");
   } catch (e: any) {
     pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     toast.push(`新道具创建失败：${e?.message || e}`, "error");
+  } finally {
+    storyStore.finishPendingProp(props.storyId);
   }
 }
 
@@ -636,6 +642,7 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
   const description = payload.description;
   propModalOpen.value = false;
   pendingProps.value.push({ tempId, name, refImage });
+  storyStore.startPendingProp(props.storyId);
   toast.push(`🎨 「${name}」在后台作画，稍等片刻…`, "info");
   try {
     const r = await createProp({
@@ -655,10 +662,13 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
       origin_story_id: props.storyId,
       origin_scene_idx: props.scene.index,
     });
+    sessions.markGeneratedNotice(props.storyId);
     toast.push(`✨ 「${r.name}」画好啦，拖到舞台就能用～`, "success");
   } catch (e: any) {
     pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     toast.push(`生成失败：${e?.message || e}`, "error");
+  } finally {
+    storyStore.finishPendingProp(props.storyId);
   }
 }
 

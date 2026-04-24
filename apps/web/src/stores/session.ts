@@ -48,6 +48,7 @@ export interface SessionPlayState {
 export const useSessionStore = defineStore("session", () => {
   const list = useLocalStorage<SessionRecord[]>("mindshow_sessions", []);
   const playStates = useLocalStorage<Record<string, SessionPlayState>>("mindshow_play_states", {});
+  const generatedNotices = useLocalStorage<Record<string, boolean>>("mindshow_generated_notices", {});
   // 后端 session id 映射：story_id → backend session id
   const backendIds = ref<Record<string, string>>({});
   // 防抖定时器
@@ -76,6 +77,19 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   function clear() { list.value = []; }
+
+  function markGeneratedNotice(storyId: string) {
+    generatedNotices.value = { ...generatedNotices.value, [storyId]: true };
+  }
+
+  function clearGeneratedNotice(storyId: string) {
+    const { [storyId]: _, ...rest } = generatedNotices.value || {};
+    generatedNotices.value = rest;
+  }
+
+  function hasGeneratedNotice(storyId: string): boolean {
+    return !!generatedNotices.value?.[storyId];
+  }
 
   // ---- playState API (localStorage 立即写 + 后端防抖同步) ----
   function savePlayState(state: SessionPlayState) {
@@ -144,8 +158,9 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   return {
-    list, playStates, backendIds,
+    list, playStates, backendIds, generatedNotices,
     start, markReportReady, remove, clearAllForStory, clear,
+    markGeneratedNotice, clearGeneratedNotice, hasGeneratedNotice,
     savePlayState, getPlayState, clearPlayState, hasInProgress,
     fetchRemoteSession,
   };
