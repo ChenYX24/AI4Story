@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { useLocalStorage } from "@vueuse/core";
 import { ref } from "vue";
 import type { Operation, CustomProp, InteractResponse, Interaction } from "@/api/types";
+import type { FlowNode, PendingDynamicRecord } from "@/stores/story";
 import { getAuthToken } from "@/api/client";
 import {
   createSessionApi, updateSessionApi, fetchSessionsApi,
@@ -17,11 +18,7 @@ export interface SessionRecord {
   report_ready?: boolean;
 }
 
-export interface FlowItem {
-  type: "narrative" | "interactive" | "dynamic";
-  sceneIdx: number;
-  visited: boolean;
-}
+export type FlowItem = FlowNode;
 
 export interface ChatMsg { role: "user" | "assistant"; text: string; }
 
@@ -36,6 +33,7 @@ export interface SessionPlayState {
     snapOps: Operation[];
     snapProps: CustomProp[];
   }>;
+  pendingDynamicByScene?: Record<string, PendingDynamicRecord>;
   interactByScene: Record<string, {
     placed: any[];
     ops: Operation[];

@@ -12,8 +12,8 @@ import BaseModal from "@/components/BaseModal.vue";
 import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
-import { postChat } from "@/api/endpoints";
-import type { Scene, InteractResponse, Operation } from "@/api/types";
+import { postChat, postInteract } from "@/api/endpoints";
+import type { Scene, InteractRequest, InteractResponse, Operation } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -39,6 +39,8 @@ const chatLogByScene = ref<Record<string, ChatMsg[]>>({});
 
 // 互动场景生成的动态 narrative payload — 在切换到下一节点时插入到 flow
 const dynamicNode = ref<InteractResponse | null>(null);
+const pendingDynamicPreview = ref<string | null>(null);
+const pendingDynamicError = ref<string | null>(null);
 
 async function loadCursor(idx: number) {
   if (idx < 0 || idx >= store.flow.length) return;
@@ -62,14 +64,18 @@ async function loadCursor(idx: number) {
     if (node.type === "dynamic") {
       // 独立的 dynamic 幕（互动后生成，已插入 flow）
       const dyn = store.dynamicByScene.get(node.sceneIdx);
+      const pending = store.pendingDynamicByScene.get(node.sceneIdx);
       if (!dyn) {
-        toast.push("这一幕的创作丢了，回到上一幕吧", "error");
-        scene.value = null;
+        scene.value = await store.ensureScene(node.sceneIdx).catch(() => null as any);
         dynamicNode.value = null;
+        pendingDynamicPreview.value = pending?.previewUrl || null;
+        pendingDynamicError.value = pending?.error || null;
       } else {
         // 源 interactive 场景的 meta 仍然作为 scene.value 背景（供 summary 卡用），但 type 在模板分支里按 dynamicNode 优先
         scene.value = await store.ensureScene(node.sceneIdx).catch(() => null as any);
         dynamicNode.value = dyn.payload;
+        pendingDynamicPreview.value = null;
+        pendingDynamicError.value = null;
         store.trackComic(dyn.payload.comic_url);
         if (dyn.payload.storyboard?.length) {
           tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
@@ -83,6 +89,8 @@ async function loadCursor(idx: number) {
       scene.value = sc;
       store.trackComic(sc.comic_url);
       dynamicNode.value = null;
+      pendingDynamicPreview.value = null;
+      pendingDynamicError.value = null;
       if (sc.type === "narrative" && sc.storyboard?.length) {
         tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
       } else {
@@ -261,6 +269,53 @@ async function onInteractDone(
   }, 420);
 }
 
+function onInteractGenerate(request: InteractRequest) {
+  const sourceSceneIdx = scene.value?.index;
+  if (sourceSceneIdx === undefined) return;
+  const sourceGoal = scene.value?.interaction_goal;
+  const previewUrl = nextPreviewComicUrl.value;
+  store.recordPendingDynamic(sourceSceneIdx, {
+    previewUrl,
+    snapOps: request.ops,
+    snapProps: request.custom_props,
+    startedAt: new Date().toISOString(),
+  });
+  const insertedAt = store.insertDynamicAfter(store.cursor, sourceSceneIdx);
+  flipping.value = "next";
+  setTimeout(() => {
+    flipping.value = null;
+    void loadCursor(insertedAt);
+  }, 420);
+
+  void postInteract(request).then((payload) => {
+    store.addInteraction({
+      scene_idx: sourceSceneIdx,
+      interaction_goal: sourceGoal,
+      ops: request.ops,
+      custom_props: request.custom_props,
+      dynamic_summary: payload.summary,
+      comic_url: payload.comic_url,
+    });
+    store.recordDynamic(sourceSceneIdx, {
+      payload,
+      snapOps: request.ops,
+      snapProps: request.custom_props,
+    });
+    toast.push("Generated new story scene", "success");
+    const active = store.flow[store.cursor];
+    if (active?.type === "dynamic" && active.sceneIdx === sourceSceneIdx) {
+      void loadCursor(store.cursor);
+    }
+  }).catch((e: any) => {
+    const msg = e?.message || String(e);
+    store.failPendingDynamic(sourceSceneIdx, msg);
+    pendingDynamicError.value = msg;
+    toast.push(`Generate failed: ${msg}`, "error");
+  });
+}
+
+void onInteractDone;
+
 
 // E3：进行中 session 恢复弹窗
 const resumeModalOpen = ref(false);
@@ -277,6 +332,9 @@ function onResumeContinue() {
   const dynMap = new Map();
   for (const k in ps.dynamicByScene) dynMap.set(Number(k), ps.dynamicByScene[k]);
   store.dynamicByScene = dynMap;
+  const pendingDynMap = new Map();
+  for (const k in (ps.pendingDynamicByScene || {})) pendingDynMap.set(Number(k), ps.pendingDynamicByScene![k]);
+  store.pendingDynamicByScene = pendingDynMap;
   // interactByScene
   interactStore.clearAll();
   for (const k in ps.interactByScene) {
@@ -350,6 +408,7 @@ watch(
     () => store.cursor,
     () => store.flow,
     () => store.dynamicByScene,
+    () => store.pendingDynamicByScene,
     () => interactStore.states,
     () => store.interactions,
     () => store.comicUrls,
@@ -364,6 +423,8 @@ watch(
     }
     const dynObj: Record<string, any> = {};
     store.dynamicByScene?.forEach?.((v, k) => { dynObj[String(k)] = v; });
+    const pendingDynObj: Record<string, any> = {};
+    store.pendingDynamicByScene?.forEach?.((v, k) => { pendingDynObj[String(k)] = v; });
     const interactObj: Record<string, any> = {};
     interactStore.states?.forEach?.((v, k) => {
       const [sid, sidxStr] = k.split(":");
@@ -377,6 +438,7 @@ watch(
       highestUnlocked: store.highestUnlocked,
       flow: store.flow.map((f) => ({ ...f })),
       dynamicByScene: dynObj,
+      pendingDynamicByScene: pendingDynObj,
       interactByScene: interactObj,
       interactions: store.interactions.map((i) => ({ ...i })),
       comicUrls: [...store.comicUrls],
@@ -399,6 +461,7 @@ watch(() => props.id, async (v) => {
 const node = computed(() => store.flow[store.cursor]);
 const isLast = computed(() => store.cursor === store.flow.length - 1);
 const visibleLines = computed(() => activeStoryboard.value.slice(0, lineCursor.value));
+const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynamicNode.value);
 
 // TopBar 现在自读 store，无需传 timelineItems
 
@@ -408,7 +471,11 @@ const nextPreviewComicUrl = computed<string | undefined>(() => {
   if (nextIdx >= store.flow.length) return undefined;
   const nextNode = store.flow[nextIdx];
   const cached = store.sceneCache?.get?.(nextNode.sceneIdx);
-  return cached?.comic_url;
+  if (cached?.comic_url) return cached.comic_url;
+  const pad = String(nextNode.sceneIdx).padStart(3, "0");
+  return nextNode.type === "narrative"
+    ? `/assets/scenes/${pad}/comic/panel.png`
+    : `/assets/scenes/${pad}/background/background.png`;
 });
 
 // 互动场景的 ops —— 与 InteractiveView 双向绑定（defineModel），在右侧对话栏展示 + 删除
@@ -515,6 +582,25 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                 </template>
 
                 <!-- 叙事 -->
+                <template v-else-if="isPendingDynamic">
+                  <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper">
+                    <img
+                      v-if="pendingDynamicPreview"
+                      :src="pendingDynamicPreview"
+                      class="absolute inset-0 w-full h-full object-contain"
+                      alt="Generating scene preview"
+                    />
+                    <div v-else class="absolute inset-0 bg-gradient-to-br from-paper-deep to-gold-mute"></div>
+                    <div class="absolute inset-x-0 bottom-4 mx-auto w-fit max-w-[86%] rounded-2xl bg-white/90 border border-gold/40 px-4 py-3 shadow-[var(--shadow-card)] text-center">
+                      <div class="mx-auto mb-2 w-8 h-8 rounded-full border-[3px] border-gold-mute border-t-accent animate-spin"></div>
+                      <div class="text-sm font-semibold text-ink">AI is generating your new scene</div>
+                      <div class="text-xs text-ink-soft mt-1">
+                        {{ pendingDynamicError ? `Generate failed: ${pendingDynamicError}` : "You can switch pages; generation will keep running in the background." }}
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
                 <template v-else-if="node?.type === 'narrative'">
                   <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper">
                     <img
@@ -535,7 +621,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     :scene="scene"
                     :story-id="props.id"
                     :next-comic-url="nextPreviewComicUrl"
-                    @done="onInteractDone"
+                    @generate="onInteractGenerate"
                   />
                 </template>
               </div>
@@ -560,7 +646,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     @click="advanceLine"
                   >🔊 下一句</BaseButton>
                 </div>
-                <template v-if="node?.type === 'interactive' && !dynamicNode">
+                <template v-if="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic">
                   <BaseButton
                     size="sm"
                     pill
@@ -591,12 +677,12 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
         </BaseCard>
 
         <!-- 互动节点：操作输入区（Teleport 自 InteractiveView） -->
-        <BaseCard v-show="node?.type === 'interactive' && !dynamicNode" class="p-4">
+        <BaseCard v-show="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic" class="p-4">
           <div id="interact-inputs-slot"></div>
         </BaseCard>
 
         <!-- 互动节点：动作序列卡（从舞台侧挪过来，方便和对话一起看） -->
-        <BaseCard v-if="node?.type === 'interactive' && !dynamicNode" class="p-4">
+        <BaseCard v-if="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic" class="p-4">
           <div class="text-sm font-semibold mb-2 flex items-center justify-between">
             <span>🎬 动作序列<span v-if="interactiveOps.length" class="text-xs text-ink-mute font-normal ml-1">· 共 {{ interactiveOps.length }}</span></span>
             <button

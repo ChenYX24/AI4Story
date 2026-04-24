@@ -6,11 +6,10 @@ import { useToastStore } from "@/stores/toast";
 import { useSessionStore } from "@/stores/session";
 import { useAssetShelfStore } from "@/stores/assetShelf";
 import { useInteractStore } from "@/stores/interact";
-import { fetchPlacements, postInteract, createProp, uploadImage } from "@/api/endpoints";
+import { fetchPlacements, createProp, uploadImage } from "@/api/endpoints";
 import type {
   Scene, SceneCharacter, SceneProp,
   Transform, Operation, CustomProp,
-  InteractResponse,
 } from "@/api/types";
 import BaseButton from "./BaseButton.vue";
 import SketchPadModal from "./SketchPadModal.vue";
@@ -43,7 +42,11 @@ function stopLoadingHints() {
 // nextComicUrl: 下一幕的叙事图，loading 时做背景图（后端未来会给"本幕对应的叙事补充图"，届时替换）
 const props = defineProps<{ scene: Scene; storyId: string; nextComicUrl?: string }>();
 const emit = defineEmits<{
-  (e: "done", payload: InteractResponse, snap: {
+  (e: "generate", request: {
+    story_id: string;
+    session_id: string;
+    scene_idx: number;
+    placements: Transform[];
     ops: Operation[];
     custom_props: CustomProp[];
   }): void;
@@ -518,33 +521,22 @@ function askComplete() {
   confirmingComplete.value = true;
 }
 
-async function doComplete() {
+function doComplete() {
   confirmingComplete.value = false;
   generating.value = true;
   startLoadingHints();
-  try {
-    const transforms: Transform[] = placed.value.map((p) => ({
-      name: p.name, kind: p.kind, x: p.x, y: p.y, scale: p.scale, rotation: p.rotation,
-      custom_url: p.custom_url,
-    }));
-    const resp = await postInteract({
-      story_id: props.storyId,
-      session_id: sessionId.value,
-      scene_idx: props.scene.index,
-      placements: transforms,
-      ops: ops.value,
-      custom_props: customProps.value,
-    });
-    emit("done", resp, {
-      ops: ops.value.map((o) => ({ ...o })),
-      custom_props: customProps.value.map((c) => ({ ...c })),
-    });
-  } catch (e: any) {
-    toast.push(`生成失败：${e.message}`, "error");
-  } finally {
-    generating.value = false;
-    stopLoadingHints();
-  }
+  const transforms: Transform[] = placed.value.map((p) => ({
+    name: p.name, kind: p.kind, x: p.x, y: p.y, scale: p.scale, rotation: p.rotation,
+    custom_url: p.custom_url,
+  }));
+  emit("generate", {
+    story_id: props.storyId,
+    session_id: sessionId.value,
+    scene_idx: props.scene.index,
+    placements: transforms,
+    ops: ops.value.map((o) => ({ ...o })),
+    custom_props: customProps.value.map((c) => ({ ...c })),
+  });
 }
 
 onBeforeUnmount(stopLoadingHints);

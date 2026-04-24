@@ -17,11 +17,15 @@ interface TimelineItem {
   type: "narrative" | "interactive" | "dynamic";
   visited?: boolean;
   dynamicThumb?: string;
+  pendingThumb?: string;
+  pending?: boolean;
+  generated?: boolean;
 }
 
 const timelineItems = computed<TimelineItem[]>(() =>
   (story.flow || []).map((f) => {
     const dyn = story.dynamicByScene?.get?.(f.sceneIdx);
+    const pending = story.pendingDynamicByScene?.get?.(f.sceneIdx);
     // 只有 dynamic type 的节点才用 dyn 缩略图覆盖；interactive 保留默认 bg，仅金色描边表示已玩过
     const isDynamicNode = f.type === "dynamic";
     return {
@@ -29,11 +33,15 @@ const timelineItems = computed<TimelineItem[]>(() =>
       type: f.type,
       visited: f.visited,
       dynamicThumb: isDynamicNode ? (dyn?.payload.thumbnail_url || dyn?.payload.comic_url) : undefined,
+      pendingThumb: isDynamicNode ? pending?.previewUrl : undefined,
+      pending: isDynamicNode && !!pending && !dyn,
+      generated: isDynamicNode && !!dyn,
     };
   }),
 );
 
 function thumbUrl(it: TimelineItem): string {
+  if (it.pendingThumb) return it.pendingThumb;
   if (it.dynamicThumb) return it.dynamicThumb;
   const pad = String(it.sceneIdx).padStart(3, "0");
   return it.type === "narrative"
@@ -89,11 +97,21 @@ function onStoreClick() {
           @error="(ev: any) => (ev.target.style.display = 'none')"
         />
         <div
-          v-if="it.dynamicThumb && i !== story.cursor"
+          v-if="it.generated"
           class="absolute inset-0 ring-2 ring-gold/60 rounded-md pointer-events-none"
         ></div>
         <div
-          v-else-if="it.visited && i !== story.cursor"
+          v-if="it.generated"
+          class="absolute top-0 left-0 px-1 py-0 text-[9px] bg-accent/95 text-white rounded-br"
+        >AI</div>
+        <div
+          v-if="it.pending"
+          class="absolute inset-0 bg-white/45 grid place-items-center pointer-events-none"
+        >
+          <div class="w-4 h-4 rounded-full border-2 border-gold-mute border-t-accent animate-spin"></div>
+        </div>
+        <div
+          v-else-if="it.visited && i !== story.cursor && !it.generated"
           class="absolute inset-0 bg-good/20 grid place-items-center text-[10px] text-ink"
         >✓</div>
         <div

@@ -3,10 +3,24 @@ import { ref } from "vue";
 import type { Scene, StoryCard, StoryDetail, Interaction, CustomProp, Operation, InteractResponse } from "@/api/types";
 import { fetchStories, fetchStory, fetchScene } from "@/api/endpoints";
 
+export interface FlowNode {
+  type: "narrative" | "interactive" | "dynamic";
+  sceneIdx: number;
+  visited: boolean;
+}
+
 export interface DynamicNodeRecord {
   payload: InteractResponse;
   snapOps: Operation[];
   snapProps: CustomProp[];
+}
+
+export interface PendingDynamicRecord {
+  previewUrl?: string;
+  snapOps: Operation[];
+  snapProps: CustomProp[];
+  startedAt: string;
+  error?: string;
 }
 
 export const useStoryStore = defineStore("story", () => {
@@ -16,7 +30,7 @@ export const useStoryStore = defineStore("story", () => {
 
   // 节点流：narrative + interactive 穿插；互动完成生成 dynamic 幕，splice 插入在 interactive 之后
   // 对 dynamic 类型，sceneIdx 等于其源 interactive 场景的 sceneIdx（作为 dynamicByScene 的 key）
-  const flow = ref<Array<{ type: "narrative" | "interactive" | "dynamic"; sceneIdx: number; visited: boolean }>>([]);
+  const flow = ref<FlowNode[]>([]);
   const cursor = ref(0);
   const highestUnlocked = ref(0);
 
@@ -26,6 +40,7 @@ export const useStoryStore = defineStore("story", () => {
   const comicUrls = ref<string[]>([]);
   // 动态节点持久化：sceneIdx → 该 interactive 场景已生成的 dynamic 结果（可切换回看）
   const dynamicByScene = ref<Map<number, DynamicNodeRecord>>(new Map());
+  const pendingDynamicByScene = ref<Map<number, PendingDynamicRecord>>(new Map());
 
   function recordDynamic(sceneIdx: number, record: DynamicNodeRecord) {
     if (!dynamicByScene.value) dynamicByScene.value = new Map();
@@ -34,6 +49,23 @@ export const useStoryStore = defineStore("story", () => {
       snapOps: record.snapOps.map((o) => ({ ...o })),
       snapProps: record.snapProps.map((p) => ({ ...p })),
     });
+    pendingDynamicByScene.value.delete(sceneIdx);
+  }
+
+  function recordPendingDynamic(sceneIdx: number, record: PendingDynamicRecord) {
+    pendingDynamicByScene.value.set(sceneIdx, {
+      previewUrl: record.previewUrl,
+      snapOps: record.snapOps.map((o) => ({ ...o })),
+      snapProps: record.snapProps.map((p) => ({ ...p })),
+      startedAt: record.startedAt,
+      error: record.error,
+    });
+  }
+
+  function failPendingDynamic(sceneIdx: number, error: string) {
+    const current = pendingDynamicByScene.value.get(sceneIdx);
+    if (!current) return;
+    pendingDynamicByScene.value.set(sceneIdx, { ...current, error });
   }
 
   // 把 dynamic 幕 splice 到当前 interactive 节点之后
@@ -120,15 +152,17 @@ export const useStoryStore = defineStore("story", () => {
     interactions.value = [];
     comicUrls.value = [];
     dynamicByScene.value.clear();
+    pendingDynamicByScene.value.clear();
   }
 
   return {
     list, current, flow, cursor, highestUnlocked,
     sceneCache,
     interactions, comicUrls,
-    dynamicByScene,
+    dynamicByScene, pendingDynamicByScene,
     loadList, loadStory, ensureScene, reset,
-    addInteraction, trackComic, recordDynamic, insertDynamicAfter,
+    addInteraction, trackComic,
+    recordDynamic, recordPendingDynamic, failPendingDynamic, insertDynamicAfter,
     setJumpHandler, requestJump,
   };
 });

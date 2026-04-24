@@ -151,6 +151,22 @@ function sessionProgress(storyId: string): number {
   if (!ps || ps.flow.length === 0) return 0;
   return Math.round(((ps.cursor + 1) / ps.flow.length) * 100);
 }
+const profileSessions = computed(() => {
+  const merged = [...sess.list];
+  const known = new Set(merged.map((s) => s.story_id));
+  for (const [storyId, ps] of Object.entries(sess.playStates || {})) {
+    if (known.has(storyId)) continue;
+    const story = store.list.find((s) => s.id === storyId);
+    merged.push({
+      id: `ps_${storyId}`,
+      story_id: storyId,
+      story_title: ps.story_title || story?.title || storyId,
+      started_at: ps.updatedAt,
+      report_ready: ps.cursor >= ps.flow.length - 1,
+    });
+  }
+  return merged.sort((a, b) => Number(Boolean(a.report_ready)) - Number(Boolean(b.report_ready)));
+});
 
 // D4/D5 我的资产 —— 多选 + 打包分享 + 分享码导入
 const mineSelected = ref<Set<string>>(new Set());
@@ -283,8 +299,8 @@ function radarPoints(): string[] {
 }
 
 const sessionsByStory = computed(() => {
-  const g: Record<string, typeof sess.list> = {};
-  for (const s of sess.list) (g[s.story_title] ??= []).push(s);
+  const g: Record<string, typeof profileSessions.value> = {};
+  for (const s of profileSessions.value) (g[s.story_title] ??= []).push(s);
   return g;
 });
 
@@ -441,7 +457,7 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
       </div>
 
       <div v-else-if="tab === 'sessions'">
-        <template v-if="sess.list.length === 0">
+        <template v-if="profileSessions.length === 0">
           <div class="text-center py-16 bg-white rounded-[var(--radius-card)] shadow-[var(--shadow-card)] border border-paper-edge">
             <div class="text-5xl mb-3">🎮</div>
             <div class="font-bold text-ink">还没玩过的会话</div>
