@@ -167,13 +167,14 @@ const profileSessions = computed(() => {
   const known = new Set(merged.map((s) => s.story_id));
   for (const [storyId, ps] of Object.entries(sess.playStates || {})) {
     if (known.has(storyId)) continue;
+    if (ps.cursor >= ps.flow.length - 1) continue;
     const story = store.list.find((s) => s.id === storyId);
     merged.push({
       id: `ps_${storyId}`,
       story_id: storyId,
       story_title: ps.story_title || story?.title || storyId,
       started_at: ps.updatedAt,
-      report_ready: ps.cursor >= ps.flow.length - 1,
+      report_ready: false,
     });
   }
   return merged.sort((a, b) => Number(Boolean(a.report_ready)) - Number(Boolean(b.report_ready)));

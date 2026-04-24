@@ -1,7 +1,6 @@
 // 本地会话历史 + 进行中 playState 快照 + 后端持久化（混合存储）。
 import { defineStore } from "pinia";
-import { useLocalStorage } from "@vueuse/core";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { Operation, CustomProp, InteractResponse, Interaction } from "@/api/types";
 import type { FlowNode, PendingDynamicRecord } from "@/stores/story";
 import { getAuthToken } from "@/api/client";
@@ -19,6 +18,12 @@ export interface SessionRecord {
   report_status?: "idle" | "generating" | "ready" | "failed";
   report_payload?: any;
   report_error?: string;
+  play_state?: SessionPlayState;
+  comic_urls?: string[];
+  custom_props?: CustomProp[];
+  interactions?: Interaction[];
+  report_comics?: string[];
+  report_props?: CustomProp[];
 }
 
 export type FlowItem = FlowNode;
@@ -48,15 +53,43 @@ export interface SessionPlayState {
   updatedAt: string;
 }
 
+function readJson<T>(key: string, fallback: T): T {
+  try { return JSON.parse(localStorage.getItem(key) || "") as T; }
+  catch { return fallback; }
+}
+
 export const useSessionStore = defineStore("session", () => {
-  const list = useLocalStorage<SessionRecord[]>("mindshow_sessions", []);
-  const playStates = useLocalStorage<Record<string, SessionPlayState>>("mindshow_play_states", {});
-  const generatedNotices = useLocalStorage<Record<string, boolean>>("mindshow_generated_notices", {});
+  const scope = ref("guest");
+  const list = ref<SessionRecord[]>([]);
+  const playStates = ref<Record<string, SessionPlayState>>({});
+  const generatedNotices = ref<Record<string, boolean>>({});
   // 后端 session id 映射：story_id → backend session id
   const backendIds = ref<Record<string, string>>({});
   // 防抖定时器
   const _syncTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const reportPromises = new Map<string, Promise<any>>();
+
+  const key = (name: string) => `mindshow_${scope.value}_${name}`;
+
+  function loadScope(userId?: string | null) {
+    for (const timer of _syncTimers.values()) clearTimeout(timer);
+    _syncTimers.clear();
+    reportPromises.clear();
+    backendIds.value = {};
+    scope.value = userId || "guest";
+    list.value = readJson<SessionRecord[]>(key("sessions"), []);
+    playStates.value = readJson<Record<string, SessionPlayState>>(key("play_states"), {});
+    generatedNotices.value = readJson<Record<string, boolean>>(key("generated_notices"), {});
+  }
+
+  function persistScope() {
+    localStorage.setItem(key("sessions"), JSON.stringify(list.value));
+    localStorage.setItem(key("play_states"), JSON.stringify(playStates.value));
+    localStorage.setItem(key("generated_notices"), JSON.stringify(generatedNotices.value));
+  }
+
+  loadScope(null);
+  watch([list, playStates, generatedNotices], persistScope, { deep: true });
 
   function start(story_id: string, story_title: string): string {
     const id = "s_" + Date.now().toString(36);
@@ -98,9 +131,39 @@ export const useSessionStore = defineStore("session", () => {
     r.report_status = "generating";
   }
 
-  function saveReport(id: string, payload: any) {
+  function snapshotFromState(state?: SessionPlayState) {
+    if (!state) return {};
+    const customMap = new Map<string, CustomProp>();
+    for (const it of state.interactions || []) {
+      for (const cp of it.custom_props || []) {
+        customMap.set(`${cp.name}:${cp.url}`, { ...cp });
+      }
+    }
+    for (const key of Object.keys(state.interactByScene || {})) {
+      for (const cp of state.interactByScene[key]?.customProps || []) {
+        customMap.set(`${cp.name}:${cp.url}`, { ...cp });
+      }
+    }
+    return {
+      play_state: state,
+      comic_urls: [...(state.comicUrls || [])],
+      report_comics: [...(state.comicUrls || [])],
+      custom_props: Array.from(customMap.values()),
+      report_props: Array.from(customMap.values()),
+      interactions: (state.interactions || []).map((i) => ({ ...i })),
+    };
+  }
+
+  function updateSnapshot(id: string, state?: SessionPlayState) {
     const r = list.value.find((s) => s.id === id);
     if (!r) return;
+    Object.assign(r, snapshotFromState(state));
+  }
+
+  function saveReport(id: string, payload: any, state?: SessionPlayState) {
+    const r = list.value.find((s) => s.id === id);
+    if (!r) return;
+    Object.assign(r, snapshotFromState(state || r.play_state));
     r.report_payload = payload;
     r.report_error = undefined;
     markReportReady(id);
@@ -148,6 +211,11 @@ export const useSessionStore = defineStore("session", () => {
   // ---- playState API (localStorage 立即写 + 后端防抖同步) ----
   function savePlayState(state: SessionPlayState) {
     playStates.value = { ...playStates.value, [state.story_id]: state };
+    const active = list.value.find((s) => s.story_id === state.story_id && !s.report_ready);
+    if (active) {
+      active.story_title = state.story_title || active.story_title;
+      Object.assign(active, snapshotFromState(state));
+    }
     _debouncedSync(state.story_id, state);
   }
 
@@ -156,12 +224,18 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   function clearPlayState(storyId: string) {
+    const timer = _syncTimers.get(storyId);
+    if (timer) {
+      clearTimeout(timer);
+      _syncTimers.delete(storyId);
+    }
+    const finishedState = playStates.value?.[storyId];
     const { [storyId]: _, ...rest } = playStates.value || {};
     playStates.value = rest;
     // 后端也标记完成
     const bid = backendIds.value[storyId];
     if (bid && getAuthToken()) {
-      updateSessionApi(bid, { play_state: {}, status: "finished" }).catch(() => {});
+      updateSessionApi(bid, { play_state: finishedState || {}, status: "finished" }).catch(() => {});
     }
     delete backendIds.value[storyId];
   }
@@ -215,8 +289,9 @@ export const useSessionStore = defineStore("session", () => {
 
   return {
     list, playStates, backendIds, generatedNotices,
+    loadScope,
     start, ensure, currentForStory, getById,
-    markReportReady, markReportGenerating, saveReport, failReport, setReportPromise, getReportPromise,
+    markReportReady, markReportGenerating, saveReport, failReport, setReportPromise, getReportPromise, updateSnapshot,
     remove, clearAllForStory, clear,
     markGeneratedNotice, clearGeneratedNotice, hasGeneratedNotice,
     savePlayState, getPlayState, clearPlayState, hasInProgress,

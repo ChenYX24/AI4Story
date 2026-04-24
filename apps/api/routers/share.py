@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import OUTPUTS_ROOT
 
@@ -30,6 +30,7 @@ SHARES_DIR.mkdir(parents=True, exist_ok=True)
 class ShareCreateRequest(BaseModel):
     story_title: str = ""
     comics: list[str]
+    props: list[dict] = Field(default_factory=list)
 
 
 @router.get("/server-info")
@@ -56,7 +57,7 @@ def share_qr(share_id: str, url: str = Query(default="")) -> Response:
 @router.post("/share")
 def create_share(req: ShareCreateRequest) -> dict:
     share_id = uuid.uuid4().hex[:12]
-    data = {"id": share_id, "story_title": req.story_title, "comics": req.comics}
+    data = {"id": share_id, "story_title": req.story_title, "comics": req.comics, "props": req.props}
     (SHARES_DIR / f"{share_id}.json").write_text(
         json.dumps(data, ensure_ascii=False), encoding="utf-8"
     )
@@ -91,6 +92,10 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
   transition:transform .35s ease,opacity .35s ease;will-change:transform,opacity;user-select:none}
 .slide img{width:100%;height:100%;object-fit:contain;border-radius:18px;pointer-events:none}
 .counter{text-align:center;padding:10px 0 20px;font-size:14px;color:#8a7664;font-weight:600}
+.props{display:flex;gap:10px;overflow-x:auto;padding:0 14px 10px}
+.prop{flex:0 0 78px;background:#fff;border-radius:12px;padding:8px;text-align:center;box-shadow:0 3px 12px rgba(61,43,31,.12)}
+.prop img{width:52px;height:52px;object-fit:contain}
+.prop div{font-size:11px;color:#6b5848;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hint{text-align:center;font-size:12px;color:#baa994;padding:0 0 12px}
 .loading{display:flex;align-items:center;justify-content:center;height:100%;font-size:16px;color:#8a7664}
 body{display:flex;flex-direction:column}
@@ -103,19 +108,28 @@ body{display:flex;flex-direction:column}
 </div>
 <div class="deck" id="deck"></div>
 <div class="counter" id="counter"></div>
+<div class="props" id="props"></div>
 <div class="hint">← 滑动翻页 →</div>
 <script>
 const shareId = location.pathname.split("/").pop();
-let comics = [], current = 0;
+let comics = [], props = [], current = 0;
 
 fetch("/api/share/" + shareId).then(r => r.json()).then(data => {
   comics = data.comics || [];
+  props = data.props || [];
   document.getElementById("story-title").textContent = data.story_title || "";
+  renderProps();
   if (!comics.length) { document.getElementById("deck").innerHTML = '<div class="loading">暂无漫画</div>'; return; }
   renderDeck();
 }).catch(() => {
   document.getElementById("deck").innerHTML = '<div class="loading">加载失败</div>';
 });
+
+function renderProps() {
+  const el = document.getElementById("props");
+  if (!props.length) { el.style.display = "none"; return; }
+  el.innerHTML = props.map(p => `<div class="prop"><img src="${p.url}" alt="${p.name || ""}"/><div>${p.name || ""}</div></div>`).join("");
+}
 
 function renderDeck() {
   const deck = document.getElementById("deck");

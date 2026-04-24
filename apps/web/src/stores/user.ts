@@ -5,6 +5,7 @@ import { computed, ref } from "vue";
 import { authLogin, authLogout, authMe, authRegister } from "@/api/endpoints";
 import { getAuthToken, setAuthToken } from "@/api/client";
 import { useAssetShelfStore } from "@/stores/assetShelf";
+import { useSessionStore } from "@/stores/session";
 
 export interface User {
   id: string;
@@ -27,11 +28,13 @@ export const useUserStore = defineStore("user", () => {
       user.value = { id: me.id, nickname: me.nickname, created_at: me.created_at };
       const assets = useAssetShelfStore();
       assets.loadScope(me.id);
+      useSessionStore().loadScope(me.id);
       void assets.pullFromServer();
     } catch {
       user.value = null;
       setAuthToken(null);
       useAssetShelfStore().loadScope(null);
+      useSessionStore().loadScope(null);
     } finally {
       booting.value = false;
     }
@@ -43,6 +46,7 @@ export const useUserStore = defineStore("user", () => {
     user.value = { id: r.id, nickname: r.nickname };
     const assets = useAssetShelfStore();
     assets.loadScope(r.id);
+    useSessionStore().loadScope(r.id);
     await assets.pullFromServer();
   }
 
@@ -52,6 +56,7 @@ export const useUserStore = defineStore("user", () => {
     user.value = { id: r.id, nickname: r.nickname };
     const assets = useAssetShelfStore();
     assets.loadScope(r.id);
+    useSessionStore().loadScope(r.id);
     await assets.pullFromServer();
   }
 
@@ -60,6 +65,7 @@ export const useUserStore = defineStore("user", () => {
     setAuthToken(null);
     user.value = null;
     useAssetShelfStore().loadScope(null);
+    useSessionStore().loadScope(null);
   }
 
   return { user, isAuthed, booting, boot, login, register, logout };

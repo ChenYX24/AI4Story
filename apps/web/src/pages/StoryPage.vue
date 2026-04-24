@@ -128,8 +128,13 @@ function currentSessionId(): string {
   return sess.ensure(props.id, store.current?.title || props.id);
 }
 
+function currentPlayState() {
+  return sess.getPlayState(props.id);
+}
+
 function startReportInBackground() {
   const sessionId = currentSessionId();
+  sess.updateSnapshot(sessionId, currentPlayState());
   const current = sess.getById(sessionId);
   if (current?.report_payload || current?.report_status === "generating" || sess.getReportPromise(sessionId)) return;
   sess.markReportGenerating(sessionId);
@@ -138,7 +143,7 @@ function startReportInBackground() {
     story_id: props.id,
     interactions: store.interactions,
   }).then((payload) => {
-    sess.saveReport(sessionId, payload);
+    sess.saveReport(sessionId, payload, currentPlayState());
     return payload;
   }).catch((e: any) => {
     sess.failReport(sessionId, e?.message || String(e));

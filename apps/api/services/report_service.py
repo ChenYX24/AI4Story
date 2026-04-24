@@ -160,6 +160,13 @@ def build_report(req: ReportRequest) -> dict[str, Any]:
             },
         ]
     canonical_names = ["想象", "表达", "逻辑", "审美", "创新"]
+    criteria = {
+        "想象": "看孩子是否能把角色、道具和情节组合出新的可能性。",
+        "表达": "看孩子是否能清楚说出想法、动作意图和故事变化。",
+        "逻辑": "看孩子安排的动作是否有前因后果，情节是否连贯。",
+        "审美": "看孩子对画面摆放、颜色感受和道具选择的关注度。",
+        "创新": "看孩子是否主动创造新道具、新办法或不同结局。",
+    }
     canonical: list[dict[str, Any]] = []
     for name in canonical_names:
         matched = next((m for m in metrics if name in str(m.get("name", ""))), None)
@@ -167,15 +174,25 @@ def build_report(req: ReportRequest) -> dict[str, Any]:
             canonical.append({
                 "name": name,
                 "value": _clamp_pct(matched.get("value", 60)),
-                "evidence": matched.get("evidence", ""),
+                "evidence": criteria[name],
             })
         else:
             base = 50 + min(20, stats["total_ops"] * 3) + (8 if name in ("想象", "创新") and stats["total_custom"] else 0)
             canonical.append({
                 "name": name,
                 "value": _clamp_pct(base),
-                "evidence": f"根据本次 {stats['total_ops']} 个互动动作和 {stats['total_custom']} 个自创道具综合估计。",
+                "evidence": criteria[name],
             })
     parent["metrics"] = canonical
+    real_world_suggestions = [
+        "亲子共读后，请孩子用自己的话复述一个情节，再追问“为什么会这样”。",
+        "用积木、纸偶或画笔复现故事场景，让孩子在现实物品中练习表达和组织。",
+        "日常遇到选择时，引导孩子说出两个办法，并比较每个办法的结果。",
+        "鼓励孩子观察家里或幼儿园里的颜色、形状和摆放，说出自己喜欢的理由。",
+    ]
+    suggestions = [str(s).strip() for s in (parent.get("suggestions") or []) if str(s).strip()]
+    blocked = ("软件", "应用", "屏幕", "点击", "页面", "互动场景", "继续使用")
+    suggestions = [s for s in suggestions if not any(b in s for b in blocked)]
+    parent["suggestions"] = (suggestions + real_world_suggestions)[:4]
 
     return {"share": share, "kid_section": kid, "parent_section": parent}

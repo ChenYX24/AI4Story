@@ -119,6 +119,7 @@ export const useStoryStore = defineStore("story", () => {
       ops: snap.ops.map((o) => ({ ...o })),
       custom_props: snap.custom_props.map((c) => ({ ...c })),
       dynamic_summary: snap.dynamic_summary,
+      comic_url: snap.comic_url,
     });
     if (snap.comic_url && !comicUrls.value.includes(snap.comic_url)) {
       comicUrls.value.push(snap.comic_url);

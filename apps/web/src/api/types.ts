@@ -85,6 +85,7 @@ export interface Interaction {
   ops: OpItem[];
   custom_props: CustomProp[];
   dynamic_summary?: string;
+  comic_url?: string;
 }
 
 export interface ReportRequest {
@@ -124,6 +125,7 @@ export interface ReportResponse {
 export interface ShareInit {
   story_title?: string;
   comics: string[];
+  props?: CustomProp[];
 }
 export interface ShareResponse {
   share_id: string;

@@ -22,6 +22,10 @@ const stream = useReportStream();
 const payload = ref<ReportResponse | null>(null);
 const tab = ref("share");
 const failed = ref(false);
+const activeSessionId = ref<string | null>(null);
+const activeSession = computed(() => session.getById(activeSessionId.value));
+const reportComics = computed(() => activeSession.value?.report_comics || activeSession.value?.comic_urls || store.comicUrls);
+const reportProps = computed(() => activeSession.value?.report_props || activeSession.value?.custom_props || []);
 
 // Share / QR state
 const shareId = ref<string | null>(null);
@@ -37,9 +41,10 @@ async function buildShare() {
   if (shareId.value || shareBuilding.value) return;
   shareBuilding.value = true;
   try {
-    const comics = store.comicUrls.slice();
+    const comics = reportComics.value.slice();
+    const props = reportProps.value.map((p) => ({ name: p.name, url: p.url }));
     const title = (store.current?.title || store.current?.story_summary || "").slice(0, 30);
-    const r = await postShare({ story_title: title, comics });
+    const r = await postShare({ story_title: title, comics, props });
     shareId.value = r.share_id;
     // LAN IP 判断：localhost/127.0.0.1 时从 /api/server-info 取真正局域网 IP，方便手机扫码
     let host = location.hostname;
@@ -80,13 +85,18 @@ async function runStream() {
     await store.loadStory(props.id).catch(() => {});
   }
   const requestedSid = typeof route.query.sid === "string" ? route.query.sid : null;
-  const existing = session.getById(requestedSid) || session.currentForStory(props.id);
+  const existing = requestedSid ? session.getById(requestedSid) : session.currentForStory(props.id);
+  if (requestedSid && !existing) {
+    failed.value = true;
+    toast.push("Session report not found", "error");
+    return;
+  }
   const sessionId = existing?.id || session.ensure(props.id, store.current?.title || props.id);
+  activeSessionId.value = sessionId;
   const record = session.getById(sessionId);
   if (record?.report_payload) {
     payload.value = record.report_payload;
     void buildShare();
-    session.clearPlayState(props.id);
     return;
   }
   const pending = session.getReportPromise(sessionId);
@@ -95,7 +105,6 @@ async function runStream() {
     try {
       payload.value = await pending;
       void buildShare();
-      session.clearPlayState(props.id);
     } catch (e: any) {
       failed.value = true;
       session.failReport(sessionId, e?.message || String(e));
@@ -113,7 +122,7 @@ async function runStream() {
     session.setReportPromise(sessionId, p);
     const resp = await p;
     payload.value = resp;
-    session.saveReport(sessionId, resp);
+    session.saveReport(sessionId, resp, session.getPlayState(props.id));
     void buildShare();
     session.clearPlayState(props.id);
   } catch (e: any) {
@@ -124,8 +133,6 @@ async function runStream() {
 }
 onMounted(() => {
   runStream();
-  // E3: 进入报告 = 本次 session 结束，清掉进行中快照
-  session.clearPlayState(props.id);
 });
 
 const reportTabs = [
@@ -296,13 +303,13 @@ const reportTabs = [
           </div>
 
           <!-- 漫画条 -->
-          <BaseCard v-if="store.comicUrls.length" class="p-5 mt-4">
+          <BaseCard v-if="reportComics.length" class="p-5 mt-4">
             <div class="text-xs tracking-wider text-ink-mute mb-2">
-              📚 故事漫画一览 · {{ store.comicUrls.length }} 幅
+              📚 故事漫画一览 · {{ reportComics.length }} 幅
             </div>
             <div class="flex gap-2 overflow-x-auto no-scrollbar pb-2">
               <img
-                v-for="(u, i) in store.comicUrls"
+                v-for="(u, i) in reportComics"
                 :key="i"
                 :src="u"
                 loading="lazy"
@@ -310,6 +317,28 @@ const reportTabs = [
                 :alt="`第 ${i + 1} 幅`"
                 class="h-28 w-auto rounded-lg border border-paper-edge shadow-sm hover:shadow-md hover:-translate-y-0.5 transition shrink-0"
               />
+            </div>
+          </BaseCard>
+
+          <BaseCard v-if="reportProps.length" class="p-5 mt-4">
+            <div class="text-xs tracking-wider text-ink-mute mb-2">
+              自创道具 · {{ reportProps.length }} 个
+            </div>
+            <div class="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+              <div
+                v-for="p in reportProps"
+                :key="`${p.name}:${p.url}`"
+                class="w-24 shrink-0 rounded-lg border border-paper-edge bg-paper-soft p-2 text-center"
+              >
+                <img
+                  :src="p.url"
+                  :alt="p.name"
+                  loading="lazy"
+                  decoding="async"
+                  class="mx-auto h-14 w-14 object-contain"
+                />
+                <div class="mt-1 truncate text-xs text-ink-soft">{{ p.name }}</div>
+              </div>
             </div>
           </BaseCard>
 

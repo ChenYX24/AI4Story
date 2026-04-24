@@ -160,6 +160,7 @@ class ReportInteraction(BaseModel):
     ops: list[Operation] = Field(default_factory=list)
     custom_props: list[CustomProp] = Field(default_factory=list)
     dynamic_summary: str = ""
+    comic_url: str | None = None
 
 
 class ReportRequest(BaseModel):
