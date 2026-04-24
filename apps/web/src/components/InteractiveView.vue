@@ -15,6 +15,7 @@ import type {
 import BaseButton from "./BaseButton.vue";
 import SketchPadModal from "./SketchPadModal.vue";
 import CustomPropCreateModal from "./CustomPropCreateModal.vue";
+import MyAssetsModal from "./MyAssetsModal.vue";
 
 // ---- 生图 loading hint 轮播 ----
 const LOADING_HINTS = [
@@ -618,6 +619,36 @@ const propModalOpen = ref(false);
 const propModalRefUrl = ref("");
 const propModalDefaultName = ref("");
 
+// 📦 我的资产 弹窗
+const myAssetsOpen = ref(false);
+function addAssetToStage(asset: {
+  id: string;
+  name: string;
+  url: string;
+  kind: "character" | "object";
+  origin: string;
+}) {
+  // 放在舞台中心；用户之后可以自由拖动
+  const isCustom = asset.origin === "mine";
+  placed.value.push({
+    id: `${asset.kind}-${asset.name}-${Date.now()}`,
+    name: asset.name,
+    kind: asset.kind,
+    url: asset.url,
+    custom_url: isCustom ? asset.url : undefined,
+    isCustom,
+    x: 0.5,
+    y: 0.55,
+    scale: 1,
+    rotation: 0,
+  });
+  // 自造道具同时推进 customProps（作为生成下一幕时的参考图候选）
+  if (isCustom && !customProps.value.some((c) => c.url === asset.url)) {
+    customProps.value = [...customProps.value, { name: asset.name, url: asset.url }];
+  }
+  toast.push(`已添加「${asset.name}」到舞台`, "info");
+}
+
 async function addCustomFromImage(dataUrl: string, defaultName: string) {
   try {
     const up = await uploadImage({ data: dataUrl, kind: "prop" });
@@ -864,6 +895,15 @@ defineExpose({
             <img v-if="p.url" :src="p.url" class="w-12 h-12 object-contain" :alt="p.name" />
             <div class="text-[10px] mt-1 text-ink truncate w-full">{{ p.name }}</div>
           </div>
+          <!-- ➕ 打开"我的资产"会话框 -->
+          <button
+            class="bg-paper-deep hover:bg-gold-mute/60 active:scale-95 rounded-lg p-2 grid place-items-center text-center border border-dashed border-paper-edge hover:border-gold/40 transition"
+            :title="'浏览账户下所有已有资产'"
+            @click="myAssetsOpen = true"
+          >
+            <div class="w-12 h-12 grid place-items-center text-2xl text-ink-soft">＋</div>
+            <div class="text-[10px] mt-1 text-ink-soft truncate w-full">我的资产</div>
+          </button>
         </div>
         <!-- 动作序列已挪到 StoryPage 右侧对话栏 -->
 
@@ -1040,6 +1080,14 @@ defineExpose({
       :default-name="propModalDefaultName"
       @close="propModalOpen = false"
       @submit="onPropModalSubmit"
+    />
+
+    <!-- 📦 我的资产 modal -->
+    <MyAssetsModal
+      :open="myAssetsOpen"
+      :session-custom-props="customProps"
+      @close="myAssetsOpen = false"
+      @pick="addAssetToStage"
     />
 
     <!-- 生成下一幕二次确认（C7） -->
