@@ -1,124 +1,110 @@
 #!/usr/bin/env bash
-# macOS / Linux 启动脚本
+# AI4Story 开发启动脚本 (macOS / Linux)
+# 同时启动：前端 Vite dev server + 后端 uvicorn (--reload)
 set -euo pipefail
 
-HOST="${HOST:-127.0.0.1}"
+HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-URL="http://${HOST}:${PORT}"
 KEY_FILE="${ROOT}/start_webdemo.keys.sh"
 LOG_DIR="${ROOT}/outputs/logs"
 mkdir -p "${LOG_DIR}"
 
+# ---- 加载 API Keys ----
 if [[ ! -f "$KEY_FILE" ]]; then
   cat >"$KEY_FILE" <<'EOF'
 #!/usr/bin/env bash
-# Fill your API keys below, save this file, then run ./start_webdemo.sh again.
 export ARK_API_KEY="PASTE_SEEDREAM_API_KEY_HERE"
 export DASHSCOPE_API_KEY="PASTE_TEXT_MODEL_API_KEY_HERE"
 export XIAOMI_TTS_API_KEY="PASTE_XIAOMI_TTS_API_KEY_HERE"
 EOF
 fi
-
 # shellcheck source=/dev/null
 source "$KEY_FILE"
 
 if [[ "${ARK_API_KEY}" == "PASTE_SEEDREAM_API_KEY_HERE" ]]; then
-  echo "[ERROR] ARK_API_KEY not filled in yet. Please edit: $KEY_FILE"
-  exit 1
+  echo "[ERROR] ARK_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
 fi
 if [[ "${DASHSCOPE_API_KEY}" == "PASTE_TEXT_MODEL_API_KEY_HERE" ]]; then
-  echo "[ERROR] DASHSCOPE_API_KEY not filled in yet. Please edit: $KEY_FILE"
-  exit 1
-fi
-if [[ "${XIAOMI_TTS_API_KEY}" == "PASTE_XIAOMI_TTS_API_KEY_HERE" ]]; then
-  echo "[ERROR] XIAOMI_TTS_API_KEY not filled in yet. Please edit: $KEY_FILE"
-  exit 1
+  echo "[ERROR] DASHSCOPE_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
 fi
 
+# ---- 找 Python ----
 PYTHON_EXE=""
 if [[ -n "${AI4STORY_PYTHON:-}" && -x "${AI4STORY_PYTHON}" ]]; then
   PYTHON_EXE="${AI4STORY_PYTHON}"
 fi
-if [[ -z "${PYTHON_EXE}" && -x "${HOME}/miniconda3/envs/ai4story/bin/python" ]]; then
-  PYTHON_EXE="${HOME}/miniconda3/envs/ai4story/bin/python"
-fi
-if [[ -z "${PYTHON_EXE}" && -x "${HOME}/miniforge3/envs/ai4story/bin/python" ]]; then
-  PYTHON_EXE="${HOME}/miniforge3/envs/ai4story/bin/python"
-fi
-if [[ -z "${PYTHON_EXE}" && -x "${HOME}/anaconda3/envs/ai4story/bin/python" ]]; then
-  PYTHON_EXE="${HOME}/anaconda3/envs/ai4story/bin/python"
-fi
+for p in \
+  "${HOME}/miniconda3/envs/ai4story/bin/python" \
+  "${HOME}/miniforge3/envs/ai4story/bin/python" \
+  "${HOME}/anaconda3/envs/ai4story/bin/python"; do
+  if [[ -z "${PYTHON_EXE}" && -x "$p" ]]; then PYTHON_EXE="$p"; fi
+done
 if [[ -z "${PYTHON_EXE}" && "${CONDA_DEFAULT_ENV:-}" == "ai4story" && -n "${CONDA_PREFIX:-}" && -x "${CONDA_PREFIX}/bin/python" ]]; then
   PYTHON_EXE="${CONDA_PREFIX}/bin/python"
 fi
 if [[ -z "${PYTHON_EXE}" ]]; then
-  if command -v python3 >/dev/null 2>&1; then
-    PYTHON_EXE="$(command -v python3)"
-  elif command -v python >/dev/null 2>&1; then
-    PYTHON_EXE="$(command -v python)"
-  fi
+  PYTHON_EXE="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
 fi
 if [[ -z "${PYTHON_EXE}" ]]; then
-  echo "[ERROR] Python was not found."
-  exit 1
+  echo "[ERROR] Python not found."; exit 1
 fi
 
-if ! "${PYTHON_EXE}" -c "import fastapi,uvicorn,requests,PIL,dashscope" >/dev/null 2>&1; then
-  echo "[ERROR] Missing Python packages in: ${PYTHON_EXE}"
-  echo "Create or fix the environment first: conda env create -f environment.yml"
-  exit 1
+if ! "${PYTHON_EXE}" -c "import fastapi,uvicorn" >/dev/null 2>&1; then
+  echo "[ERROR] Missing Python packages (fastapi/uvicorn) in: ${PYTHON_EXE}"; exit 1
 fi
 
-# 前端 (v2 Vite/Vue) — dist 不存在则自动 build
-WEB_DIR="${ROOT}/apps/web"
-if [[ -f "${WEB_DIR}/package.json" && ! -f "${WEB_DIR}/dist/index.html" ]]; then
-  echo "[info] frontend dist 不存在，开始 build..."
-  if command -v pnpm >/dev/null 2>&1; then
-    (cd "${WEB_DIR}" && pnpm install --silent && pnpm build) || { echo "[ERROR] frontend build failed"; exit 1; }
-  elif command -v npm >/dev/null 2>&1; then
-    (cd "${WEB_DIR}" && npm install --silent && npm run build) || { echo "[ERROR] frontend build failed"; exit 1; }
-  else
-    echo "[WARN] 没找到 pnpm 或 npm，将退回到 web-legacy 静态版本"
-  fi
-fi
-
-if curl -sf --max-time 2 "${URL}/healthz" >/dev/null 2>&1; then
-  echo "AI4Story is already running. Opening ${URL}"
-  if command -v open >/dev/null 2>&1; then
-    open "${URL}"
-  elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "${URL}"
-  fi
-  exit 0
-fi
-
+# ---- 检查端口 ----
 if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "[ERROR] Port ${PORT} is already in use."
-  echo "Example: PORT=8001 ./start_webdemo.sh"
-  exit 1
+  echo "[ERROR] Port ${PORT} is already in use. PORT=8001 ./start_webdemo.sh"; exit 1
 fi
 
-echo "Starting AI4Story on ${URL}"
+# ---- 前端依赖 ----
+WEB_DIR="${ROOT}/apps/web"
+if [[ -f "${WEB_DIR}/package.json" && ! -d "${WEB_DIR}/node_modules" ]]; then
+  echo "[BUILD] Installing frontend dependencies..."
+  if command -v pnpm >/dev/null 2>&1; then
+    (cd "${WEB_DIR}" && pnpm install --silent)
+  elif command -v npm >/dev/null 2>&1; then
+    (cd "${WEB_DIR}" && npm install --silent)
+  else
+    echo "[ERROR] Neither pnpm nor npm found."; exit 1
+  fi
+fi
+
+# ---- 启动后端 ----
+echo "[START] Backend: uvicorn on http://${HOST}:${PORT}"
 cd "${ROOT}"
 export ARK_API_KEY DASHSCOPE_API_KEY XIAOMI_TTS_API_KEY
-nohup "${PYTHON_EXE}" -m uvicorn apps.api.main:app --host "${HOST}" --port "${PORT}" \
+"${PYTHON_EXE}" -m uvicorn apps.api.main:create_app \
+  --host "${HOST}" --port "${PORT}" --factory --reload \
   >>"${LOG_DIR}/backend.out.log" 2>>"${LOG_DIR}/backend.err.log" &
+BACKEND_PID=$!
 
-deadline=$((SECONDS + 60))
+# ---- 启动前端 ----
+echo "[START] Frontend: Vite dev server"
+if command -v pnpm >/dev/null 2>&1; then
+  (cd "${WEB_DIR}" && pnpm dev) &
+else
+  (cd "${WEB_DIR}" && npm run dev) &
+fi
+FRONTEND_PID=$!
+
+# ---- Ctrl+C 同时停两个 ----
+trap "kill ${BACKEND_PID} ${FRONTEND_PID} 2>/dev/null; exit" INT TERM
+
+# ---- 等后端就绪 ----
+URL="http://127.0.0.1:${PORT}"
+deadline=$((SECONDS + 30))
 while (( SECONDS < deadline )); do
   if curl -sf --max-time 2 "${URL}/healthz" >/dev/null 2>&1; then
-    echo "AI4Story is ready. Opening ${URL}"
-    if command -v open >/dev/null 2>&1; then
-      open "${URL}"
-    elif command -v xdg-open >/dev/null 2>&1; then
-      xdg-open "${URL}"
+    echo "[READY] Backend ready. Frontend at http://localhost:5173"
+    if command -v open >/dev/null 2>&1; then open "http://localhost:5173"
+    elif command -v xdg-open >/dev/null 2>&1; then xdg-open "http://localhost:5173"
     fi
-    exit 0
+    break
   fi
   sleep 1
 done
 
-echo "[ERROR] Server did not become ready within 60 seconds."
-echo "Check ${LOG_DIR}/backend.err.log for details."
-exit 1
+wait
