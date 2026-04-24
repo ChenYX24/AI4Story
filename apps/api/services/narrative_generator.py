@@ -133,7 +133,13 @@ def _collect_reference_paths(
     req: InteractRequest,
     scene_chars: list[str],
 ) -> list[Path]:
-    """Background + global character PNGs + objects used in ops + custom_props."""
+    """Background + global character PNGs + objects currently placed on the canvas.
+
+    Only objects that have been dragged onto the interactive stage are used as
+    reference images — inventory-only items (including user-created custom props
+    still sitting in the shelf) are intentionally excluded so the next-scene comic
+    only recalls what the child actually brought into play.
+    """
     paths: list[Path] = []
     seen: set[Path] = set()
 
@@ -150,26 +156,32 @@ def _collect_reference_paths(
             paths.append(gc)
             seen.add(gc)
 
-    # objects appearing in ops
-    for op in req.ops:
-        for n, k in ((op.subject, op.subject_kind), (op.target, op.target_kind)):
-            if not n or not k:
-                continue
-            try:
-                p = resolve_interactive_asset(req.scene_idx, n, k, story_id=req.story_id)
-                if p not in seen:
-                    paths.append(p)
-                    seen.add(p)
-            except FileNotFoundError:
-                continue
-
-    # custom props (user-generated, absolute path under outputs)
-    for cp in req.custom_props:
-        rel = cp.url.lstrip("/")
-        candidate = (PROJECT_ROOT / rel).resolve()
-        if candidate.exists() and candidate not in seen:
-            paths.append(candidate)
-            seen.add(candidate)
+    # Objects ON the canvas only. Handles both scene-defined objects and
+    # user-created custom props — the distinguishing signal is Transform.custom_url
+    # (set when a custom prop was dragged in) or a name match into req.custom_props.
+    custom_prop_by_name = {cp.name: cp for cp in req.custom_props}
+    for pl in req.placements:
+        if pl.kind != "object":
+            continue
+        custom_url = pl.custom_url or (
+            custom_prop_by_name[pl.name].url if pl.name in custom_prop_by_name else None
+        )
+        if custom_url:
+            rel = custom_url.lstrip("/")
+            candidate = (PROJECT_ROOT / rel).resolve()
+            if candidate.exists() and candidate not in seen:
+                paths.append(candidate)
+                seen.add(candidate)
+            continue
+        try:
+            p = resolve_interactive_asset(
+                req.scene_idx, pl.name, pl.kind, story_id=req.story_id
+            )
+        except FileNotFoundError:
+            continue
+        if p not in seen:
+            paths.append(p)
+            seen.add(p)
 
     return paths
 
@@ -243,6 +255,17 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
     scene_char_names = [c["name"] for c in scene.get("characters", [])]
     scene_obj_names = [o["name"] for o in scene.get("objects", [])]
 
+    # On-canvas filters: only objects / custom props actually dragged onto the
+    # interactive stage should flow into any downstream prompt or reference image.
+    placed_object_names = {
+        pl.name for pl in req.placements if pl.kind == "object" and pl.name
+    }
+    placed_scene_obj_names = [n for n in scene_obj_names if n in placed_object_names]
+    placed_custom_props = [cp for cp in req.custom_props if cp.name in placed_object_names]
+    placed_scene_objects = [
+        o for o in scene.get("objects", []) if o.get("name") in placed_object_names
+    ]
+
     all_characters = story.get("global_content", {}).get("characters", [])
     all_scenes = story.get("scenes", [])
     next_scene = next(
@@ -256,8 +279,8 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
         story_summary=story_summary,
         ops=req.ops,
         active_characters=scene_char_names,
-        active_objects=scene_obj_names,
-        custom_props=req.custom_props,
+        active_objects=placed_scene_obj_names,
+        custom_props=placed_custom_props,
         all_characters=all_characters,
         next_scene=next_scene,
     )
@@ -299,11 +322,14 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
         "narration": narration,
         "background_visual_description": scene.get("background_visual_description", ""),
         "characters": scene.get("characters", []),
+        # Only props on the interactive stage are described to Seedream — mirrors
+        # the reference-image filter so the text prompt cannot reintroduce
+        # inventory-only items.
         "objects": [
             {"name": cp.name, "appearance_description": f"小朋友创作的「{cp.name}」"}
-            for cp in req.custom_props
+            for cp in placed_custom_props
         ]
-        + scene.get("objects", []),
+        + placed_scene_objects,
         "dialogue": dialogue if isinstance(dialogue, list) else [],
     }
     seed_prompt = build_narrative_comic_prompt(pseudo_scene, storyboard_text)
