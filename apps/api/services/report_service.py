@@ -62,7 +62,7 @@ def build_report(req: ReportRequest) -> dict[str, Any]:
 
     prompt = (
         "你要给一位 4-6 岁小朋友和他的家长写一份完整的互动故事报告。"
-        "小朋友刚刚玩完一个《小红帽》互动故事书，在原著基础上通过选择道具和动作改写了情节。\n\n"
+        "小朋友刚刚玩完一个互动故事书，在原著基础上通过选择道具和动作改写了情节。\n\n"
         f"【原著大纲】{story_summary}\n\n"
         f"【互动统计】操作总数 {stats['total_ops']}（双物 {stats['two_way_ops']} / 单物 {stats['single_ops']} / 自由描述 {stats['freeform_ops']}），"
         f"新创物品 {stats['total_custom']} 个，改写场景 {stats['scenes_changed']} 幕。\n\n"
@@ -174,7 +174,7 @@ def build_report(req: ReportRequest) -> dict[str, Any]:
             canonical.append({
                 "name": name,
                 "value": _clamp_pct(matched.get("value", 60)),
-                "evidence": criteria[name],
+                "evidence": str(matched.get("evidence") or matched.get("description") or criteria[name]).strip(),
             })
         else:
             base = 50 + min(20, stats["total_ops"] * 3) + (8 if name in ("想象", "创新") and stats["total_custom"] else 0)
@@ -184,15 +184,17 @@ def build_report(req: ReportRequest) -> dict[str, Any]:
                 "evidence": criteria[name],
             })
     parent["metrics"] = canonical
-    real_world_suggestions = [
-        "亲子共读后，请孩子用自己的话复述一个情节，再追问“为什么会这样”。",
-        "用积木、纸偶或画笔复现故事场景，让孩子在现实物品中练习表达和组织。",
-        "日常遇到选择时，引导孩子说出两个办法，并比较每个办法的结果。",
-        "鼓励孩子观察家里或幼儿园里的颜色、形状和摆放，说出自己喜欢的理由。",
-    ]
-    suggestions = [str(s).strip() for s in (parent.get("suggestions") or []) if str(s).strip()]
     blocked = ("软件", "应用", "屏幕", "点击", "页面", "互动场景", "继续使用")
+    suggestions = [str(s).strip() for s in (parent.get("suggestions") or []) if str(s).strip()]
     suggestions = [s for s in suggestions if not any(b in s for b in blocked)]
-    parent["suggestions"] = (suggestions + real_world_suggestions)[:4]
+    if len(suggestions) < 3:
+        fallback = [
+            "亲子共读后，请孩子用自己的话复述一个情节，再追问\u201c为什么会这样\u201d。",
+            "用积木、纸偶或画笔复现故事场景，让孩子在现实物品中练习表达和组织。",
+            "日常遇到选择时，引导孩子说出两个办法，并比较每个办法的结果。",
+            "鼓励孩子观察家里或幼儿园里的颜色、形状和摆放，说出自己喜欢的理由。",
+        ]
+        suggestions.extend(fallback[:4 - len(suggestions)])
+    parent["suggestions"] = suggestions[:4]
 
     return {"share": share, "kid_section": kid, "parent_section": parent}

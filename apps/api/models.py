@@ -95,6 +95,27 @@ class CreatePropResponse(BaseModel):
     reference_image_url: str | None = None
 
 
+class TTSItem(BaseModel):
+    text: str
+    voice: str | None = None
+    tone: str | None = None
+    speaker: str | None = None
+
+
+class TTSBatchRequest(BaseModel):
+    items: list[TTSItem]
+
+
+class TTSBatchResponseItem(BaseModel):
+    index: int
+    audio_b64: str
+    format: str
+
+
+class TTSBatchResponse(BaseModel):
+    items: list[TTSBatchResponseItem]
+
+
 class BatchPropItem(BaseModel):
     name: str
     description: str | None = None
@@ -123,6 +144,7 @@ class SmartCreatePropsResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     story_id: str | None = None
+    session_id: str
     scene_idx: int
     user_text: str
 

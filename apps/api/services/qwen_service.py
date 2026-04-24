@@ -7,7 +7,7 @@ import requests
 from ..config import DASHSCOPE_API_KEY
 
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_MODEL = "qwen3.5-122b-a10b"
+DEFAULT_MODEL = "qwen3.6-flash-2026-04-16"
 
 
 class QwenError(RuntimeError):
@@ -86,6 +86,38 @@ def call_text(
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": False,
+    }
+    headers = {
+        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(
+        f"{BASE_URL}/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=timeout,
+    )
+    if resp.status_code >= 400:
+        raise QwenError(f"HTTP {resp.status_code}: {resp.text[:400]}")
+    data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def call_chat(
+    messages: list[dict[str, str]],
+    *,
+    model: str = DEFAULT_MODEL,
+    temperature: float = 0.5,
+    timeout: int = 60,
+) -> str:
+    """Send a full multi-turn messages list to Qwen and return the assistant reply."""
+    if not DASHSCOPE_API_KEY:
+        raise QwenError("DASHSCOPE_API_KEY not set")
     payload = {
         "model": model,
         "messages": messages,

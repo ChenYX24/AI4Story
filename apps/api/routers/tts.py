@@ -1,7 +1,11 @@
+import base64
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
-from ..services.tts_service import TTSError, media_type, synthesize_bytes
+from ..config import XIAOMI_TTS_FORMAT
+from ..models import TTSBatchRequest, TTSBatchResponse, TTSBatchResponseItem
+from ..services.tts_service import TTSError, media_type, synthesize_batch, synthesize_bytes
 
 router = APIRouter()
 
@@ -24,3 +28,28 @@ def tts(
         media_type=media_type(),
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+
+@router.post("/tts/batch", response_model=TTSBatchResponse)
+def tts_batch(req: TTSBatchRequest):
+    if len(req.items) > 20:
+        raise HTTPException(status_code=400, detail="max 20 items per batch")
+    if not req.items:
+        raise HTTPException(status_code=400, detail="items list is empty")
+
+    raw_items = [item.model_dump() for item in req.items]
+    try:
+        audio_list = synthesize_batch(raw_items)
+    except TTSError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    fmt = XIAOMI_TTS_FORMAT.lower()
+    response_items = [
+        TTSBatchResponseItem(
+            index=i,
+            audio_b64=base64.b64encode(audio).decode(),
+            format=fmt,
+        )
+        for i, audio in enumerate(audio_list)
+    ]
+    return TTSBatchResponse(items=response_items)

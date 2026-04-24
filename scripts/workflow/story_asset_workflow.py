@@ -37,8 +37,8 @@ from scripts.story.story_scene_splitter import (
     normalize_name,
 )
 
-DEFAULT_QWEN_MODEL = "qwen3.6-plus"
-PLACEMENT_VISION_MODEL = "qwen-vl-max"
+DEFAULT_QWEN_MODEL = "qwen3.6-flash-2026-04-16"
+PLACEMENT_VISION_MODEL = "qwen3.6-flash-2026-04-16"
 MIN_SEEDREAM_PIXELS = 3686400
 DEFAULT_MAX_WORKERS = min(8, max(4, (os.cpu_count() or 4)))
 PROGRESS_LOCK = Lock()
@@ -593,49 +593,54 @@ def build_global_assets(
     total = (math.ceil(len(characters) / 9) if characters else 0) + (math.ceil(len(objects) / 9) if objects else 0)
     progress = tqdm(total=total, desc="Generating global assets", unit="asset", disable=not show_progress)
 
-    if characters:
-        character_grid_results = generate_object_grid_assets(
-            api_key=api_key,
-            provider=provider,
-            model=seedream_model,
-            size=asset_size,
-            entries=prepare_global_character_grid_entries(characters),
-            output_dir=character_dir,
-            work_dir=character_work_dir,
-            batch_prefix="global_characters",
-            overall_progress=overall_progress,
-            overall_label="global characters grid",
-            parallel_workers=scene_asset_workers,
-        )
-        for result in character_grid_results:
-            manifests["characters"][normalize_name(str(result["name"]))] = {
-                "name": str(result["name"]),
-                "png": str(result["png"]),
-                "svg": str(result["svg"]),
-            }
-        progress.update(math.ceil(len(characters) / 9))
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures: dict[Any, str] = {}
 
-    if objects:
-        grid_results = generate_object_grid_assets(
-            api_key=api_key,
-            provider=provider,
-            model=seedream_model,
-            size=asset_size,
-            entries=objects,
-            output_dir=object_dir,
-            work_dir=object_work_dir,
-            batch_prefix="global_objects",
-            overall_progress=overall_progress,
-            overall_label="global objects grid",
-            parallel_workers=scene_asset_workers,
-        )
-        for result in grid_results:
-            manifests["objects"][normalize_name(str(result["name"]))] = {
-                "name": str(result["name"]),
-                "png": str(result["png"]),
-                "svg": str(result["svg"]),
-            }
-        progress.update(math.ceil(len(objects) / 9))
+        if characters:
+            futures[executor.submit(
+                generate_object_grid_assets,
+                api_key=api_key,
+                provider=provider,
+                model=seedream_model,
+                size=asset_size,
+                entries=prepare_global_character_grid_entries(characters),
+                output_dir=character_dir,
+                work_dir=character_work_dir,
+                batch_prefix="global_characters",
+                overall_progress=overall_progress,
+                overall_label="global characters grid",
+                parallel_workers=scene_asset_workers,
+            )] = "characters"
+
+        if objects:
+            futures[executor.submit(
+                generate_object_grid_assets,
+                api_key=api_key,
+                provider=provider,
+                model=seedream_model,
+                size=asset_size,
+                entries=objects,
+                output_dir=object_dir,
+                work_dir=object_work_dir,
+                batch_prefix="global_objects",
+                overall_progress=overall_progress,
+                overall_label="global objects grid",
+                parallel_workers=scene_asset_workers,
+            )] = "objects"
+
+        for future in as_completed(futures):
+            kind = futures[future]
+            results = future.result()
+            for result in results:
+                manifests[kind][normalize_name(str(result["name"]))] = {
+                    "name": str(result["name"]),
+                    "png": str(result["png"]),
+                    "svg": str(result["svg"]),
+                }
+            if kind == "characters":
+                progress.update(math.ceil(len(characters) / 9))
+            else:
+                progress.update(math.ceil(len(objects) / 9))
 
     progress.close()
     save_json(global_dir / "manifest.json", manifests)

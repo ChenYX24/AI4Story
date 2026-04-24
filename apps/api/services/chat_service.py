@@ -2,9 +2,15 @@ import logging
 
 from ..config import DASHSCOPE_API_KEY
 from ..scene_loader import _load_scene_json, load_story
-from .qwen_service import QwenError, call_text
+from .qwen_service import QwenError, call_chat
 
 log = logging.getLogger(__name__)
+
+# In-memory conversation history keyed by session_id.
+# Each value is a list of {"role": ..., "content": ...} dicts.
+# Capped at 6 rounds (12 messages) per session.
+_CHAT_HISTORY: dict[str, list[dict[str, str]]] = {}
+_MAX_ROUNDS = 6
 
 
 class ChatServiceError(RuntimeError):
@@ -21,7 +27,12 @@ def _build_char_notes(global_chars: list[dict]) -> str:
     return "\n".join(lines) or "  （无）"
 
 
-def reply_to(scene_idx: int, user_text: str, story_id: str | None = None) -> str:
+def clear_chat_history(session_id: str) -> None:
+    """Remove all stored conversation history for the given session."""
+    _CHAT_HISTORY.pop(session_id, None)
+
+
+def reply_to(scene_idx: int, user_text: str, story_id: str | None = None, session_id: str = "") -> str:
     if not user_text.strip():
         return "我没听清呢，再说一遍好吗？"
     if not DASHSCOPE_API_KEY:
@@ -65,10 +76,23 @@ def reply_to(scene_idx: int, user_text: str, story_id: str | None = None) -> str
         "- 回答简短有趣，适合 5 岁儿童理解，不超过 2 句"
     )
 
-    # 统一走 qwen_service.call_text —— 和其他 pipeline 同一条 HTTP 通道
-    # （OpenAI 兼容 endpoint），不再依赖 dashscope SDK，避免 URL/模型 ID 不一致的 400。
+    # Build full multi-turn messages list: system + history + current user msg
+    history = _CHAT_HISTORY.get(session_id, [])
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": user_text})
+
     try:
-        return call_text(user_text, system=system, temperature=0.7, timeout=60)
+        reply = call_chat(messages, temperature=0.7, timeout=60)
     except QwenError as e:
-        log.warning("[chat] call_text failed: %s", e)
+        log.warning("[chat] call_chat failed: %s", e)
         raise ChatServiceError(str(e)) from e
+
+    # Persist the new round in history, capped at _MAX_ROUNDS (12 messages)
+    history.append({"role": "user", "content": user_text})
+    history.append({"role": "assistant", "content": reply})
+    if len(history) > _MAX_ROUNDS * 2:
+        history = history[-_MAX_ROUNDS * 2:]
+    _CHAT_HISTORY[session_id] = history
+
+    return reply
