@@ -129,6 +129,24 @@ function copyCode(code: string) {
 }
 
 const filteredAssets = computed(() => assets.value);
+const sharedAssets = computed(() =>
+  shared.value.flatMap((p) => p.assets.map((a) => ({ ...a, packCode: p.code, packName: p.name }))),
+);
+function addSharedAssetToMine(a: PackOut["assets"][number] & { packCode: string }) {
+  if (assetShelf.myAssets.find((m) => m.id === a.id)) {
+    toast.push("\u5df2\u7ecf\u5728\u6211\u7684\u8d44\u4ea7\u91cc\u4e86", "success");
+    return;
+  }
+  assetShelf.addMyAsset({
+    id: a.id,
+    name: a.name,
+    url: a.url,
+    kind: (a.kind as "character" | "object"),
+    origin_story_id: a.origin_story_id,
+    origin_scene_idx: a.origin_scene_idx,
+  });
+  toast.push("\u5df2\u6dfb\u52a0\u5230\u6211\u7684\u8d44\u4ea7", "success");
+}
 
 watch(tab, (v) => { if (v === "mine" && myPacks.value.length === 0) loadMyPacks(); });
 </script>
@@ -243,40 +261,27 @@ watch(tab, (v) => { if (v === "mine" && myPacks.value.length === 0) loadMyPacks(
 
     <!-- 用户分享（后端 /packs/ public） -->
     <template v-else-if="tab === 'shared'">
-      <div v-if="shared.length === 0" class="text-center py-16 text-ink-mute">
-        <div class="text-5xl mb-3">✨</div>
-        <div>还没有用户分享的资产包<br />在"我的资产"多选后点"打包分享到公共库"</div>
+      <div v-if="sharedAssets.length === 0" class="text-center py-16 text-ink-mute">
+        <div class="text-5xl mb-3">*</div>
+        <div>No shared props yet<br />Shared props published from personal assets will appear here as individual cards.</div>
       </div>
-      <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
-        <BaseCard
-          v-for="p in shared"
-          :key="p.code"
-          hover
-          class="overflow-hidden relative"
-        >
-          <div class="h-28 grid place-items-center bg-gradient-to-br from-paper-deep to-gold-mute relative overflow-hidden">
-            <div v-if="p.assets.length" class="grid grid-cols-3 gap-1 p-2">
-              <div v-for="a in p.assets.slice(0, 6)" :key="a.id"
-                   class="w-8 h-8 bg-white/70 rounded overflow-hidden grid place-items-center">
-                <img :src="a.url" class="max-w-full max-h-full object-contain" alt="" />
-              </div>
-            </div>
-            <div v-else class="text-4xl">📦</div>
-            <div class="absolute bottom-1 right-2 px-2 py-0.5 text-[11px] rounded-full bg-white/90 text-ink font-semibold">× {{ p.asset_ids.length }}</div>
+      <div v-else class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+        <BaseCard v-for="a in sharedAssets" :key="a.packCode + '-' + a.id" hover class="overflow-hidden relative group">
+          <div class="h-24 grid place-items-center bg-gradient-to-br from-paper-deep to-gold-mute relative">
+            <img :src="a.url" :alt="a.name" loading="lazy" class="max-w-[88%] max-h-[88%] object-contain" />
           </div>
           <div class="p-3">
-            <div class="font-semibold text-ink truncate">{{ p.name }}</div>
-            <div class="text-xs text-ink-mute mt-0.5 line-clamp-1">{{ p.description || "没有描述" }}</div>
-            <div class="mt-2 flex items-center justify-between text-[11px]">
-              <span class="font-mono text-accent-deep">{{ p.code }}</span>
-              <BaseButton size="sm" pill @click="codeInput = p.code; importByCode()">导入</BaseButton>
-            </div>
+            <div class="font-semibold text-ink text-sm truncate">{{ a.name }}</div>
+            <div class="text-[11px] text-ink-mute mt-0.5 truncate">From {{ a.packName }}</div>
+            <BaseButton class="mt-2 w-full" size="sm" pill @click="addSharedAssetToMine(a)">
+              {{ assetShelf.myAssets.find((m) => m.id === a.id) ? '\u5df2\u6dfb\u52a0' : '\u6dfb\u52a0\u5230\u6211\u7684\u8d44\u4ea7' }}
+            </BaseButton>
           </div>
         </BaseCard>
       </div>
     </template>
 
-    <!-- 我的资产包 -->
+    <!-- mine -->
     <template v-else-if="tab === 'mine'">
       <div v-if="!user.isAuthed" class="text-center py-16 text-ink-mute">
         请先登录后查看我的资产包

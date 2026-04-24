@@ -1,16 +1,11 @@
-// 资产收藏 —— 独立于故事书架 (useShelfStore)。
-// 三条独立 list：
-//   assetIds / bundleIds — 收藏的公共资产（id 指向公共库）
-//   myAssets — 用户自创道具（互动页生成的 AI 道具、上传/拍照/画板做的道具）
-// 登录后自动与后端 /api/user/assets 双向同步（未登录时仅 localStorage）。
+// Asset shelf is scoped per account so one browser profile cannot leak assets between users.
 import { defineStore } from "pinia";
-import { computed } from "vue";
-import { useLocalStorage } from "@vueuse/core";
-import { createMyAsset, deleteMyAsset, syncMyAssets } from "@/api/endpoints";
+import { computed, ref, watch } from "vue";
+import { createMyAsset, deleteMyAsset, fetchMyAssets } from "@/api/endpoints";
 import { getAuthToken } from "@/api/client";
 
 export interface MyAsset {
-  id: string;          // 客户端生成的稳定 id（时间戳 + 随机）
+  id: string;
   name: string;
   url: string;
   kind: "character" | "object";
@@ -19,13 +14,31 @@ export interface MyAsset {
   created_at: number;
 }
 
+function readJson<T>(key: string, fallback: T): T {
+  try { return JSON.parse(localStorage.getItem(key) || "") as T; }
+  catch { return fallback; }
+}
+
 export const useAssetShelfStore = defineStore("assetShelf", () => {
-  // 单件资产（公共库收藏）
-  const assetIds = useLocalStorage<string[]>("mindshow_asset_shelf", []);
-  // 打包资产（公共库收藏）
-  const bundleIds = useLocalStorage<string[]>("mindshow_bundle_shelf", []);
-  // 我自己创造的道具（互动页 AI 生成 / 上传 / 画板）
-  const myAssets = useLocalStorage<MyAsset[]>("mindshow_my_assets", []);
+  const scope = ref("guest");
+  const assetIds = ref<string[]>([]);
+  const bundleIds = ref<string[]>([]);
+  const myAssets = ref<MyAsset[]>([]);
+
+  const key = (name: string) => `mindshow_${scope.value}_${name}`;
+  function loadScope(userId?: string | null) {
+    scope.value = userId || "guest";
+    assetIds.value = readJson<string[]>(key("asset_shelf"), []);
+    bundleIds.value = readJson<string[]>(key("bundle_shelf"), []);
+    myAssets.value = readJson<MyAsset[]>(key("my_assets"), []);
+  }
+  function persist() {
+    localStorage.setItem(key("asset_shelf"), JSON.stringify(assetIds.value));
+    localStorage.setItem(key("bundle_shelf"), JSON.stringify(bundleIds.value));
+    localStorage.setItem(key("my_assets"), JSON.stringify(myAssets.value));
+  }
+  loadScope(null);
+  watch([assetIds, bundleIds, myAssets], persist, { deep: true });
 
   const assetSet = computed(() => new Set(assetIds.value));
   const bundleSet = computed(() => new Set(bundleIds.value));
@@ -45,7 +58,7 @@ export const useAssetShelfStore = defineStore("assetShelf", () => {
   function removeAsset(id: string) { assetIds.value = assetIds.value.filter((x) => x !== id); }
   function removeBundle(id: string) { bundleIds.value = bundleIds.value.filter((x) => x !== id); }
 
-  function addMyAsset(a: Omit<MyAsset, "id" | "created_at"> & { id?: string }): MyAsset {
+  function addMyAsset(a: Omit<MyAsset, "id" | "created_at"> & { id?: string; created_at?: number }): MyAsset {
     const full: MyAsset = {
       id: a.id || `my-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: a.name,
@@ -53,10 +66,9 @@ export const useAssetShelfStore = defineStore("assetShelf", () => {
       kind: a.kind,
       origin_story_id: a.origin_story_id,
       origin_scene_idx: a.origin_scene_idx,
-      created_at: Date.now(),
+      created_at: a.created_at || Date.now(),
     };
-    myAssets.value = [full, ...myAssets.value];
-    // 后台同步到服务端（登录态），失败不阻塞本地
+    myAssets.value = [full, ...myAssets.value.filter((x) => x.id !== full.id)];
     if (getAuthToken()) {
       createMyAsset({
         id: full.id,
@@ -76,15 +88,10 @@ export const useAssetShelfStore = defineStore("assetShelf", () => {
     }
   }
 
-  // 登录后调用：把本地未上传的 push 给服务端并 pull 全量回来合并
   async function pullFromServer() {
     if (!getAuthToken()) return;
     try {
-      const resp = await syncMyAssets(myAssets.value.map((a) => ({
-        id: a.id, name: a.name, url: a.url, kind: a.kind,
-        origin_story_id: a.origin_story_id, origin_scene_idx: a.origin_scene_idx,
-      })));
-      // 合并结果（服务端是权威）
+      const resp = await fetchMyAssets();
       myAssets.value = resp.assets.map((s) => ({
         id: s.id,
         name: s.name,
@@ -107,6 +114,6 @@ export const useAssetShelfStore = defineStore("assetShelf", () => {
     toggleAsset, toggleBundle,
     removeAsset, removeBundle,
     addMyAsset, removeMyAsset,
-    pullFromServer,
+    loadScope, pullFromServer,
   };
 });

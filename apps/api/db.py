@@ -182,6 +182,9 @@ def list_user_assets(user_id: str) -> list[dict]:
 def create_user_asset(user_id: str, a: dict) -> dict:
     aid = a.get("id") or ("ua_" + secrets.token_hex(6))
     with _conn() as c:
+        existing = c.execute("SELECT user_id FROM user_assets WHERE id = ?", (aid,)).fetchone()
+        if existing and existing["user_id"] != user_id:
+            aid = "ua_" + secrets.token_hex(6)
         c.execute(
             "INSERT OR REPLACE INTO user_assets "
             "(id, user_id, name, url, kind, origin_story_id, origin_scene_idx, created_at) "

@@ -159,6 +159,23 @@ def build_report(req: ReportRequest) -> dict[str, Any]:
                 "evidence": f"孩子在 {stats['scenes_changed']} 幕里一共安排了 {stats['total_ops']} 个操作。",
             },
         ]
-    parent["metrics"] = metrics[:8]
+    canonical_names = ["想象", "表达", "逻辑", "审美", "创新"]
+    canonical: list[dict[str, Any]] = []
+    for name in canonical_names:
+        matched = next((m for m in metrics if name in str(m.get("name", ""))), None)
+        if matched:
+            canonical.append({
+                "name": name,
+                "value": _clamp_pct(matched.get("value", 60)),
+                "evidence": matched.get("evidence", ""),
+            })
+        else:
+            base = 50 + min(20, stats["total_ops"] * 3) + (8 if name in ("想象", "创新") and stats["total_custom"] else 0)
+            canonical.append({
+                "name": name,
+                "value": _clamp_pct(base),
+                "evidence": f"根据本次 {stats['total_ops']} 个互动动作和 {stats['total_custom']} 个自创道具综合估计。",
+            })
+    parent["metrics"] = canonical
 
     return {"share": share, "kid_section": kid, "parent_section": parent}

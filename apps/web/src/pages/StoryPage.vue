@@ -12,7 +12,7 @@ import BaseModal from "@/components/BaseModal.vue";
 import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
-import { postChat, postInteract } from "@/api/endpoints";
+import { postChat, postInteract, postReport } from "@/api/endpoints";
 import type { Scene, InteractRequest, InteractResponse, Operation } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
@@ -124,6 +124,41 @@ async function prefetchNode(idx: number) {
   } catch { /* silent */ }
 }
 
+function currentSessionId(): string {
+  return sess.ensure(props.id, store.current?.title || props.id);
+}
+
+function startReportInBackground() {
+  const sessionId = currentSessionId();
+  const current = sess.getById(sessionId);
+  if (current?.report_payload || current?.report_status === "generating" || sess.getReportPromise(sessionId)) return;
+  sess.markReportGenerating(sessionId);
+  const p = postReport({
+    session_id: sessionId,
+    story_id: props.id,
+    interactions: store.interactions,
+  }).then((payload) => {
+    sess.saveReport(sessionId, payload);
+    return payload;
+  }).catch((e: any) => {
+    sess.failReport(sessionId, e?.message || String(e));
+    throw e;
+  });
+  sess.setReportPromise(sessionId, p);
+  p.catch(() => {});
+}
+
+function goReport() {
+  const sid = currentSessionId();
+  startReportInBackground();
+  router.push({ name: "report", params: { id: props.id }, query: { sid } });
+}
+
+function isLastInteractiveScene(sceneIdx: number): boolean {
+  const scenes = store.current?.scenes || [];
+  return !scenes.some((s) => s.type === "interactive" && s.index > sceneIdx);
+}
+
 async function turnPage(direction: "next" | "prev") {
   // 在 dynamic narrative 上点 next → 先清 dynamic 再走真正的 flow 推进
   if (dynamicNode.value && direction === "next") {
@@ -141,7 +176,7 @@ async function turnPage(direction: "next" | "prev") {
   const to = store.cursor + (direction === "next" ? 1 : -1);
   if (to < 0) return;
   if (to >= store.flow.length) {
-    router.push({ name: "report", params: { id: props.id } });
+    goReport();
     return;
   }
   // 顺序推进永远允许；跳转（timeline）才检查 highestUnlocked
@@ -164,7 +199,7 @@ async function advanceLine() {
     if (!isLast.value) {
       turnPage("next");
     } else {
-      router.push({ name: "report", params: { id: props.id } });
+      goReport();
     }
     return;
   }
@@ -309,6 +344,7 @@ function onInteractGenerate(request: InteractRequest) {
     });
     sess.markGeneratedNotice(props.id);
     toast.push("Generated new story scene", "success");
+    if (isLastInteractiveScene(sourceSceneIdx)) startReportInBackground();
     const active = store.flow[store.cursor];
     if (active?.type === "dynamic" && active.sceneIdx === sourceSceneIdx) {
       void loadCursor(store.cursor);
@@ -390,6 +426,7 @@ onMounted(async () => {
         router.push("/library");
         return;
       }
+      currentSessionId();
       resumeModalOpen.value = true;
       return;
     }
@@ -403,6 +440,7 @@ onMounted(async () => {
       router.push("/library");
       return;
     }
+    currentSessionId();
     await loadCursor(0);
   } catch (e: any) {
     toast.push(`加载失败：${e.message}`, "error");
@@ -462,6 +500,7 @@ onBeforeUnmount(() => { store.setJumpHandler(null); });
 watch(() => props.id, async (v) => {
   if (store.current?.id !== v) {
     await store.loadStory(v);
+    currentSessionId();
     await loadCursor(0);
   }
 });

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import BaseCard from "@/components/BaseCard.vue";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
@@ -12,6 +12,7 @@ import { fetchServerInfo, postShare } from "@/api/endpoints";
 import type { ReportResponse } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
+const route = useRoute();
 const router = useRouter();
 const store = useStoryStore();
 const session = useSessionStore();
@@ -75,23 +76,52 @@ const chunkByKind = computed(() => {
 });
 
 async function runStream() {
-  const sessionId = session.start(props.id, store.current?.title || props.id);
+  if (!store.current || store.current.id !== props.id) {
+    await store.loadStory(props.id).catch(() => {});
+  }
+  const requestedSid = typeof route.query.sid === "string" ? route.query.sid : null;
+  const existing = session.getById(requestedSid) || session.currentForStory(props.id);
+  const sessionId = existing?.id || session.ensure(props.id, store.current?.title || props.id);
+  const record = session.getById(sessionId);
+  if (record?.report_payload) {
+    payload.value = record.report_payload;
+    void buildShare();
+    session.clearPlayState(props.id);
+    return;
+  }
+  const pending = session.getReportPromise(sessionId);
+  if (pending) {
+    session.markReportGenerating(sessionId);
+    try {
+      payload.value = await pending;
+      void buildShare();
+      session.clearPlayState(props.id);
+    } catch (e: any) {
+      failed.value = true;
+      session.failReport(sessionId, e?.message || String(e));
+      toast.push(`Report generation failed: ${e.message}`, "error");
+    }
+    return;
+  }
+  session.markReportGenerating(sessionId);
   try {
-    const resp = await stream.run({
+    const p = stream.run({
       session_id: sessionId,
       story_id: props.id,
-      interactions: store.interactions, // 真实记录，不是空数组
+      interactions: store.interactions,
     });
+    session.setReportPromise(sessionId, p);
+    const resp = await p;
     payload.value = resp;
-    session.markReportReady(sessionId);
-    // 完成后异步生成分享码 + QR
+    session.saveReport(sessionId, resp);
     void buildShare();
+    session.clearPlayState(props.id);
   } catch (e: any) {
     failed.value = true;
-    toast.push(`报告生成失败：${e.message}`, "error");
+    session.failReport(sessionId, e?.message || String(e));
+    toast.push(`Report generation failed: ${e.message}`, "error");
   }
 }
-
 onMounted(() => {
   runStream();
   // E3: 进入报告 = 本次 session 结束，清掉进行中快照

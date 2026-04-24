@@ -10,6 +10,7 @@ from ..db import (
     delete_asset_pack,
     get_asset_pack,
     list_public_packs,
+    list_user_assets,
     list_user_packs,
     update_asset_pack,
     user_assets_by_ids,
@@ -64,7 +65,12 @@ def create_pack(payload: PackCreateReq,
     if not payload.asset_ids:
         raise HTTPException(status_code=400, detail="至少选一件资产")
     u = _current_user(authorization)
-    owner = u["id"] if u else None
+    if not u:
+        raise HTTPException(401, "请先登录")
+    owner = u["id"]
+    owned = {a["id"] for a in list_user_assets(owner)}
+    if any(aid not in owned for aid in payload.asset_ids):
+        raise HTTPException(status_code=403, detail="只能分享自己的资产")
     r = create_asset_pack(owner, payload.name or "我分享的道具包",
                           payload.description or "", payload.asset_ids, payload.public)
     assets_map = user_assets_by_ids(payload.asset_ids)

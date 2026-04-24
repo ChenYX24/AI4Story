@@ -268,50 +268,66 @@ function importPackToMine() {
 }
 
 // E4 成长报告 —— 硬编码 + 轻量启发式（阶段 3 接后端 AI 聚合分析）
+const growthKeys = [
+  { key: "imagination", label: "\u60f3\u8c61" },
+  { key: "expression", label: "\u8868\u8fbe" },
+  { key: "logic", label: "\u903b\u8f91" },
+  { key: "aesthetic", label: "\u5ba1\u7f8e" },
+  { key: "innovation", label: "\u521b\u65b0" },
+];
+function metricValue(report: any, label: string): number {
+  const metrics = report?.parent_section?.metrics || [];
+  const found = metrics.find((m: any) => String(m.name || "").includes(label));
+  const n = Number(found?.value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 60;
+}
+const completedGrowthReports = computed(() => sess.completedReports);
+const latestGrowthReport = computed(() => completedGrowthReports.value[0]?.report_payload || null);
 const growthDims = computed(() => {
-  const total = sess.list.length;
-  const finished = sess.list.filter((s) => s.report_ready).length;
-  const myCount = assetShelf.myAssets.length;
-  const favCount = assetShelf.assetIds.length + assetShelf.bundleIds.length;
-  return [
-    { key: "imagination", label: "想象力", value: Math.min(100, 30 + myCount * 12) },
-    { key: "expression",  label: "表达",   value: Math.min(100, 25 + total * 10) },
-    { key: "empathy",     label: "共情",   value: Math.min(100, 30 + favCount * 6) },
-    { key: "logic",       label: "逻辑",   value: Math.min(100, 20 + finished * 15) },
-    { key: "aesthetic",   label: "审美",   value: Math.min(100, 35 + myCount * 5 + favCount * 3) },
-    { key: "perseverance",label: "坚持",   value: Math.min(100, 25 + finished * 18) },
-  ];
+  const reports = completedGrowthReports.value.map((r) => r.report_payload).filter(Boolean);
+  return growthKeys.map((d) => {
+    const latest = latestGrowthReport.value ? metricValue(latestGrowthReport.value, d.label) : 0;
+    const average = reports.length ? Math.round(reports.reduce((sum, r) => sum + metricValue(r, d.label), 0) / reports.length) : latest;
+    return { ...d, latest, average };
+  });
 });
 const growthAdvice = computed(() => {
+  if (!latestGrowthReport.value) return "\u5b8c\u6210\u4e00\u6b21\u6545\u4e8b\u4e92\u52a8\u540e\uff0c\u8fd9\u91cc\u4f1a\u5c55\u793a\u6700\u8fd1\u4e00\u6b21\u548c\u5386\u53f2\u5e73\u5747\u7684\u5bf9\u6bd4\u3002";
   const dims = growthDims.value;
-  const weakest = [...dims].sort((a, b) => a.value - b.value)[0];
-  const strongest = [...dims].sort((a, b) => b.value - a.value)[0];
-  return `「${strongest.label}」是你家孩子的小强项，不妨多安排一些需要${strongest.label}的桥段；「${weakest.label}」还可以通过多玩几个互动段落来慢慢练。`;
+  const improved = [...dims].sort((a, b) => (b.latest - b.average) - (a.latest - a.average))[0];
+  const focus = [...dims].sort((a, b) => a.latest - b.latest)[0];
+  const same = dims.every((d) => d.latest === d.average);
+  if (same) return `\u8fd9\u662f\u7b2c\u4e00\u6b21\u5b8c\u6574\u62a5\u544a\uff0c${improved.label}\u76ee\u524d\u8868\u73b0\u6700\u9c9c\u660e\u3002\u540e\u7eed\u591a\u73a9\u51e0\u6b21\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u548c\u5386\u53f2\u5e73\u5747\u7684\u53d8\u5316\u3002`;
+  return `\u6700\u8fd1\u4e00\u6b21\u5728\u300c${improved.label}\u300d\u4e0a\u9ad8\u4e8e\u5e73\u5747\uff0c\u8bf4\u660e\u8fd9\u6b21\u4e92\u52a8\u91cc\u6709\u65b0\u7684\u4eae\u70b9\uff1b\u300c${focus.label}\u300d\u53ef\u4ee5\u7ee7\u7eed\u901a\u8fc7\u8bb2\u8ff0\u539f\u56e0\u3001\u8865\u5145\u7ec6\u8282\u548c\u5c1d\u8bd5\u4e0d\u540c\u7ed3\u5c40\u6765\u7ec3\u4e60\u3002`;
 });
 
 function hexPoints(radius: number): string[] {
   const pts: string[] = [];
-  for (let i = 0; i < 6; i++) {
-    const a = (Math.PI * 2 * i) / 6 - Math.PI / 2;
+  for (let i = 0; i < growthKeys.length; i++) {
+    const a = (Math.PI * 2 * i) / growthKeys.length - Math.PI / 2;
     pts.push(`${(Math.cos(a) * radius).toFixed(1)},${(Math.sin(a) * radius).toFixed(1)}`);
   }
   return pts;
 }
 function labelPoint(i: number, radius: number): { x: number; y: number } {
-  const a = (Math.PI * 2 * i) / 6 - Math.PI / 2;
+  const a = (Math.PI * 2 * i) / growthKeys.length - Math.PI / 2;
   return { x: Math.cos(a) * radius, y: Math.sin(a) * radius + 4 };
 }
-function radarPoints(): string[] {
+function radarPoints(which: "latest" | "average" = "latest"): string[] {
   return growthDims.value.map((d, i) => {
-    const a = (Math.PI * 2 * i) / 6 - Math.PI / 2;
-    const r = (d.value / 100) * 100;
+    const a = (Math.PI * 2 * i) / growthKeys.length - Math.PI / 2;
+    const r = ((which === "latest" ? d.latest : d.average) / 100) * 100;
     return `${(Math.cos(a) * r).toFixed(1)},${(Math.sin(a) * r).toFixed(1)}`;
   });
 }
 
 const sessionsByStory = computed(() => {
   const g: Record<string, typeof profileSessions.value> = {};
-  for (const s of profileSessions.value) (g[s.story_title] ??= []).push(s);
+  for (const s of profileSessions.value) {
+    const card = store.list.find((x) => x.id === s.story_id);
+    const title = s.story_title && s.story_title !== s.story_id ? s.story_title : (card?.title || s.story_title || s.story_id);
+    (g[title] ??= []).push(s);
+  }
   return g;
 });
 
@@ -349,7 +365,7 @@ onMounted(() => {
 
 function backHome() { router.push("/"); }
 function openStory(id: string) { router.push({ name: "story", params: { id } }); }
-function openReport(storyId: string) { router.push({ name: "report", params: { id: storyId } }); }
+function openReport(storyId: string, sid?: string) { router.push({ name: "report", params: { id: storyId }, query: sid ? { sid } : {} }); }
 </script>
 
 <template>
@@ -489,7 +505,7 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                 :key="s.id"
                 hover
                 class="p-0 relative group cursor-pointer overflow-hidden"
-                @click="s.report_ready ? openReport(s.story_id) : openStory(s.story_id)"
+                @click="s.report_ready || s.report_status === 'generating' ? openReport(s.story_id, s.id) : openStory(s.story_id)"
               >
                 <span
                   v-if="sess.hasGeneratedNotice(s.story_id)"
@@ -510,6 +526,10 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                     v-if="s.report_ready"
                     class="absolute top-1.5 right-4 px-2 py-0.5 text-[10px] rounded-full bg-good/90 text-white"
                   >✓ 已完成</span>
+                  <span
+                    v-else-if="s.report_status === 'generating'"
+                    class="absolute top-1.5 right-4 px-2 py-0.5 text-[10px] rounded-full bg-gold/90 text-ink"
+                  >生成中</span>
                   <span
                     v-else-if="sess.hasInProgress(s.story_id)"
                     class="absolute top-1.5 right-4 px-2 py-0.5 text-[10px] rounded-full bg-accent/90 text-white"
@@ -532,6 +552,7 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                       第 {{ sessionProgressText(s.story_id) }} 页
                     </div>
                   </div>
+                  <div v-else-if="s.report_status === 'generating'" class="text-xs text-accent-deep">点击查看生成进度</div>
                   <div v-else-if="s.report_ready" class="text-xs text-good">点击查看报告</div>
                   <div v-else class="text-xs text-ink-mute">点击继续</div>
                 </div>
@@ -712,11 +733,11 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
         <!-- 官方资产库 -->
         <template v-else>
           <!-- 官方 bundles -->
-          <div v-if="publicBundles.length" class="mb-6">
+          <div v-if="favBundles.length" class="mb-6">
             <div class="text-sm font-semibold text-ink-soft mb-2">📦 官方资产包</div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
               <BaseCard
-                v-for="b in publicBundles"
+                v-for="b in favBundles"
                 :key="b.id"
                 hover
                 :glow="true"
@@ -750,7 +771,7 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
             <div class="text-sm font-semibold text-ink-soft mb-2">🎭 官方单件</div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <BaseCard
-                v-for="a in publicAssets"
+                v-for="a in favAssets"
                 :key="a.id"
                 hover
                 class="overflow-hidden relative cursor-pointer"
@@ -803,7 +824,14 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                 </g>
                 <!-- 数据多边形 -->
                 <polygon
-                  :points="radarPoints().join(' ')"
+                  :points="radarPoints('average').join(' ')"
+                  fill="rgba(82, 126, 164, 0.18)"
+                  stroke="#527ea4"
+                  stroke-width="2"
+                  stroke-dasharray="4 4"
+                />
+                <polygon
+                  :points="radarPoints('latest').join(' ')"
                   fill="rgba(255, 203, 99, 0.35)"
                   stroke="#e35a1f"
                   stroke-width="2"
@@ -825,9 +853,9 @@ function openReport(storyId: string) { router.push({ name: "report", params: { i
                 <div class="w-20 text-sm text-ink font-semibold">{{ d.label }}</div>
                 <div class="flex-1 h-2 bg-paper-deep rounded-full overflow-hidden">
                   <div class="h-full bg-gradient-to-r from-gold to-accent-deep transition-all"
-                       :style="{ width: d.value + '%' }"></div>
+                       :style="{ width: d.latest + '%' }"></div>
                 </div>
-                <div class="w-10 text-right text-sm text-ink-soft">{{ d.value }}</div>
+                <div class="w-20 text-right text-sm text-ink-soft">{{ d.latest }} / {{ d.average }}</div>
               </div>
             </div>
           </div>

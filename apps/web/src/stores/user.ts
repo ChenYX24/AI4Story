@@ -4,6 +4,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { authLogin, authLogout, authMe, authRegister } from "@/api/endpoints";
 import { getAuthToken, setAuthToken } from "@/api/client";
+import { useAssetShelfStore } from "@/stores/assetShelf";
 
 export interface User {
   id: string;
@@ -24,9 +25,13 @@ export const useUserStore = defineStore("user", () => {
     try {
       const me = await authMe();
       user.value = { id: me.id, nickname: me.nickname, created_at: me.created_at };
+      const assets = useAssetShelfStore();
+      assets.loadScope(me.id);
+      void assets.pullFromServer();
     } catch {
       user.value = null;
       setAuthToken(null);
+      useAssetShelfStore().loadScope(null);
     } finally {
       booting.value = false;
     }
@@ -36,18 +41,25 @@ export const useUserStore = defineStore("user", () => {
     const r = await authLogin(nickname, password);
     setAuthToken(r.token);
     user.value = { id: r.id, nickname: r.nickname };
+    const assets = useAssetShelfStore();
+    assets.loadScope(r.id);
+    await assets.pullFromServer();
   }
 
   async function register(nickname: string, password: string) {
     const r = await authRegister(nickname, password);
     setAuthToken(r.token);
     user.value = { id: r.id, nickname: r.nickname };
+    const assets = useAssetShelfStore();
+    assets.loadScope(r.id);
+    await assets.pullFromServer();
   }
 
   async function logout() {
     try { await authLogout(); } catch { /* ignore */ }
     setAuthToken(null);
     user.value = null;
+    useAssetShelfStore().loadScope(null);
   }
 
   return { user, isAuthed, booting, boot, login, register, logout };

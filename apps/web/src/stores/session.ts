@@ -1,7 +1,7 @@
 // 本地会话历史 + 进行中 playState 快照 + 后端持久化（混合存储）。
 import { defineStore } from "pinia";
 import { useLocalStorage } from "@vueuse/core";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { Operation, CustomProp, InteractResponse, Interaction } from "@/api/types";
 import type { FlowNode, PendingDynamicRecord } from "@/stores/story";
 import { getAuthToken } from "@/api/client";
@@ -16,6 +16,9 @@ export interface SessionRecord {
   started_at: string;
   finished_at?: string;
   report_ready?: boolean;
+  report_status?: "idle" | "generating" | "ready" | "failed";
+  report_payload?: any;
+  report_error?: string;
 }
 
 export type FlowItem = FlowNode;
@@ -53,6 +56,7 @@ export const useSessionStore = defineStore("session", () => {
   const backendIds = ref<Record<string, string>>({});
   // 防抖定时器
   const _syncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const reportPromises = new Map<string, Promise<any>>();
 
   function start(story_id: string, story_title: string): string {
     const id = "s_" + Date.now().toString(36);
@@ -61,11 +65,61 @@ export const useSessionStore = defineStore("session", () => {
     return id;
   }
 
+  function ensure(story_id: string, story_title: string): string {
+    const active = list.value.find((s) => s.story_id === story_id && !s.report_ready);
+    if (active) {
+      if (story_title && active.story_title !== story_title) active.story_title = story_title;
+      return active.id;
+    }
+    return start(story_id, story_title);
+  }
+
+  function currentForStory(storyId: string): SessionRecord | undefined {
+    return list.value.find((s) => s.story_id === storyId && !s.report_ready)
+      || list.value.find((s) => s.story_id === storyId);
+  }
+
+  function getById(id?: string | null): SessionRecord | undefined {
+    if (!id) return undefined;
+    return list.value.find((s) => s.id === id);
+  }
+
   function markReportReady(id: string) {
     const r = list.value.find((s) => s.id === id);
     if (!r) return;
     r.report_ready = true;
+    r.report_status = "ready";
     r.finished_at = new Date().toISOString();
+  }
+
+  function markReportGenerating(id: string) {
+    const r = list.value.find((s) => s.id === id);
+    if (!r) return;
+    r.report_status = "generating";
+  }
+
+  function saveReport(id: string, payload: any) {
+    const r = list.value.find((s) => s.id === id);
+    if (!r) return;
+    r.report_payload = payload;
+    r.report_error = undefined;
+    markReportReady(id);
+  }
+
+  function failReport(id: string, error: string) {
+    const r = list.value.find((s) => s.id === id);
+    if (!r) return;
+    r.report_status = "failed";
+    r.report_error = error;
+  }
+
+  function setReportPromise(id: string, p: Promise<any>) {
+    reportPromises.set(id, p);
+    p.finally(() => reportPromises.delete(id)).catch(() => {});
+  }
+
+  function getReportPromise(id: string) {
+    return reportPromises.get(id);
   }
 
   function remove(id: string) {
@@ -117,6 +171,8 @@ export const useSessionStore = defineStore("session", () => {
     return !!ps && ps.cursor < ps.flow.length - 1;
   }
 
+  const completedReports = computed(() => list.value.filter((s) => s.report_ready && s.report_payload));
+
   // 后端防抖同步（5s）
   function _debouncedSync(storyId: string, state: SessionPlayState) {
     if (!getAuthToken()) return;
@@ -159,9 +215,11 @@ export const useSessionStore = defineStore("session", () => {
 
   return {
     list, playStates, backendIds, generatedNotices,
-    start, markReportReady, remove, clearAllForStory, clear,
+    start, ensure, currentForStory, getById,
+    markReportReady, markReportGenerating, saveReport, failReport, setReportPromise, getReportPromise,
+    remove, clearAllForStory, clear,
     markGeneratedNotice, clearGeneratedNotice, hasGeneratedNotice,
     savePlayState, getPlayState, clearPlayState, hasInProgress,
-    fetchRemoteSession,
+    fetchRemoteSession, completedReports,
   };
 });

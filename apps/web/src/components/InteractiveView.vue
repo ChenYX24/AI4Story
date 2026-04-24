@@ -177,6 +177,14 @@ watch(
   { deep: true },
 );
 
+function persistSceneState() {
+  interactStore.save(props.storyId, props.scene.index, {
+    placed: placed.value,
+    ops: ops.value,
+    customProps: customProps.value,
+  });
+}
+
 // ---- Drag from sidebar onto stage ----
 const stageRef = ref<HTMLDivElement | null>(null);
 let dragSource: { name: string; kind: "character" | "object"; url?: string } | null = null;
@@ -500,6 +508,7 @@ async function addCustomProp() {
     // 完成：从 pendingProps 移除，加入 customProps（aside 展示 + API 发送）+ 写入 assetShelf 持久化
     pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     customProps.value.push({ name: r.name, url: r.url });
+    persistSceneState();
     assetShelf.addMyAsset({
       name: r.name,
       url: r.url,
@@ -624,6 +633,7 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
   // skipAi：直接用原图，瞬间完成；加入 customProps + 持久化 myAssets，不自动上舞台
   if (payload.skipAi) {
     customProps.value.push({ name: payload.name, url: propModalRefUrl.value });
+    persistSceneState();
     assetShelf.addMyAsset({
       name: payload.name,
       url: propModalRefUrl.value,
@@ -655,6 +665,7 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
     });
     pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     customProps.value.push({ name: r.name, url: r.url });
+    persistSceneState();
     assetShelf.addMyAsset({
       name: r.name,
       url: r.url,
