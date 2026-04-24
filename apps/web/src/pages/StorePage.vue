@@ -108,7 +108,7 @@ function openEditPack(p: PackOut) {
   editingPack.value = p;
   packModalOpen.value = true;
 }
-function onPackSaved(p: PackOut) {
+function onPackSaved() {
   packModalOpen.value = false;
   loadMyPacks();
 }

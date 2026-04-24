@@ -54,6 +54,8 @@ async function submitAuth() {
   }
 }
 
+void submitAuth;
+
 async function logout() {
   await user.logout();
   toast.push("已登出", "info");

@@ -5,7 +5,7 @@ import { ref } from "vue";
 import type { Operation, CustomProp, InteractResponse, Interaction } from "@/api/types";
 import { getAuthToken } from "@/api/client";
 import {
-  createSessionApi, updateSessionApi, fetchSessionsApi, deleteSessionApi,
+  createSessionApi, updateSessionApi, fetchSessionsApi,
 } from "@/api/endpoints";
 
 export interface SessionRecord {
