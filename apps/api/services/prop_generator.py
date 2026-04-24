@@ -1,6 +1,7 @@
 import io
 import re
 import sys
+import base64
 from pathlib import Path
 
 from PIL import Image
@@ -21,6 +22,7 @@ from scripts.image_generation.seedream_client import (  # noqa: E402
     generate_image_bytes,
 )
 from scripts.image_processing.postprocess_grid import (  # noqa: E402
+    add_white_outline,
     cell_boxes,
     remove_background_with_rembg,
     remove_background_with_rembg_single,
@@ -36,6 +38,9 @@ def _load_reference_bytes(url: str) -> bytes:
     u = (url or "").strip()
     if not u:
         raise ValueError("empty reference url")
+    if u.startswith("data:"):
+        _, _, raw = u.partition(",")
+        return base64.b64decode(raw)
     if u.startswith("/outputs/"):
         p = OUTPUTS_ROOT / u[len("/outputs/"):]
         return p.read_bytes()
@@ -44,6 +49,21 @@ def _load_reference_bytes(url: str) -> bytes:
         r = requests.get(u, timeout=15)
         r.raise_for_status()
         return r.content
+    raise ValueError(f"unsupported reference url: {u!r}")
+
+
+def _reference_image_input(url: str) -> str | Path:
+    """Resolve a user reference image into a Seedream-compatible input."""
+    u = (url or "").strip()
+    if not u:
+        raise ValueError("empty reference url")
+    if u.startswith("/outputs/"):
+        p = OUTPUTS_ROOT / u[len("/outputs/"):]
+        if not p.is_file():
+            raise FileNotFoundError(p)
+        return p
+    if u.startswith(("http://", "https://", "data:")):
+        return u
     raise ValueError(f"unsupported reference url: {u!r}")
 
 
@@ -58,10 +78,11 @@ def _build_prompt(name: str, description: str | None, has_reference: bool = Fals
         f'Create one single "{name}" object illustration.',
         "Centered on pure white background.",
         "Hand-drawn colored pencil children's storybook style.",
+        "Style prompt: soft warm colors, clear friendly outline, whimsical preschool picture-book prop.",
         "No shadows on the background.",
         "No text, no labels, no decorations.",
         "Leave generous white space around the object so it can be cut out cleanly.",
-        "Soft warm colors, clear outlines, whimsical and friendly.",
+        "Readable silhouette, simple object design, suitable as a draggable story prop.",
     ]
     if extra:
         parts.append(f"Extra detail: {extra}")
@@ -69,6 +90,11 @@ def _build_prompt(name: str, description: str | None, has_reference: bool = Fals
         parts.append(
             "Note: a child has provided a rough sketch/photo as reference — "
             "keep the general shape and vibe of their idea while rendering in the storybook style."
+        )
+    if has_reference:
+        parts.append(
+            "Use the attached reference image as the primary visual guide. Preserve its silhouette, pose, "
+            "structure, and distinctive details; render it as one clean draggable story prop."
         )
     return " ".join(parts)
 
@@ -90,12 +116,19 @@ def create_custom_prop(
     else:
         if not ARK_API_KEY:
             raise RuntimeError("ARK_API_KEY 未配置，无法生成物品")
+        reference_inputs: list[str | Path] | None = None
+        if reference_image_url:
+            try:
+                reference_inputs = [_reference_image_input(reference_image_url)]
+            except Exception as e:
+                raise RuntimeError(f"无法读取参考图：{e}") from e
         raw_png = generate_image_bytes(
             api_key=ARK_API_KEY,
             prompt=_build_prompt(name, description, has_reference=bool(reference_image_url)),
             size=SEEDREAM_SIZE,
             model=SEEDREAM_MODEL,
             provider=SEEDREAM_PROVIDER,
+            reference_images=reference_inputs,
             timeout=SEEDREAM_TIMEOUT,
         )
 
@@ -107,6 +140,7 @@ def create_custom_prop(
             alpha_matting=True,
         )
         transparent = _crop_to_content(transparent)
+        transparent = add_white_outline(transparent, outline_width=10, outline_blur=1)
         out_bytes_buf = io.BytesIO()
         transparent.save(out_bytes_buf, format="PNG")
         out_bytes = out_bytes_buf.getvalue()
