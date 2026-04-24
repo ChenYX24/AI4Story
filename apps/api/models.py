@@ -153,6 +153,10 @@ class ChatResponse(BaseModel):
     reply: str
 
 
+class ChatSuggestionsResponse(BaseModel):
+    questions: list[str]
+
+
 class StoryCard(BaseModel):
     id: str
     title: str

@@ -22,6 +22,7 @@ from ..story_registry import (
     update_custom_story_record,
 )
 from .placement_service import clear_layout_cache
+from .suggestion_service import ensure_scene_questions_for_story
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -91,9 +92,16 @@ def _build_story_assets(story_id: str, text: str) -> None:
             progress_callback=lambda p, label: _set_progress(story_id, p, label),
         )
         run_workflow(args)
-        _set_progress(story_id, 95, "整理资源中")
+        _set_progress(story_id, 92, "整理资源中")
         clear_story_cache(story_id)
         clear_layout_cache(story_id)
+        # 预生成每幕聊天建议问题，保证前端第一次打开聊天气泡即有数据
+        _set_progress(story_id, 95, "生成聊天建议")
+        try:
+            ensure_scene_questions_for_story(story_id)
+        except Exception as e:
+            print(f"[custom_story] pre-gen suggestions failed: {e}")
+        clear_story_cache(story_id)
         story = load_story(story_id)
         scenes = story.get("scenes", [])
         first_narrative_idx = next(

@@ -12,7 +12,7 @@ import BaseModal from "@/components/BaseModal.vue";
 import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
-import { postChat, postInteract, postReport } from "@/api/endpoints";
+import { postChat, postInteract, postReport, fetchChatSuggestions } from "@/api/endpoints";
 import type { Scene, InteractRequest, InteractResponse, Operation } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
@@ -226,12 +226,23 @@ function retreatLine() {
 // 点击已显示的旁白气泡重播（narrative）或动态段落任意行重播
 function replayLine(idx: number) { tts.stop(); tts.play(idx); }
 
-// 聊天空态预设问题（P-S3；等 A4 动态推荐落地后替换）
-const presetQuestions = [
+// 聊天空态预设问题 —— 每切换场景就拉一次后端（后端有 scene.json 缓存）
+const presetQuestions = ref<string[]>([
   "他为什么这么做？",
   "如果我是他，我会怎么办？",
   "可不可以换一个结局？",
-];
+]);
+async function loadSuggestions() {
+  const idx = scene.value?.index ?? 0;
+  if (!idx) return;
+  try {
+    const r = await fetchChatSuggestions(props.id, idx);
+    if (r.questions && r.questions.length) presetQuestions.value = r.questions.slice(0, 3);
+  } catch {
+    // 网络失败时保留兜底问题，不打断 UI
+  }
+}
+watch(() => scene.value?.index, () => { chatLog.value = []; loadSuggestions(); });
 function fillPreset(q: string) {
   inputText.value = q;
   // 自动发送 vs 只填入 —— 这里只填入，让小朋友有机会改。
@@ -260,6 +271,7 @@ async function sendChat(textOverride?: string) {
   try {
     const r = await postChat({
       story_id: props.id,
+      session_id: currentSessionId(),
       scene_idx: (scene.value?.index ?? 0),
       user_text: v,
     });
@@ -816,13 +828,18 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
             <div
               v-for="(m, i) in chatLog"
               :key="i"
-              class="fade-in rounded-2xl px-3 py-2 text-sm max-w-[85%]"
-              :class="m.role === 'user'
-                ? 'bg-accent-soft/20 ml-auto text-ink'
-                : 'bg-paper-deep mr-auto text-ink'"
+              class="flex w-full"
+              :class="m.role === 'user' ? 'justify-end' : 'justify-start'"
             >
-              <span v-if="m.role !== 'user'" class="text-xs text-ink-soft font-semibold block mb-0.5">讲故事的人</span>
-              {{ m.text }}
+              <div
+                class="fade-in rounded-2xl px-3 py-2 text-sm max-w-[85%] whitespace-pre-wrap break-words"
+                :class="m.role === 'user'
+                  ? 'bg-accent-soft/20 text-ink text-right'
+                  : 'bg-paper-deep text-ink text-left'"
+              >
+                <span v-if="m.role !== 'user'" class="text-xs text-ink-soft font-semibold block mb-0.5">讲故事的人</span>
+                {{ m.text }}
+              </div>
             </div>
           </div>
           <div class="flex gap-2 mt-auto">

@@ -181,6 +181,7 @@ export interface PlacementResponse { placements: PlacementItem[]; }
 
 export interface ChatRequest {
   story_id?: string;
+  session_id: string;
   scene_idx: number;
   user_text: string;
 }

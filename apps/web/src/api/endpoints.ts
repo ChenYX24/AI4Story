@@ -42,6 +42,11 @@ export const postInteract = (req: InteractRequest) =>
   apiPost<InteractResponse>("/api/interact", req);
 export const postChat = (req: ChatRequest) =>
   apiPost<ChatResponse>("/api/chat", req);
+export const fetchChatSuggestions = (storyId: string | undefined, sceneIdx: number) => {
+  const qs = new URLSearchParams({ scene_idx: String(sceneIdx) });
+  if (storyId) qs.set("story_id", storyId);
+  return apiGet<{ questions: string[] }>(`/api/chat/suggestions?${qs.toString()}`);
+};
 export const createProp = (req: CreatePropRequest) =>
   apiPost<CreatePropResponse>("/api/create_prop", req);
 
