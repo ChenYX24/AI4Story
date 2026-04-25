@@ -41,10 +41,48 @@ async function buildShare() {
   if (shareId.value || shareBuilding.value) return;
   shareBuilding.value = true;
   try {
-    const comics = reportComics.value.slice();
-    const props = reportProps.value.map((p) => ({ name: p.name, url: p.url }));
+    const propsOut = reportProps.value.map((p) => ({ name: p.name, url: p.url }));
     const title = (store.current?.title || store.current?.story_summary || "").slice(0, 30);
-    const r = await postShare({ story_title: title, comics, props });
+    // 把 store.flow 按顺序展平成"分享页"：narrative → 用原故事四格 + 原 storyboard；
+    // dynamic → 用用户生成的四格 + 用户生成的 storyboard；interactive 节点跳过
+    // （它的画 / 旁白替换为紧随其后的 dynamic 节点对应内容）。
+    const pages: Array<{ comic_url: string; summary: string; storyboard: any[] }> = [];
+    for (const node of store.flow) {
+      if (node.type === "narrative") {
+        try {
+          const sc: any = await store.ensureScene(node.sceneIdx);
+          if (sc?.comic_url) {
+            pages.push({
+              comic_url: sc.comic_url,
+              summary: sc.summary || sc.narration || "",
+              storyboard: Array.isArray(sc.storyboard) ? sc.storyboard : [],
+            });
+          }
+        } catch { /* skip missing scenes */ }
+      } else if (node.type === "dynamic") {
+        const dyn = store.dynamicByScene?.get?.(node.sceneIdx);
+        const p = dyn?.payload;
+        if (p?.comic_url) {
+          pages.push({
+            comic_url: p.comic_url,
+            summary: p.summary || p.narration || "",
+            storyboard: Array.isArray(p.storyboard) ? p.storyboard : [],
+          });
+        }
+      }
+      // interactive 节点：跳过（它的位置已由后面的 dynamic 替代）
+    }
+    // 兜底：如果 flow 还没读出来 / 跑过来 store 已重置，把 reportComics 当 url 列表降级处理。
+    let comicsFallback: string[] = [];
+    if (!pages.length) comicsFallback = reportComics.value.slice();
+
+    const r = await postShare({
+      story_title: title,
+      story_id: store.current?.id || props.id || "",
+      pages,
+      comics: comicsFallback,
+      props: propsOut,
+    });
     shareId.value = r.share_id;
     // 优先用后端给出的 share_url —— 它知道自己绑在哪个 host:port，能避开
     // Vite dev server (127.0.0.1:5173) 不监听 LAN 的坑。

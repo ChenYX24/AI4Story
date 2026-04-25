@@ -125,9 +125,18 @@ export interface ReportResponse {
   };
 }
 
+export interface SharePage {
+  comic_url: string;
+  summary?: string;
+  storyboard?: StoryboardLine[];
+}
 export interface ShareInit {
   story_title?: string;
-  comics: string[];
+  story_id?: string;
+  /** 旧版兜底：仅图片 url 列表；新调用方应使用 pages */
+  comics?: string[];
+  /** 每页结构化数据：图、概述、旁白/对话 */
+  pages?: SharePage[];
   props?: CustomProp[];
 }
 export interface ShareResponse {
