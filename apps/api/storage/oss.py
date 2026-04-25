@@ -48,7 +48,9 @@ class OSSStorage(StorageBackend):
         headers = {}
         if content_type:
             headers["Content-Type"] = content_type
-        self.bucket.put_object(self._obj(key), data, headers=headers or None)
+        # public-read：图片要给浏览器直接访问，不能要签名
+        headers["x-oss-object-acl"] = "public-read"
+        self.bucket.put_object(self._obj(key), data, headers=headers)
         return self.url_for(key)
 
     def read_bytes(self, key: str) -> Optional[bytes]:

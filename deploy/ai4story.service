@@ -1,0 +1,18 @@
+[Unit]
+Description=AI4Story FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/hackthron/AI4Story
+EnvironmentFile=/root/hackthron/AI4Story/.env
+# 用 conda 环境的 python 跑 uvicorn
+ExecStart=/root/miniconda3/envs/ai4story/bin/python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

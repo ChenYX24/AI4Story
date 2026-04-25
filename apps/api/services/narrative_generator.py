@@ -23,6 +23,7 @@ from ..config import (
 )
 from ..models import CustomProp, InteractRequest, Operation, Transform
 from ..scene_loader import _load_scene_json, load_story
+from ..storage import get_storage
 from .qwen_service import QwenError, call_json
 
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -358,10 +359,20 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
     t3 = time.time()
     log.info("[interact] step 3 done in %.1fs, image size=%d bytes", t3 - t2, len(img_bytes))
 
+    # 始终先落本地 OUTPUTS_ROOT — node.json / refboard 还需要本地路径调试。
     panel_path = out_dir / "panel.png"
     panel_path.write_bytes(img_bytes)
     thumb_path = out_dir / "thumb.jpg"
     _write_thumb(panel_path, thumb_path)
+    # 然后通过 storage backend 拿到对外可访问的 URL（OSS 模式会另写一份到云端）
+    storage = get_storage()
+    panel_key = f"{req.session_id}/dynamic/{node_id}/panel.png"
+    thumb_key = f"{req.session_id}/dynamic/{node_id}/thumb.jpg"
+    panel_url = storage.save_bytes(panel_key, img_bytes, content_type="image/png")
+    try:
+        thumb_url = storage.save_bytes(thumb_key, thumb_path.read_bytes(), content_type="image/jpeg")
+    except Exception:
+        thumb_url = panel_url
 
     # cleanup refboard for tidiness
     if ref_board and ref_board.exists():
@@ -404,6 +415,6 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
             for d in (dialogue if isinstance(dialogue, list) else [])
         ],
         "storyboard": storyboard_lines,
-        "comic_url": f"/outputs/{req.session_id}/dynamic/{node_id}/panel.png",
-        "thumbnail_url": f"/outputs/{req.session_id}/dynamic/{node_id}/thumb.jpg",
+        "comic_url": panel_url,
+        "thumbnail_url": thumb_url,
     }

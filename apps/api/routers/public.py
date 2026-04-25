@@ -1,8 +1,9 @@
 """
-公共平台 API — 阶段 2 接入账号 + 分享后会替换为真"他人分享"的数据，
-当前 MVP 返回：
-- stories：官方公开故事。用户自定义故事默认只出现在本人书架，后续通过分享码机制进入公共池。
-- assets：scenes/global/{characters,objects} 里预置的资产
+公共平台 API。
+
+数据源：
+  - 优先 DB（stories / assets 表，is_official=1 OR public=1）
+  - 文件系统回落：当 DB 里没有官方故事时（本地未跑 seed_official）从 scenes/ 读
 """
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 
 from ..config import SCENES_DIR
 from ..scene_loader import load_story
+from .. import db
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -24,7 +26,7 @@ class PublicStoryCard(BaseModel):
     author: str
     likes: int
     official: bool = False
-    category: str = "hot"   # hot / featured / official
+    category: str = "hot"
     emoji_cover: str | None = None
 
 
@@ -41,7 +43,6 @@ class PublicAssetBundle(BaseModel):
     id: str
     name: str
     description: str = ""
-    # bundle 的封面：可以是 emoji 或 URL，前端两者兼容
     cover_emoji: str | None = None
     cover_url: str | None = None
     kind: str      # character_pack / object_pack / mixed
@@ -60,33 +61,65 @@ class PublicAssetsResponse(BaseModel):
     bundles: list[PublicAssetBundle] = []
 
 
-def _default_card() -> PublicStoryCard:
-    story = load_story()
+def _row_to_card(row: dict) -> PublicStoryCard:
     return PublicStoryCard(
-        id="little_red_riding_hood",
-        title="小红帽 · 森林冒险",
-        summary=story.get("story_summary", ""),
-        cover_url="/assets/scenes/001/comic/panel.png",
-        scene_count=len(story.get("scenes", [])),
-        author="漫秀官方",
-        likes=512,
-        official=True,
-        category="official",
+        id=row["id"],
+        title=row["title"],
+        summary=row.get("summary", ""),
+        cover_url=row.get("cover_url"),
+        scene_count=row.get("scene_count", 0),
+        author="漫秀官方" if row.get("is_official") else "用户原创",
+        likes=row.get("likes", 0),
+        official=row.get("is_official", False),
+        category="official" if row.get("is_official") else "hot",
     )
 
 
 @router.get("/stories", response_model=PublicStoriesResponse)
 def public_stories() -> PublicStoriesResponse:
     cards: list[PublicStoryCard] = []
-    # 默认故事（官方）
-    try:
-        cards.append(_default_card())
-    except Exception:
-        pass
+
+    # 1) DB 里所有公开故事（官方 + 用户主动 share 的）
+    rows = db.list_stories(public=True)
+    for r in rows:
+        cards.append(_row_to_card(r))
+
+    # 2) 兜底：DB 里没东西时回落到文件系统的 little_red_riding_hood
+    if not cards:
+        try:
+            story = load_story()
+            cards.append(PublicStoryCard(
+                id="little_red_riding_hood",
+                title="小红帽 · 森林冒险",
+                summary=story.get("story_summary", ""),
+                cover_url="/assets/scenes/001/comic/panel.png",
+                scene_count=len(story.get("scenes", [])),
+                author="漫秀官方",
+                likes=512,
+                official=True,
+                category="official",
+            ))
+        except Exception:
+            pass
     return PublicStoriesResponse(stories=cards)
 
 
-def _iter_global_assets() -> list[PublicAsset]:
+def _assets_from_db() -> list[PublicAsset]:
+    rows = db.list_assets(scope="global", is_official=True)
+    return [
+        PublicAsset(
+            id=r["id"],
+            name=r["name"],
+            kind=r["kind"],
+            url=r["url"],
+            svg_url=r.get("svg_url"),
+            category="featured",
+        )
+        for r in rows
+    ]
+
+
+def _iter_global_assets_fs() -> list[PublicAsset]:
     out: list[PublicAsset] = []
     g = SCENES_DIR / "global"
     for kind_dir, kind in (("characters", "character"), ("objects", "object")):
@@ -109,12 +142,10 @@ def _iter_global_assets() -> list[PublicAsset]:
 
 
 def _build_official_bundles(assets: list[PublicAsset]) -> list[PublicAssetBundle]:
-    """基于已有的全局资产自动拼几个"官方打包"。未来用户能自造 bundle 后走新表。"""
     bundles: list[PublicAssetBundle] = []
     chars = [a for a in assets if a.kind == "character"]
     objs = [a for a in assets if a.kind == "object"]
 
-    # 小红帽人物包 — 4 位角色
     red_char_ids = [a.id for a in chars if a.name in ("小红帽", "大灰狼", "外婆", "猎人")]
     if red_char_ids:
         bundles.append(PublicAssetBundle(
@@ -130,7 +161,6 @@ def _build_official_bundles(assets: list[PublicAsset]) -> list[PublicAssetBundle
             likes=420,
         ))
 
-    # 小红帽道具包 — 鲜花/篮子/床/睡帽/步枪
     red_obj_ids = [a.id for a in objs if a.name in ("鲜花", "篮子", "床", "睡帽", "步枪")]
     if red_obj_ids:
         bundles.append(PublicAssetBundle(
@@ -145,14 +175,13 @@ def _build_official_bundles(assets: list[PublicAsset]) -> list[PublicAssetBundle
             official=True,
             likes=338,
         ))
-
-    # 未来：火焰山等其它故事的打包
-    # bundles.append(PublicAssetBundle(id="bundle-huoyanshan", ...))
     return bundles
 
 
 @router.get("/assets", response_model=PublicAssetsResponse)
 def public_assets() -> PublicAssetsResponse:
-    assets = _iter_global_assets()
+    assets = _assets_from_db()
+    if not assets:
+        assets = _iter_global_assets_fs()
     bundles = _build_official_bundles(assets)
     return PublicAssetsResponse(assets=assets, bundles=bundles)

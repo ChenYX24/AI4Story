@@ -102,6 +102,76 @@ def init_db() -> None:
             )
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_story ON sessions(user_id, story_id)")
+        # 统一内容表：官方 / 用户原创故事都进这张表，is_official + owner_user_id 字段区分。
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS stories (
+                id              TEXT PRIMARY KEY,
+                title           TEXT NOT NULL,
+                summary         TEXT NOT NULL DEFAULT '',
+                cover_url       TEXT,
+                scene_count     INTEGER NOT NULL DEFAULT 0,
+                status          TEXT NOT NULL DEFAULT 'ready',
+                error_message   TEXT,
+                progress        INTEGER NOT NULL DEFAULT 100,
+                progress_label  TEXT,
+                is_official     INTEGER NOT NULL DEFAULT 0,
+                public          INTEGER NOT NULL DEFAULT 0,
+                owner_user_id   TEXT,
+                raw_meta        TEXT NOT NULL DEFAULT '{}',
+                likes           INTEGER NOT NULL DEFAULT 0,
+                input_text      TEXT NOT NULL DEFAULT '',
+                created_at      INTEGER NOT NULL,
+                updated_at      INTEGER NOT NULL,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_stories_owner ON stories(owner_user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_stories_official_public ON stories(is_official, public)")
+        # 每个故事的场景 — comic_url / background_url 直接保存 OSS URL，避免运行时拼路径。
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS scenes (
+                id                TEXT PRIMARY KEY,
+                story_id          TEXT NOT NULL,
+                scene_index       INTEGER NOT NULL,
+                scene_type        TEXT NOT NULL,
+                title             TEXT NOT NULL DEFAULT '',
+                narration         TEXT NOT NULL DEFAULT '',
+                interaction_goal  TEXT,
+                initial_frame     TEXT,
+                event_outcome     TEXT,
+                comic_url         TEXT,
+                background_url    TEXT,
+                raw_json          TEXT NOT NULL DEFAULT '{}',
+                created_at        INTEGER NOT NULL,
+                UNIQUE(story_id, scene_index),
+                FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_scenes_story ON scenes(story_id)")
+        # 统一资产表 — 官方角色/道具、scene-local、用户创作 全在这里，is_official + scope + owner_user_id 区分。
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS assets (
+                id                TEXT PRIMARY KEY,
+                name              TEXT NOT NULL,
+                kind              TEXT NOT NULL,
+                url               TEXT NOT NULL,
+                svg_url           TEXT,
+                description       TEXT NOT NULL DEFAULT '',
+                scope             TEXT NOT NULL,
+                story_id          TEXT,
+                scene_index       INTEGER,
+                is_official       INTEGER NOT NULL DEFAULT 0,
+                public            INTEGER NOT NULL DEFAULT 0,
+                owner_user_id     TEXT,
+                origin_story_id   TEXT,
+                origin_scene_idx  INTEGER,
+                created_at        INTEGER NOT NULL,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assets_scope_story ON assets(scope, story_id, scene_index)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assets_official ON assets(is_official, scope)")
 
 
 # ---------- 账号操作 ----------
@@ -393,6 +463,325 @@ def delete_session(session_id: str, user_id: str) -> bool:
             (session_id, user_id),
         )
         return cur.rowcount > 0
+
+
+# ---------- 统一内容表：stories / scenes / assets ----------
+
+def upsert_story(s: dict) -> dict:
+    """官方/用户故事统一入口。要求字段：id, title。其余给默认值。"""
+    sid = s["id"]
+    now = _now()
+    raw_meta = s.get("raw_meta")
+    if isinstance(raw_meta, dict):
+        raw_meta = _json.dumps(raw_meta, ensure_ascii=False)
+    with _conn() as c:
+        c.execute(
+            """
+            INSERT INTO stories
+                (id, title, summary, cover_url, scene_count, status, error_message,
+                 progress, progress_label, is_official, public, owner_user_id, raw_meta,
+                 likes, input_text, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                summary = excluded.summary,
+                cover_url = excluded.cover_url,
+                scene_count = excluded.scene_count,
+                status = excluded.status,
+                error_message = excluded.error_message,
+                progress = excluded.progress,
+                progress_label = excluded.progress_label,
+                is_official = excluded.is_official,
+                public = excluded.public,
+                owner_user_id = excluded.owner_user_id,
+                raw_meta = excluded.raw_meta,
+                likes = excluded.likes,
+                input_text = excluded.input_text,
+                updated_at = excluded.updated_at
+            """,
+            (
+                sid,
+                s.get("title", ""),
+                s.get("summary", ""),
+                s.get("cover_url"),
+                int(s.get("scene_count", 0) or 0),
+                s.get("status", "ready"),
+                s.get("error_message"),
+                int(s.get("progress", 100) or 0),
+                s.get("progress_label"),
+                1 if s.get("is_official") else 0,
+                1 if s.get("public") else 0,
+                s.get("owner_user_id"),
+                raw_meta or "{}",
+                int(s.get("likes", 0) or 0),
+                s.get("input_text", ""),
+                int(s.get("created_at") or now),
+                now,
+            ),
+        )
+    return get_story(sid) or {}
+
+
+def get_story(story_id: str) -> Optional[dict]:
+    with _conn() as c:
+        row = c.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
+    if not row:
+        return None
+    return _row_to_story(row)
+
+
+def list_stories(*, owner_user_id: Optional[str] = None, public: Optional[bool] = None,
+                 is_official: Optional[bool] = None) -> list[dict]:
+    sql = "SELECT * FROM stories WHERE 1=1"
+    args: list = []
+    if owner_user_id is not None:
+        sql += " AND owner_user_id = ?"; args.append(owner_user_id)
+    if public is not None:
+        sql += " AND public = ?"; args.append(1 if public else 0)
+    if is_official is not None:
+        sql += " AND is_official = ?"; args.append(1 if is_official else 0)
+    sql += " ORDER BY is_official DESC, updated_at DESC"
+    with _conn() as c:
+        rows = c.execute(sql, args).fetchall()
+    return [_row_to_story(r) for r in rows]
+
+
+def delete_story(story_id: str) -> bool:
+    with _conn() as c:
+        cur = c.execute("DELETE FROM stories WHERE id = ?", (story_id,))
+        return cur.rowcount > 0
+
+
+def _row_to_story(row) -> dict:
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "summary": row["summary"],
+        "cover_url": row["cover_url"],
+        "scene_count": row["scene_count"],
+        "status": row["status"],
+        "error_message": row["error_message"],
+        "progress": row["progress"],
+        "progress_label": row["progress_label"],
+        "is_official": bool(row["is_official"]),
+        "public": bool(row["public"]),
+        "owner_user_id": row["owner_user_id"],
+        "raw_meta": _json.loads(row["raw_meta"] or "{}"),
+        "likes": row["likes"],
+        "input_text": row["input_text"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def upsert_scene(s: dict) -> dict:
+    """story_id + scene_index 是逻辑唯一。raw_json 存原始 scene.json 全量。"""
+    story_id = s["story_id"]
+    idx = int(s["scene_index"])
+    sid = s.get("id") or f"{story_id}:{idx:03d}"
+    raw = s.get("raw_json")
+    if isinstance(raw, dict):
+        raw = _json.dumps(raw, ensure_ascii=False)
+    with _conn() as c:
+        c.execute(
+            """
+            INSERT INTO scenes
+                (id, story_id, scene_index, scene_type, title, narration,
+                 interaction_goal, initial_frame, event_outcome,
+                 comic_url, background_url, raw_json, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                scene_type = excluded.scene_type,
+                title = excluded.title,
+                narration = excluded.narration,
+                interaction_goal = excluded.interaction_goal,
+                initial_frame = excluded.initial_frame,
+                event_outcome = excluded.event_outcome,
+                comic_url = excluded.comic_url,
+                background_url = excluded.background_url,
+                raw_json = excluded.raw_json
+            """,
+            (
+                sid, story_id, idx,
+                s.get("scene_type", "narrative"),
+                s.get("title", ""),
+                s.get("narration", ""),
+                s.get("interaction_goal"),
+                s.get("initial_frame"),
+                s.get("event_outcome"),
+                s.get("comic_url"),
+                s.get("background_url"),
+                raw or "{}",
+                int(s.get("created_at") or _now()),
+            ),
+        )
+    return get_scene(story_id, idx) or {}
+
+
+def get_scene(story_id: str, scene_index: int) -> Optional[dict]:
+    with _conn() as c:
+        row = c.execute(
+            "SELECT * FROM scenes WHERE story_id = ? AND scene_index = ?",
+            (story_id, scene_index),
+        ).fetchone()
+    if not row:
+        return None
+    return _row_to_scene(row)
+
+
+def list_scenes(story_id: str) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM scenes WHERE story_id = ? ORDER BY scene_index ASC",
+            (story_id,),
+        ).fetchall()
+    return [_row_to_scene(r) for r in rows]
+
+
+def _row_to_scene(row) -> dict:
+    return {
+        "id": row["id"],
+        "story_id": row["story_id"],
+        "scene_index": row["scene_index"],
+        "scene_type": row["scene_type"],
+        "title": row["title"],
+        "narration": row["narration"],
+        "interaction_goal": row["interaction_goal"],
+        "initial_frame": row["initial_frame"],
+        "event_outcome": row["event_outcome"],
+        "comic_url": row["comic_url"],
+        "background_url": row["background_url"],
+        "raw_json": _json.loads(row["raw_json"] or "{}"),
+        "created_at": row["created_at"],
+    }
+
+
+def upsert_asset(a: dict) -> dict:
+    """统一资产表：scope ∈ {global, scene, user}, kind ∈ {character, object}。"""
+    aid = a.get("id") or ("a_" + secrets.token_hex(6))
+    now = _now()
+    with _conn() as c:
+        c.execute(
+            """
+            INSERT INTO assets
+                (id, name, kind, url, svg_url, description, scope,
+                 story_id, scene_index, is_official, public, owner_user_id,
+                 origin_story_id, origin_scene_idx, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                url = excluded.url,
+                svg_url = excluded.svg_url,
+                description = excluded.description,
+                scope = excluded.scope,
+                story_id = excluded.story_id,
+                scene_index = excluded.scene_index,
+                is_official = excluded.is_official,
+                public = excluded.public
+            """,
+            (
+                aid,
+                a["name"],
+                a.get("kind", "object"),
+                a["url"],
+                a.get("svg_url"),
+                a.get("description", ""),
+                a.get("scope", "user"),
+                a.get("story_id"),
+                a.get("scene_index"),
+                1 if a.get("is_official") else 0,
+                1 if a.get("public") else 0,
+                a.get("owner_user_id"),
+                a.get("origin_story_id"),
+                a.get("origin_scene_idx"),
+                int(a.get("created_at") or now),
+            ),
+        )
+    return get_asset(aid) or {}
+
+
+def get_asset(asset_id: str) -> Optional[dict]:
+    with _conn() as c:
+        row = c.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    return _row_to_asset(row) if row else None
+
+
+def find_scene_asset(story_id: str, scene_index: int, name: str, kind: str) -> Optional[dict]:
+    """优先 scene-local；找不到回落 global。"""
+    with _conn() as c:
+        row = c.execute(
+            "SELECT * FROM assets WHERE story_id = ? AND scene_index = ? AND name = ? AND kind = ? AND scope = 'scene'",
+            (story_id, scene_index, name, kind),
+        ).fetchone()
+        if row:
+            return _row_to_asset(row)
+        row = c.execute(
+            "SELECT * FROM assets WHERE story_id = ? AND name = ? AND kind = ? AND scope = 'global'",
+            (story_id, name, kind),
+        ).fetchone()
+    return _row_to_asset(row) if row else None
+
+
+def list_assets(*, owner_user_id: Optional[str] = None, scope: Optional[str] = None,
+                story_id: Optional[str] = None, is_official: Optional[bool] = None,
+                public: Optional[bool] = None) -> list[dict]:
+    sql = "SELECT * FROM assets WHERE 1=1"
+    args: list = []
+    if owner_user_id is not None:
+        sql += " AND owner_user_id = ?"; args.append(owner_user_id)
+    if scope is not None:
+        sql += " AND scope = ?"; args.append(scope)
+    if story_id is not None:
+        sql += " AND story_id = ?"; args.append(story_id)
+    if is_official is not None:
+        sql += " AND is_official = ?"; args.append(1 if is_official else 0)
+    if public is not None:
+        sql += " AND public = ?"; args.append(1 if public else 0)
+    sql += " ORDER BY created_at DESC"
+    with _conn() as c:
+        rows = c.execute(sql, args).fetchall()
+    return [_row_to_asset(r) for r in rows]
+
+
+def assets_by_ids(ids: list[str]) -> dict[str, dict]:
+    if not ids:
+        return {}
+    placeholders = ",".join(["?"] * len(ids))
+    with _conn() as c:
+        rows = c.execute(
+            f"SELECT * FROM assets WHERE id IN ({placeholders})", ids,
+        ).fetchall()
+    return {r["id"]: _row_to_asset(r) for r in rows}
+
+
+def delete_asset(asset_id: str, owner_user_id: Optional[str] = None) -> bool:
+    sql = "DELETE FROM assets WHERE id = ?"
+    args: list = [asset_id]
+    if owner_user_id is not None:
+        sql += " AND owner_user_id = ?"; args.append(owner_user_id)
+    with _conn() as c:
+        cur = c.execute(sql, args)
+        return cur.rowcount > 0
+
+
+def _row_to_asset(row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "kind": row["kind"],
+        "url": row["url"],
+        "svg_url": row["svg_url"],
+        "description": row["description"],
+        "scope": row["scope"],
+        "story_id": row["story_id"],
+        "scene_index": row["scene_index"],
+        "is_official": bool(row["is_official"]),
+        "public": bool(row["public"]),
+        "owner_user_id": row["owner_user_id"],
+        "origin_story_id": row["origin_story_id"],
+        "origin_scene_idx": row["origin_scene_idx"],
+        "created_at": row["created_at"],
+    }
 
 
 # 启动时自动建表

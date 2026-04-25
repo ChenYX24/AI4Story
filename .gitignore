@@ -21,6 +21,8 @@ dist/
 # Environments
 .env
 .env.*
+!.env.example
+!**/.env.example
 .venv/
 venv/
 start_webdemo.keys.cmd

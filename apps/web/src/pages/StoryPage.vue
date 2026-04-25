@@ -44,6 +44,7 @@ const chatLogByScene = ref<Record<string, ChatMsg[]>>({});
 const dynamicNode = ref<InteractResponse | null>(null);
 const pendingDynamicPreview = ref<string | null>(null);
 const pendingDynamicError = ref<string | null>(null);
+const PAGE_FLIP_MS = 720;
 
 async function loadCursor(idx: number) {
   if (idx < 0 || idx >= store.flow.length) return;
@@ -211,17 +212,24 @@ function isLastInteractiveScene(sceneIdx: number): boolean {
 }
 
 async function turnPage(direction: "next" | "prev") {
+  if (flipping.value) return;
   // 在 dynamic narrative 上点 next → 先清 dynamic 再走真正的 flow 推进
   if (dynamicNode.value && direction === "next") {
     dynamicNode.value = null;
     flipping.value = "next";
-    setTimeout(() => loadCursor(Math.min(store.cursor + 1, store.flow.length - 1)), 420);
+    setTimeout(() => {
+      flipping.value = null;
+      void loadCursor(Math.min(store.cursor + 1, store.flow.length - 1));
+    }, PAGE_FLIP_MS);
     return;
   }
   if (dynamicNode.value && direction === "prev") {
     dynamicNode.value = null;
     flipping.value = "prev";
-    setTimeout(() => loadCursor(Math.max(0, store.cursor - 1)), 420);
+    setTimeout(() => {
+      flipping.value = null;
+      void loadCursor(Math.max(0, store.cursor - 1));
+    }, PAGE_FLIP_MS);
     return;
   }
   const to = store.cursor + (direction === "next" ? 1 : -1);
@@ -233,7 +241,10 @@ async function turnPage(direction: "next" | "prev") {
   // 顺序推进永远允许；跳转（timeline）才检查 highestUnlocked
   stopAudio();
   flipping.value = direction;
-  setTimeout(() => loadCursor(to), 420);
+  setTimeout(() => {
+    flipping.value = null;
+    void loadCursor(to);
+  }, PAGE_FLIP_MS);
 }
 
 function stopAudio() { tts.stop(); }
@@ -370,7 +381,7 @@ async function onInteractDone(
     toast.push("✨ 你的故事段落已经画好了", "success");
     // 跳到新插入的 dynamic 幕
     loadCursor(insertedAt);
-  }, 420);
+  }, PAGE_FLIP_MS);
 }
 
 function onInteractGenerate(request: InteractRequest) {
@@ -389,7 +400,7 @@ function onInteractGenerate(request: InteractRequest) {
   setTimeout(() => {
     flipping.value = null;
     void loadCursor(insertedAt);
-  }, 420);
+  }, PAGE_FLIP_MS);
 
   void postInteract(request).then((payload) => {
     store.addInteraction({
@@ -641,13 +652,13 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
           <div
             v-if="scene"
             :key="store.cursor"
-            class="relative bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] overflow-hidden h-full"
+            class="story-book-shell relative bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] overflow-hidden h-full"
+            :class="[
+              flipping === 'next' && 'story-book-shell--turn-next',
+              flipping === 'prev' && 'story-book-shell--turn-prev',
+            ]"
             :style="{
               boxShadow: 'var(--shadow-book)',
-              transformOrigin: 'left center',
-              transition: 'transform 0.7s var(--ease-book), opacity 0.6s ease',
-              transform: flipping === 'next' ? 'rotateY(-160deg)' : flipping === 'prev' ? 'rotateY(160deg)' : 'rotateY(0)',
-              opacity: flipping ? 0.25 : 1,
             }"
           >
             <!-- 书脊阴影 -->
@@ -656,7 +667,14 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
             ></div>
 
             <!-- grid 3 行：header(auto) / main(1fr) / footer(auto)；footer 永不被截 -->
-            <div class="p-4 sm:p-6 grid h-full min-h-0 gap-0" style="grid-template-rows: auto minmax(0,1fr) auto;">
+            <div
+              class="story-page-layout p-4 sm:p-6 grid h-full min-h-0 gap-0"
+              :class="[
+                flipping === 'next' && 'story-page-layout--turn-next',
+                flipping === 'prev' && 'story-page-layout--turn-prev',
+              ]"
+              style="grid-template-rows: auto minmax(0,1fr) auto;"
+            >
               <div class="flex items-center justify-between mb-3">
                 <div class="text-xs tracking-wider text-ink-mute">
                   第 {{ (node?.sceneIdx ?? 0) }} 页 · {{ node?.type === "narrative" ? "叙事" : "互动" }}
@@ -729,13 +747,13 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
               <!-- 底部操作条 —— 永远渲染，保证"完成"按钮在视口底部不被 overflow 截 -->
               <div class="mt-3 flex flex-wrap gap-2 justify-between items-center pt-3 border-t border-dashed border-paper-edge">
                 <div class="flex gap-2 flex-wrap">
-                  <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0" @click="turnPage('prev')">⬅ 上一页</BaseButton>
+                  <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0 || !!flipping" @click="turnPage('prev')">⬅ 上一页</BaseButton>
                   <BaseButton
                     v-if="activeStoryboard.length > 0"
                     variant="ghost"
                     size="sm"
                     pill
-                    :disabled="lineCursor <= 1"
+                    :disabled="lineCursor <= 1 || !!flipping"
                     @click="retreatLine"
                   >◀ 上一句</BaseButton>
                   <BaseButton
@@ -743,6 +761,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     variant="ghost"
                     size="sm"
                     pill
+                    :disabled="!!flipping"
                     @click="advanceLine"
                   >🔊 下一句</BaseButton>
                 </div>
@@ -750,14 +769,14 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                   <BaseButton
                     size="sm"
                     pill
-                    :disabled="interactiveOps.length === 0 || interactiveGenerating"
+                    :disabled="interactiveOps.length === 0 || interactiveGenerating || !!flipping"
                     @click="callInteractiveComplete"
                   >
                     {{ interactiveGenerating ? "AI 正在画…" : `✨ 完成 (${interactiveOps.length}) 并生成下一幕` }}
                   </BaseButton>
                 </template>
                 <template v-else>
-                  <BaseButton size="sm" pill @click="turnPage('next')">
+                  <BaseButton size="sm" pill :disabled="!!flipping" @click="turnPage('next')">
                     {{ isLast ? "📊 查看报告" : "翻下一页 ⏭" }}
                   </BaseButton>
                 </template>
@@ -903,10 +922,187 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
 
 <style scoped>
 .book-enter-active, .book-leave-active {
-  transition: opacity 0.4s ease, transform 0.7s var(--ease-book);
+  transition: opacity 0.18s ease;
 }
-.book-enter-from { opacity: 0; transform: rotateY(-160deg); }
-.book-leave-to   { opacity: 0; }
+.book-enter-from,
+.book-leave-to {
+  opacity: 0;
+}
+
+.story-book-shell {
+  isolation: isolate;
+  transform-style: preserve-3d;
+  perspective: 1800px;
+  background-image:
+    linear-gradient(90deg, rgba(122, 90, 54, 0.18), transparent 28px),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 237, 213, 0.9));
+}
+
+.story-book-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(90deg, rgba(80, 52, 25, 0.28), transparent 18%),
+    radial-gradient(120% 80% at 0% 50%, rgba(90, 58, 28, 0.26), transparent 56%);
+  z-index: 12;
+}
+
+.story-book-shell--turn-next::after,
+.story-book-shell--turn-prev::after {
+  animation: story-shell-shadow 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
+}
+
+.story-page-layout {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  will-change: transform, filter;
+}
+
+.story-page-layout::before,
+.story-page-layout::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 20;
+}
+
+.story-page-layout::before {
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.5) 42%, rgba(109, 75, 36, 0.2) 50%, transparent 63%),
+    linear-gradient(90deg, rgba(74, 49, 24, 0.12), transparent 20%, transparent 80%, rgba(74, 49, 24, 0.18));
+  mix-blend-mode: multiply;
+}
+
+.story-page-layout::after {
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(57, 38, 19, 0.34) 48%, rgba(255, 249, 233, 0.7) 55%, transparent 70%);
+  transform: translateX(100%);
+}
+
+.story-page-layout--turn-next {
+  transform-origin: left center;
+  animation: story-page-turn-next 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
+}
+
+.story-page-layout--turn-prev {
+  transform-origin: right center;
+  animation: story-page-turn-prev 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
+}
+
+.story-page-layout--turn-next::before,
+.story-page-layout--turn-prev::before {
+  animation: story-paper-fold 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
+}
+
+.story-page-layout--turn-next::after {
+  animation: story-page-highlight-next 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
+}
+
+.story-page-layout--turn-prev::after {
+  animation: story-page-highlight-prev 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
+}
+
+@keyframes story-page-turn-next {
+  0% {
+    transform: translateX(0) rotateY(0deg) skewY(0deg);
+    filter: brightness(1);
+  }
+  34% {
+    transform: translateX(-8px) rotateY(-24deg) skewY(-0.8deg);
+    filter: brightness(0.98);
+  }
+  68% {
+    transform: translateX(-22px) rotateY(-64deg) skewY(-1.2deg);
+    filter: brightness(0.9);
+  }
+  100% {
+    transform: translateX(-36px) rotateY(-92deg) skewY(-1.4deg);
+    filter: brightness(0.82);
+  }
+}
+
+@keyframes story-page-turn-prev {
+  0% {
+    transform: translateX(0) rotateY(0deg) skewY(0deg);
+    filter: brightness(1);
+  }
+  34% {
+    transform: translateX(8px) rotateY(24deg) skewY(0.8deg);
+    filter: brightness(0.98);
+  }
+  68% {
+    transform: translateX(22px) rotateY(64deg) skewY(1.2deg);
+    filter: brightness(0.9);
+  }
+  100% {
+    transform: translateX(36px) rotateY(92deg) skewY(1.4deg);
+    filter: brightness(0.82);
+  }
+}
+
+@keyframes story-paper-fold {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  28% {
+    opacity: 0.35;
+  }
+  58% {
+    opacity: 0.78;
+  }
+  82% {
+    opacity: 0.44;
+  }
+}
+
+@keyframes story-page-highlight-next {
+  0% {
+    opacity: 0;
+    transform: translateX(80%);
+  }
+  42% {
+    opacity: 0.72;
+    transform: translateX(10%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-58%);
+  }
+}
+
+@keyframes story-page-highlight-prev {
+  0% {
+    opacity: 0;
+    transform: translateX(-80%) scaleX(-1);
+  }
+  42% {
+    opacity: 0.72;
+    transform: translateX(-10%) scaleX(-1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(58%) scaleX(-1);
+  }
+}
+
+@keyframes story-shell-shadow {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  45% {
+    opacity: 0.62;
+  }
+}
 
 /* P-S5 动态段落 — 极淡金色光晕 + 星点漂浮 */
 .narrative-magic::before {
@@ -941,6 +1137,16 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
           mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
 }
 @media (prefers-reduced-motion: reduce) {
+  .story-book-shell--turn-next::after,
+  .story-book-shell--turn-prev::after,
+  .story-page-layout--turn-next,
+  .story-page-layout--turn-prev,
+  .story-page-layout--turn-next::before,
+  .story-page-layout--turn-prev::before,
+  .story-page-layout--turn-next::after,
+  .story-page-layout--turn-prev::after {
+    animation: none;
+  }
   .narrative-magic::after { animation: none; }
 }
 </style>

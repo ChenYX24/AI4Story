@@ -1,5 +1,8 @@
 // 轻量 fetch wrapper —— 自动附 Authorization: Bearer <token>
-const BASE = "";
+// VITE_API_BASE 控制前端调谁：
+//   - 未设置 / 空 → 走 vite dev proxy（/api /outputs /assets → 同源）
+//   - https://your-server.example.com → 直连服务器后端（前后端分离部署用）
+export const BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
 const TOKEN_KEY = "mindshow_token";
 
 export function getAuthToken(): string | null {

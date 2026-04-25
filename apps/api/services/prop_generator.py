@@ -28,6 +28,7 @@ from scripts.image_processing.postprocess_grid import (  # noqa: E402
     remove_background_with_rembg_single,
 )
 
+from ..storage import get_storage  # noqa: E402
 from .qwen_service import QwenError, call_json  # noqa: E402
 
 REMBG_MODEL = "isnet-general-use"
@@ -152,13 +153,15 @@ def create_custom_prop(
     session_dir.mkdir(parents=True, exist_ok=True)
     slug = _slug(name)
     out_path = session_dir / f"{slug}.png"
-    # avoid clobber: append suffix if exists
     i = 2
     while out_path.exists():
         out_path = session_dir / f"{slug}_{i}.png"
         i += 1
     out_path.write_bytes(out_bytes)
-    url = f"/outputs/{session_id}/custom_props/{out_path.name}"
+    # 也走 storage backend：OSS 模式下会同步到云端，本地模式只是再写一遍 outputs。
+    storage = get_storage()
+    key = f"{session_id}/custom_props/{out_path.name}"
+    url = storage.save_bytes(key, out_bytes, content_type="image/png")
     return url, out_path
 
 
@@ -303,6 +306,7 @@ def create_custom_props_batch(
     session_dir = OUTPUTS_ROOT / session_id / "custom_props"
     session_dir.mkdir(parents=True, exist_ok=True)
 
+    storage = get_storage()
     boxes = cell_boxes(transparent.width, transparent.height)
     results: list[dict] = []
     for i in range(real_count):
@@ -315,8 +319,11 @@ def create_custom_props_batch(
             out = session_dir / f"{slug}_{k}.png"
             k += 1
         cell.save(out, "PNG")
-        results.append({
-            "name": names[i],
-            "url": f"/outputs/{session_id}/custom_props/{out.name}",
-        })
+        cell_bytes = out.read_bytes()
+        url = storage.save_bytes(
+            f"{session_id}/custom_props/{out.name}",
+            cell_bytes,
+            content_type="image/png",
+        )
+        results.append({"name": names[i], "url": url})
     return results

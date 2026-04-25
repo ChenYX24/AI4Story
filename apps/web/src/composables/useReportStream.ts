@@ -48,9 +48,13 @@ export function useReportStream() {
 
     let finalPayload: ReportResponse | null = null;
     try {
-      const resp = await fetch("/api/report/stream", {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const tok = (() => { try { return localStorage.getItem("mindshow_token"); } catch { return null; } })();
+      if (tok) headers["Authorization"] = `Bearer ${tok}`;
+      const base = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
+      const resp = await fetch(`${base}/api/report/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(body),
       });
       if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
