@@ -9,8 +9,10 @@ from tqdm import tqdm
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_MODEL = "qwen3.6-flash-2026-04-16"
+# Chat / 文本生成默认走 mikaovo.ai 的 OpenAI-compatible 通道；脚本端可用 --base-url / --model 覆盖。
+# 同时支持 LLM_BASE_URL / LLM_MODEL 环境变量（与 apps/api/config.py 保持一致）。
+DEFAULT_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.mikaovo.ai/v1").rstrip("/")
+DEFAULT_MODEL = os.getenv("LLM_MODEL", "gpt-5-4")
 NARRATIVE_SCENE = "叙事场景"
 INTERACTIVE_SCENE = "交互场景"
 

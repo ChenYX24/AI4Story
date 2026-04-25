@@ -20,6 +20,13 @@ ARK_API_KEY = os.getenv("ARK_API_KEY", "")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 QWEN_ASR_MODEL = os.getenv("QWEN_ASR_MODEL", "qwen3-asr-flash-2026-02-10")
 
+# Chat / 文本生成 LLM —— 默认走 mikaovo.ai 的 OpenAI-compatible 通道，模型 gpt-5-4。
+# 不走 DashScope（DASHSCOPE_API_KEY 仍保留给 ASR call_asr_audio 用）。
+# 调用方读取以下三个变量；缺失 LLM_API_KEY 时回落到 DASHSCOPE_API_KEY 让旧部署不直接断。
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.mikaovo.ai/v1").rstrip("/")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5-4")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip() or DASHSCOPE_API_KEY
+
 SEEDREAM_MODEL = os.getenv("SEEDREAM_MODEL", "doubao-seedream-5-0-lite-260128")
 SEEDREAM_PROVIDER = os.getenv("SEEDREAM_PROVIDER", "ark")
 SEEDREAM_SIZE = os.getenv("SEEDREAM_SIZE", "1920x1920")

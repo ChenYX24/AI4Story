@@ -37,8 +37,11 @@ from scripts.story.story_scene_splitter import (
     normalize_name,
 )
 
-DEFAULT_QWEN_MODEL = "qwen3.6-flash-2026-04-16"
-PLACEMENT_VISION_MODEL = "qwen3.6-flash-2026-04-16"
+# Chat / 文本生成默认与 apps/api/config.LLM_MODEL 同源（环境变量 LLM_MODEL 可覆盖）。
+# 名字保留 "QWEN_MODEL" 是历史命名，实际是任意 OpenAI-compatible 模型 id（默认 gpt-5-4）。
+DEFAULT_QWEN_MODEL = os.getenv("LLM_MODEL", "gpt-5-4")
+# 摆放识别需要 vision-capable 模型；如果默认 chat 模型不支持图，部署侧给 PLACEMENT_VISION_MODEL 单独配。
+PLACEMENT_VISION_MODEL = os.getenv("PLACEMENT_VISION_MODEL", DEFAULT_QWEN_MODEL)
 MIN_SEEDREAM_PIXELS = 3686400
 DEFAULT_MAX_WORKERS = min(8, max(4, (os.cpu_count() or 4)))
 PROGRESS_LOCK = Lock()

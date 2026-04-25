@@ -1,0 +1,33 @@
+# 默认让 git 自动处理换行（提交转 LF，签出按平台还原）
+* text=auto
+
+# Windows 批处理脚本必须 CRLF，否则 cmd.exe 把每行截断成乱命令
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Shell / Python / Vue / TS / 配置文件统一 LF（保证 Linux/macOS 直接能跑）
+*.sh   text eol=lf
+*.py   text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.vue  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+
+# 二进制资源 — 不要 git 改字节
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.svg  text eol=lf
+*.mp3  binary
+*.mp4  binary
+*.wav  binary
+*.onnx binary
+*.zip  binary

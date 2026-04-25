@@ -9,6 +9,9 @@ from ..config import (
     ARK_API_KEY,
     CUSTOM_STORIES_ROOT,
     DASHSCOPE_API_KEY,
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_MODEL,
     PROJECT_ROOT,
     SEEDREAM_MODEL,
     SEEDREAM_PROVIDER,
@@ -41,8 +44,8 @@ def submit_custom_story(text: str, title: str = "", owner_user_id: str | None = 
         raise ValueError("请先输入故事内容。")
     if not ARK_API_KEY:
         raise RuntimeError("服务器未配置 ARK_API_KEY，暂时不能生成自定义故事。")
-    if not DASHSCOPE_API_KEY:
-        raise RuntimeError("服务器未配置 DASHSCOPE_API_KEY，暂时不能生成自定义故事。")
+    if not LLM_API_KEY:
+        raise RuntimeError("服务器未配置 LLM_API_KEY（或 DASHSCOPE_API_KEY），暂时不能生成自定义故事。")
 
     record = create_custom_story_record(clean, title=title, owner_user_id=owner_user_id)
     schedule_custom_story_build(record["id"], clean)
@@ -81,11 +84,13 @@ def _build_story_assets(story_id: str, text: str) -> None:
             use_existing_global=False,
             interactive_only=False,
             narrative_only=False,
-            dashscope_api_key=DASHSCOPE_API_KEY,
+            # workflow 里的 "dashscope_api_key" 字段名是历史命名，实际是 chat LLM 的 key —
+            # 这里传 LLM_API_KEY（默认走 mikaovo.ai）；ASR 在 qwen_service 里另外用 DASHSCOPE_API_KEY。
+            dashscope_api_key=LLM_API_KEY,
             ark_api_key=ARK_API_KEY,
-            qwen_model=DEFAULT_QWEN_MODEL,
+            qwen_model=LLM_MODEL,
             seedream_model=SEEDREAM_MODEL,
-            base_url=DEFAULT_BASE_URL,
+            base_url=LLM_BASE_URL,
             provider=SEEDREAM_PROVIDER,
             temperature=0.2,
             timeout=300,

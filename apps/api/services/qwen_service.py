@@ -4,10 +4,13 @@ from typing import Any
 
 import requests
 
-from ..config import DASHSCOPE_API_KEY, QWEN_ASR_MODEL
+from ..config import DASHSCOPE_API_KEY, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, QWEN_ASR_MODEL
 
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_MODEL = "qwen3.6-flash-2026-04-16"
+# Chat / 文本生成默认走 LLM_BASE_URL（默认 mikaovo.ai） + LLM_MODEL（默认 gpt-5-4）。
+# 同时保留 DashScope 配置：call_asr_audio 仍然必须命中 DashScope 自己的 ASR 接口。
+BASE_URL = LLM_BASE_URL
+DEFAULT_MODEL = LLM_MODEL
+ASR_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 class QwenError(RuntimeError):
@@ -36,8 +39,8 @@ def call_json(
     timeout: int = 60,
     retries: int = 1,
 ) -> dict[str, Any]:
-    if not DASHSCOPE_API_KEY:
-        raise QwenError("DASHSCOPE_API_KEY not set")
+    if not LLM_API_KEY:
+        raise QwenError("LLM_API_KEY (or DASHSCOPE_API_KEY) not set")
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -50,7 +53,7 @@ def call_json(
         "stream": False,
     }
     headers = {
-        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+        "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
     }
     last_err: Exception | None = None
@@ -80,8 +83,8 @@ def call_text(
     temperature: float = 0.5,
     timeout: int = 60,
 ) -> str:
-    if not DASHSCOPE_API_KEY:
-        raise QwenError("DASHSCOPE_API_KEY not set")
+    if not LLM_API_KEY:
+        raise QwenError("LLM_API_KEY (or DASHSCOPE_API_KEY) not set")
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -93,7 +96,7 @@ def call_text(
         "stream": False,
     }
     headers = {
-        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+        "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
     }
     resp = requests.post(
@@ -115,9 +118,9 @@ def call_chat(
     temperature: float = 0.5,
     timeout: int = 60,
 ) -> str:
-    """Send a full multi-turn messages list to Qwen and return the assistant reply."""
-    if not DASHSCOPE_API_KEY:
-        raise QwenError("DASHSCOPE_API_KEY not set")
+    """Send a full multi-turn messages list to the chat LLM and return the assistant reply."""
+    if not LLM_API_KEY:
+        raise QwenError("LLM_API_KEY (or DASHSCOPE_API_KEY) not set")
     payload = {
         "model": model,
         "messages": messages,
@@ -125,7 +128,7 @@ def call_chat(
         "stream": False,
     }
     headers = {
-        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+        "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
     }
     resp = requests.post(
@@ -175,7 +178,7 @@ def call_asr_audio(
         "Content-Type": "application/json",
     }
     resp = requests.post(
-        f"{BASE_URL}/chat/completions",
+        f"{ASR_BASE_URL}/chat/completions",
         headers=headers,
         json=payload,
         timeout=timeout,

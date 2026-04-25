@@ -42,7 +42,13 @@ if not exist "%KEY_FILE%" (
   >"%KEY_FILE%" echo @echo off
   >>"%KEY_FILE%" echo rem Fill your API keys below, save this file, then run start_webdemo.cmd again.
   >>"%KEY_FILE%" echo set "ARK_API_KEY=PASTE_SEEDREAM_API_KEY_HERE"
-  >>"%KEY_FILE%" echo set "DASHSCOPE_API_KEY=PASTE_TEXT_MODEL_API_KEY_HERE"
+  >>"%KEY_FILE%" echo rem 主语言模型（默认走 mikaovo.ai 的 gpt-5-4），把 mikaovo 平台的 API key 粘进来。
+  >>"%KEY_FILE%" echo set "LLM_API_KEY=PASTE_LLM_API_KEY_HERE"
+  >>"%KEY_FILE%" echo rem 可选覆盖：默认 https://api.mikaovo.ai/v1 / gpt-5-4，没事别动。
+  >>"%KEY_FILE%" echo rem set "LLM_BASE_URL=https://api.mikaovo.ai/v1"
+  >>"%KEY_FILE%" echo rem set "LLM_MODEL=gpt-5-4"
+  >>"%KEY_FILE%" echo rem ASR（语音识别）仍走 DashScope，保留这个 key。如果不用语音可留空。
+  >>"%KEY_FILE%" echo set "DASHSCOPE_API_KEY=PASTE_DASHSCOPE_API_KEY_HERE"
   >>"%KEY_FILE%" echo set "XIAOMI_TTS_API_KEY=PASTE_XIAOMI_TTS_API_KEY_HERE"
 )
 call "%KEY_FILE%"
@@ -52,10 +58,13 @@ if /I "%ARK_API_KEY%"=="PASTE_SEEDREAM_API_KEY_HERE" (
   start "" notepad "%KEY_FILE%"
   goto fail
 )
-if /I "%DASHSCOPE_API_KEY%"=="PASTE_TEXT_MODEL_API_KEY_HERE" (
-  echo [ERROR] DASHSCOPE_API_KEY is not filled in: %KEY_FILE%
+if /I "%LLM_API_KEY%"=="PASTE_LLM_API_KEY_HERE" (
+  echo [ERROR] LLM_API_KEY is not filled in: %KEY_FILE%
   start "" notepad "%KEY_FILE%"
   goto fail
+)
+if /I "%DASHSCOPE_API_KEY%"=="PASTE_DASHSCOPE_API_KEY_HERE" (
+  echo [WARN] DASHSCOPE_API_KEY is not filled in. ASR / 语音识别 will be unavailable.
 )
 if /I "%XIAOMI_TTS_API_KEY%"=="PASTE_XIAOMI_TTS_API_KEY_HERE" (
   echo [WARN] XIAOMI_TTS_API_KEY is not filled in. TTS endpoints may fail.

@@ -15,7 +15,13 @@ if [[ ! -f "$KEY_FILE" ]]; then
   cat >"$KEY_FILE" <<'EOF'
 #!/usr/bin/env bash
 export ARK_API_KEY="PASTE_SEEDREAM_API_KEY_HERE"
-export DASHSCOPE_API_KEY="PASTE_TEXT_MODEL_API_KEY_HERE"
+# 主语言模型（默认 mikaovo.ai 的 gpt-5-4），把 mikaovo 平台的 API key 粘进来。
+export LLM_API_KEY="PASTE_LLM_API_KEY_HERE"
+# 可选覆盖：默认 https://api.mikaovo.ai/v1 / gpt-5-4，没事别动。
+# export LLM_BASE_URL="https://api.mikaovo.ai/v1"
+# export LLM_MODEL="gpt-5-4"
+# ASR（语音识别）仍走 DashScope；不用语音可留空。
+export DASHSCOPE_API_KEY="PASTE_DASHSCOPE_API_KEY_HERE"
 export XIAOMI_TTS_API_KEY="PASTE_XIAOMI_TTS_API_KEY_HERE"
 EOF
 fi
@@ -25,8 +31,11 @@ source "$KEY_FILE"
 if [[ "${ARK_API_KEY}" == "PASTE_SEEDREAM_API_KEY_HERE" ]]; then
   echo "[ERROR] ARK_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
 fi
-if [[ "${DASHSCOPE_API_KEY}" == "PASTE_TEXT_MODEL_API_KEY_HERE" ]]; then
-  echo "[ERROR] DASHSCOPE_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
+if [[ "${LLM_API_KEY:-}" == "PASTE_LLM_API_KEY_HERE" || -z "${LLM_API_KEY:-}" ]]; then
+  echo "[ERROR] LLM_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
+fi
+if [[ "${DASHSCOPE_API_KEY:-}" == "PASTE_DASHSCOPE_API_KEY_HERE" ]]; then
+  echo "[WARN] DASHSCOPE_API_KEY not filled in. ASR / 语音识别 will be unavailable."
 fi
 
 # ---- 找 Python ----
@@ -75,7 +84,7 @@ fi
 # ---- 启动后端 ----
 echo "[START] Backend: uvicorn on http://${HOST}:${PORT}"
 cd "${ROOT}"
-export ARK_API_KEY DASHSCOPE_API_KEY XIAOMI_TTS_API_KEY
+export ARK_API_KEY DASHSCOPE_API_KEY XIAOMI_TTS_API_KEY LLM_API_KEY LLM_BASE_URL LLM_MODEL
 "${PYTHON_EXE}" -m uvicorn apps.api.main:create_app \
   --host "${HOST}" --port "${PORT}" --factory --reload \
   >>"${LOG_DIR}/backend.out.log" 2>>"${LOG_DIR}/backend.err.log" &
