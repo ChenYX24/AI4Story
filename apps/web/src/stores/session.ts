@@ -76,6 +76,10 @@ export const useSessionStore = defineStore("session", () => {
 
   const key = (name: string) => `mindshow_${scope.value}_${name}`;
 
+  function hasValidFlow(ps?: SessionPlayState): ps is SessionPlayState {
+    return !!ps && !!ps.story_id && Array.isArray(ps.flow) && ps.flow.length > 0;
+  }
+
   function loadScope(userId?: string | null) {
     for (const timer of _syncTimers.values()) clearTimeout(timer);
     _syncTimers.clear();
@@ -83,10 +87,11 @@ export const useSessionStore = defineStore("session", () => {
     pendingStarts.clear();
     backendIds.value = {};
     scope.value = userId || "guest";
-    list.value = readJson<SessionRecord[]>(key("sessions"), []);
+    const rawList = readJson<SessionRecord[]>(key("sessions"), []);
+    list.value = rawList.filter((record) => !record.play_state || hasValidFlow(record.play_state));
     const rawStates = readJson<Record<string, SessionPlayState>>(key("play_states"), {});
     playStates.value = Object.fromEntries(
-      Object.entries(rawStates).filter(([sid, state]) => state?.session_id === sid && state?.story_id),
+      Object.entries(rawStates).filter(([sid, state]) => state?.session_id === sid && hasValidFlow(state)),
     );
     generatedNotices.value = readJson<Record<string, boolean>>(key("generated_notices"), {});
     normalizeOpenSessions();
@@ -138,8 +143,7 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   function isOpenState(ps?: SessionPlayState): ps is SessionPlayState {
-    return !!ps && !!ps.story_id && Array.isArray(ps.flow) && ps.flow.length > 0
-      && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
+    return hasValidFlow(ps) && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
   }
 
   function markReportReady(id: string) {
@@ -291,7 +295,7 @@ export const useSessionStore = defineStore("session", () => {
     // 跳过持久化 + 不进历史会话列表，避免：
     //   (a) 下次重新进入这个故事时弹"继续上次的玩法？"
     //   (b) 历史会话里堆一堆 0 进度的空记录
-    if (state.cursor === 0) return;
+    if (!hasValidFlow(state) || state.cursor === 0) return;
     let record = list.value.find((s) => s.id === state.session_id && s.story_id === state.story_id);
     if (!record) {
       // 用户翻过第一页 → 把先前 start() 占位的会话真正写入 list。
@@ -406,33 +410,59 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   // 从后端拉取未完成会话（登录后 + 进入故事时调用）
+  function mergeRemoteSession(remote: any): { sessionId: string; state?: SessionPlayState } | null {
+    const ps = remote.play_state as SessionPlayState | undefined;
+    const storyId = String(remote.story_id || ps?.story_id || "");
+    if (!storyId) return null;
+    const hasFlow = hasValidFlow(ps);
+    if (!hasFlow && remote.status !== "finished") return null;
+    const sessionId = String((hasFlow && ps?.session_id) || remote.id);
+    const state = hasFlow ? { ...ps, session_id: sessionId, story_id: storyId } : undefined;
+    const started = state?.updatedAt || (remote.created_at ? new Date(remote.created_at * 1000).toISOString() : new Date().toISOString());
+    const existing = list.value.find((s) => s.id === sessionId || s.backend_session_id === remote.id);
+    const snapshot = snapshotFromState(state);
+    const record: SessionRecord = existing || {
+      id: sessionId,
+      story_id: storyId,
+      story_title: state?.story_title || storyId,
+      started_at: started,
+    };
+    record.backend_session_id = remote.id;
+    record.story_id = storyId;
+    record.story_title = state?.story_title || record.story_title || storyId;
+    record.started_at = record.started_at || started;
+    record.finished_at = remote.status === "finished" ? (record.finished_at || started) : record.finished_at;
+    Object.assign(record, snapshot);
+    if (state && isOpenState(state) && remote.status === "playing") {
+      backendIds.value = { ...backendIds.value, [sessionId]: remote.id };
+      playStates.value = { ...playStates.value, [sessionId]: state };
+    }
+    if (!existing) list.value.unshift(record);
+    return { sessionId, state };
+  }
+
+  async function fetchRemoteSessionsAll(): Promise<void> {
+    if (!getAuthToken()) return;
+    try {
+      const { sessions } = await fetchSessionsApi();
+      for (const remote of sessions) mergeRemoteSession(remote);
+      list.value = [...list.value]
+        .sort((a, b) => Date.parse(b.play_state?.updatedAt || b.started_at || "") - Date.parse(a.play_state?.updatedAt || a.started_at || ""))
+        .slice(0, 100);
+      normalizeOpenSessions();
+    } catch { /* silent */ }
+  }
+
   async function fetchRemoteSession(storyId: string): Promise<{ sessionId: string; state: SessionPlayState } | null> {
     if (!getAuthToken()) return null;
     try {
       const { sessions } = await fetchSessionsApi(storyId);
       const playing = sessions.find((s) => s.status === "playing" && s.play_state?.story_id === storyId);
       if (!playing) return null;
-      const ps = playing.play_state as unknown as SessionPlayState;
-      const sessionId = ps.session_id || playing.id;
-      if (ps && ps.flow?.length && ps.cursor > 0 && ps.cursor < ps.flow.length - 1) {
-        const state = { ...ps, session_id: sessionId, story_id: storyId };
-        pruneOpenSessionsForStory(storyId, sessionId);
-        backendIds.value = { ...backendIds.value, [sessionId]: playing.id };
-        playStates.value = { ...playStates.value, [sessionId]: state };
-        if (!list.value.some((s) => s.id === sessionId)) {
-          list.value.unshift({
-            id: sessionId,
-            backend_session_id: playing.id,
-            story_id: storyId,
-            story_title: state.story_title || storyId,
-            started_at: state.updatedAt || new Date().toISOString(),
-            play_state: state,
-          });
-        } else {
-          const existing = list.value.find((s) => s.id === sessionId);
-          if (existing) existing.backend_session_id = playing.id;
-        }
-        return { sessionId, state };
+      const merged = mergeRemoteSession(playing);
+      if (merged?.state && isOpenState(merged.state)) {
+        pruneOpenSessionsForStory(storyId, merged.sessionId);
+        return { sessionId: merged.sessionId, state: merged.state };
       }
     } catch { /* silent */ }
     return null;
@@ -446,6 +476,6 @@ export const useSessionStore = defineStore("session", () => {
     remove, deleteSession, pruneOpenSessionsForStory, normalizeOpenSessions, clearAllForStory, clear,
     markGeneratedNotice, clearGeneratedNotice, hasGeneratedNotice,
     savePlayState, getPlayState, getSessionState, clearPlayState, hasInProgress, getInProgressForStory, completeSession,
-    fetchRemoteSession, completedReports,
+    fetchRemoteSession, fetchRemoteSessionsAll, completedReports,
   };
 });

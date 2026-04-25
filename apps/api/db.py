@@ -442,6 +442,14 @@ def update_session(session_id: str, user_id: str, play_state: str,
         return cur.rowcount > 0
 
 
+def _session_rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
+    return [{
+        "id": r["id"], "user_id": r["user_id"], "story_id": r["story_id"],
+        "play_state": _json.loads(r["play_state"] or "{}"),
+        "status": r["status"], "created_at": r["created_at"], "updated_at": r["updated_at"],
+    } for r in rows]
+
+
 def get_sessions_for_story(user_id: str, story_id: str) -> list[dict]:
     with _conn() as c:
         rows = c.execute(
@@ -449,11 +457,17 @@ def get_sessions_for_story(user_id: str, story_id: str) -> list[dict]:
             "FROM sessions WHERE user_id = ? AND story_id = ? ORDER BY updated_at DESC",
             (user_id, story_id),
         ).fetchall()
-    return [{
-        "id": r["id"], "user_id": r["user_id"], "story_id": r["story_id"],
-        "play_state": _json.loads(r["play_state"] or "{}"),
-        "status": r["status"], "created_at": r["created_at"], "updated_at": r["updated_at"],
-    } for r in rows]
+    return _session_rows_to_dicts(rows)
+
+
+def get_sessions_for_user(user_id: str) -> list[dict]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, user_id, story_id, play_state, status, created_at, updated_at "
+            "FROM sessions WHERE user_id = ? ORDER BY updated_at DESC",
+            (user_id,),
+        ).fetchall()
+    return _session_rows_to_dicts(rows)
 
 
 def delete_session(session_id: str, user_id: str) -> bool:

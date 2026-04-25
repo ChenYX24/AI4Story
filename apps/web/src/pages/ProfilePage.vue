@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import BaseCard from "@/components/BaseCard.vue";
 import { createPack, fetchPack } from "@/api/endpoints";
@@ -69,6 +69,21 @@ const tabs = [
   { key: "growth", label: "成长报告", icon: "📈" },
 ];
 const tab = ref("stories");
+const sessionsLoading = ref(false);
+
+async function syncRemoteSessions() {
+  if (!user.isAuthed || sessionsLoading.value) return;
+  sessionsLoading.value = true;
+  try {
+    await sess.fetchRemoteSessionsAll();
+  } finally {
+    sessionsLoading.value = false;
+  }
+}
+
+watch(tab, (value) => {
+  if (value === "sessions") void syncRemoteSessions();
+});
 
 const assetSubs = [
   { key: "mine",      label: "我的创作" },
@@ -366,6 +381,7 @@ function onRemoveSession(id: string, e: MouseEvent) {
 onMounted(() => {
   if (store.list.length === 0) { void store.loadList().catch(() => {}); }
   void loadPublicAssets();
+  void syncRemoteSessions();
 });
 
 function backHome() { router.push("/"); }
@@ -547,7 +563,7 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
                     {{ new Date(s.started_at).toLocaleDateString() }}
                     {{ new Date(s.started_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) }}
                   </div>
-                  <!-- 进度条：in-progress -->
+                  <div v-if="sessionsLoading" class="text-center py-6 text-xs text-ink-mute">正在同步历史会话…</div>
                   <div v-if="!s.report_ready && !!sess.getSessionState(s.id)" class="mt-1">
                     <div class="h-1.5 bg-paper-deep rounded-full overflow-hidden">
                       <div

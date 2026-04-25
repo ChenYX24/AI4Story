@@ -43,8 +43,11 @@ async function handle(resp: Response) {
     if (resp.status === 401) setAuthToken(null);
     throw new ApiError(resp.status, detail);
   }
+  if (resp.status === 204 || resp.status === 205) return undefined;
   const ct = resp.headers.get("content-type") || "";
-  return ct.includes("application/json") ? resp.json() : resp.text();
+  const text = await resp.text();
+  if (!text) return undefined;
+  return ct.includes("application/json") ? JSON.parse(text) : text;
 }
 
 export async function apiGet<T = unknown>(path: string): Promise<T> {

@@ -4,10 +4,11 @@ from fastapi import APIRouter, Header, HTTPException
 
 from ..asset_resolver import url_for
 from ..db import user_by_token
+from .. import db
 from ..models import CustomStoryCreateRequest, StoriesResponse, StoryCard
 from ..scene_loader import load_story
 from ..services.custom_story_service import submit_custom_story
-from ..story_registry import delete_custom_story_record, list_custom_story_records, story_exists, update_custom_story_record
+from ..story_registry import delete_custom_story_record, list_custom_story_records, story_exists, story_root, update_custom_story_record
 
 router = APIRouter()
 
@@ -111,6 +112,26 @@ def _build_custom_story_cards(user_id: str | None) -> list[StoryCard]:
     ]
 
 
+def _custom_cover_url(record: dict) -> str:
+    story_id = record.get("id") or ""
+    cover = str(record.get("cover_url") or "")
+    if cover and not cover.startswith("/assets/scenes/"):
+        return cover
+    scenes = db.list_scenes(story_id)
+    narrative = next((s for s in scenes if s.get("comic_url")), None)
+    if narrative:
+        return narrative.get("comic_url") or ""
+    root = story_root(story_id)
+    for scene_dir in sorted(root.glob("[0-9][0-9][0-9]")):
+        panel = scene_dir / "comic" / "panel.png"
+        if panel.exists():
+            return url_for(int(scene_dir.name), "comic", story_id=story_id)
+        bg = scene_dir / "background" / "background.png"
+        if bg.exists():
+            return url_for(int(scene_dir.name), "background", story_id=story_id)
+    return "" if cover.startswith("/assets/scenes/") else cover
+
+
 def _custom_record_to_card(record: dict) -> StoryCard:
     status = record.get("status") or "generating"
     available = status == "ready" and story_exists(record.get("id"))
@@ -118,7 +139,7 @@ def _custom_record_to_card(record: dict) -> StoryCard:
         id=record["id"],
         title=record.get("title") or "我的自定义故事",
         summary=record.get("summary") or "",
-        cover_url=record.get("cover_url") or "",
+        cover_url=_custom_cover_url(record),
         scene_count=int(record.get("scene_count") or 0),
         available=available,
         status=status if status in {"ready", "generating", "failed"} else "generating",

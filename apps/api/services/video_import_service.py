@@ -20,12 +20,20 @@ _FUTURES: dict[str, Future] = {}
 
 MAX_DURATION_SECONDS = int(os.getenv("MINDSHOW_VIDEO_MAX_SECONDS", "600"))
 MAX_AUDIO_BYTES = int(os.getenv("MINDSHOW_ASR_MAX_AUDIO_BYTES", str(9 * 1024 * 1024)))
-BILIBILI_COOKIES = os.getenv("MINDSHOW_BILIBILI_COOKIES", "").strip()
+YTDLP_SOCKET_TIMEOUT = int(os.getenv("MINDSHOW_YTDLP_SOCKET_TIMEOUT", "60"))
+YTDLP_RETRIES = int(os.getenv("MINDSHOW_YTDLP_RETRIES", "5"))
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
+_BILIBILI_HEADERS = {
+    "Referer": "https://www.bilibili.com/",
+    "Origin": "https://www.bilibili.com",
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "User-Agent": _BROWSER_UA,
+}
 
 
 def submit_video_story(url: str, title: str = "", owner_user_id: str | None = None) -> dict[str, Any]:
@@ -319,15 +327,43 @@ def _clean_text(text: str) -> str:
 
 
 def _run_yt_dlp(args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-    common = [
-        "--add-header",
-        "Referer:https://www.bilibili.com",
-        "--add-header",
-        f"User-Agent:{_BROWSER_UA}",
+    common: list[str] = [
+        "--socket-timeout",
+        str(YTDLP_SOCKET_TIMEOUT),
+        "--retries",
+        str(YTDLP_RETRIES),
+        "--fragment-retries",
+        str(YTDLP_RETRIES),
+        "--retry-sleep",
+        "linear=2::2",
     ]
-    if BILIBILI_COOKIES:
-        common.extend(["--cookies", BILIBILI_COOKIES])
-    return _run_cmd([sys.executable, "-m", "yt_dlp", *common, *args], timeout=timeout)
+    for key, value in _BILIBILI_HEADERS.items():
+        common.extend(["--add-header", f"{key}:{value}"])
+
+    cookies_file = os.getenv("MINDSHOW_BILIBILI_COOKIES", "").strip()
+    if cookies_file:
+        common.extend(["--cookies", cookies_file])
+
+    browser_cookies = os.getenv("MINDSHOW_BILIBILI_COOKIES_FROM_BROWSER", "").strip()
+    if browser_cookies:
+        common.extend(["--cookies-from-browser", browser_cookies])
+
+    cookie_header = os.getenv("MINDSHOW_BILIBILI_COOKIE", "").strip()
+    if cookie_header:
+        common.extend(["--add-header", f"Cookie:{cookie_header}"])
+
+    try:
+        return _run_cmd([sys.executable, "-m", "yt_dlp", *common, *args], timeout=timeout)
+    except RuntimeError as exc:
+        detail = str(exc)
+        if "HTTP Error 412" in detail and "BiliBili" in detail:
+            raise RuntimeError(
+                "B 站拒绝了视频元数据请求（HTTP 412）。请配置登录后的 B 站 Cookie："
+                "推荐设置 MINDSHOW_BILIBILI_COOKIES=/path/to/cookies.txt，"
+                "或 MINDSHOW_BILIBILI_COOKIES_FROM_BROWSER=chrome/safari/firefox，"
+                "然后重启后端再试。"
+            ) from exc
+        raise
 
 
 def _run_cmd(args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:

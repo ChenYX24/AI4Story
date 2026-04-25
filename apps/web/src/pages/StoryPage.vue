@@ -27,8 +27,6 @@ const tts = useTTSPreload();
 
 const loading = ref(true);
 const scene = ref<Scene | null>(null);
-const flipping = ref<"next" | "prev" | null>(null);
-const flipIn = ref(true);
 const lineCursor = ref(0);
 const inputText = ref("");
 const activeSessionId = ref("");
@@ -44,7 +42,6 @@ const chatLogByScene = ref<Record<string, ChatMsg[]>>({});
 const dynamicNode = ref<InteractResponse | null>(null);
 const pendingDynamicPreview = ref<string | null>(null);
 const pendingDynamicError = ref<string | null>(null);
-const PAGE_FLIP_MS = 720;
 
 async function loadCursor(idx: number) {
   if (idx < 0 || idx >= store.flow.length) return;
@@ -108,15 +105,12 @@ async function loadCursor(idx: number) {
       }
     }
 
-    // 进入动画
-    flipIn.value = false;
-    requestAnimationFrame(() => { flipIn.value = true; });
     // 下一幕预取（scene + 图片）
     prefetchNode(idx + 1);
     if (idx === store.flow.length - 1) {
       sess.completeSession(currentSessionId(), buildCurrentPlayState());
     }
-  } finally { loading.value = false; flipping.value = null; }
+  } finally { loading.value = false; }
 }
 
 async function prefetchNode(idx: number) {
@@ -211,40 +205,21 @@ function isLastInteractiveScene(sceneIdx: number): boolean {
   return !scenes.some((s) => s.type === "interactive" && s.index > sceneIdx);
 }
 
-async function turnPage(direction: "next" | "prev") {
-  if (flipping.value) return;
-  // 在 dynamic narrative 上点 next → 先清 dynamic 再走真正的 flow 推进
-  if (dynamicNode.value && direction === "next") {
-    dynamicNode.value = null;
-    flipping.value = "next";
-    setTimeout(() => {
-      flipping.value = null;
-      void loadCursor(Math.min(store.cursor + 1, store.flow.length - 1));
-    }, PAGE_FLIP_MS);
-    return;
-  }
-  if (dynamicNode.value && direction === "prev") {
-    dynamicNode.value = null;
-    flipping.value = "prev";
-    setTimeout(() => {
-      flipping.value = null;
-      void loadCursor(Math.max(0, store.cursor - 1));
-    }, PAGE_FLIP_MS);
-    return;
-  }
-  const to = store.cursor + (direction === "next" ? 1 : -1);
-  if (to < 0) return;
+async function advanceNode() {
+  const to = store.cursor + 1;
   if (to >= store.flow.length) {
     goReport();
     return;
   }
-  // 顺序推进永远允许；跳转（timeline）才检查 highestUnlocked
   stopAudio();
-  flipping.value = direction;
-  setTimeout(() => {
-    flipping.value = null;
-    void loadCursor(to);
-  }, PAGE_FLIP_MS);
+  await loadCursor(to);
+}
+
+async function retreatNode() {
+  const to = store.cursor - 1;
+  if (to < 0) return;
+  stopAudio();
+  await loadCursor(to);
 }
 
 function stopAudio() { tts.stop(); }
@@ -256,10 +231,10 @@ const activeStoryboard = computed(() =>
 
 async function advanceLine() {
   const sb = activeStoryboard.value;
-  // 讲完所有句子后再点"下一句" → 自动翻页（C3b：v2.1 α）
+  // 讲完所有句子后再点"下一句" → 自动继续
   if (lineCursor.value >= sb.length) {
     if (!isLast.value) {
-      turnPage("next");
+      void advanceNode();
     } else {
       goReport();
     }
@@ -307,16 +282,10 @@ function fillPreset(q: string) {
 
 // ---- 键盘快捷键 ----
 useKeyboardShortcuts([
-  { key: "ArrowRight", handler: () => turnPage("next") },
-  { key: "ArrowLeft",  handler: () => turnPage("prev") },
+  { key: "ArrowRight", handler: () => { void advanceNode(); } },
+  { key: "ArrowLeft",  handler: () => { void retreatNode(); } },
   { key: " ",          handler: () => advanceLine() },
   { key: "Escape",     handler: () => router.push("/library") },
-  ...Array.from({ length: 9 }, (_, i) => ({
-    key: String(i + 1),
-    handler: () => {
-      if (i <= store.highestUnlocked && i < store.flow.length) loadCursor(i);
-    },
-  })),
 ]);
 
 async function sendChat(textOverride?: string) {
@@ -375,13 +344,8 @@ async function onInteractDone(
   });
   // splice 到 flow：已有同源 dynamic 会先被清除
   const insertedAt = store.insertDynamicAfter(store.cursor, sourceSceneIdx);
-  flipping.value = "next";
-  setTimeout(() => {
-    flipping.value = null;
-    toast.push("✨ 你的故事段落已经画好了", "success");
-    // 跳到新插入的 dynamic 幕
-    loadCursor(insertedAt);
-  }, PAGE_FLIP_MS);
+  toast.push("✨ 你的故事段落已经画好了", "success");
+  await loadCursor(insertedAt);
 }
 
 function onInteractGenerate(request: InteractRequest) {
@@ -396,11 +360,7 @@ function onInteractGenerate(request: InteractRequest) {
     startedAt: new Date().toISOString(),
   });
   const insertedAt = store.insertDynamicAfter(store.cursor, sourceSceneIdx);
-  flipping.value = "next";
-  setTimeout(() => {
-    flipping.value = null;
-    void loadCursor(insertedAt);
-  }, PAGE_FLIP_MS);
+  void loadCursor(insertedAt);
 
   void postInteract(request).then((payload) => {
     store.addInteraction({
@@ -442,7 +402,17 @@ const resumePlayState = computed(() => (
 function onResumeContinue() {
   const sid = resumeSessionId.value;
   const ps = sid ? sess.getSessionState(sid) : undefined;
-  if (!ps) { resumeModalOpen.value = false; return; }
+  if (!ps || !Array.isArray(ps.flow) || ps.flow.length === 0) {
+    if (sid) sess.deleteSession(sid);
+    resumeModalOpen.value = false;
+    resumeSessionId.value = "";
+    activeSessionId.value = "";
+    void store.loadStory(props.id).then(() => {
+      activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
+      if (store.flow.length > 0) return loadCursor(0);
+    });
+    return;
+  }
   activeSessionId.value = sid;
   // 恢复 flow / dynamicByScene / interactStore.states
   store.flow = ps.flow.map((f) => ({ ...f }));
@@ -493,7 +463,8 @@ function onResumeCancel() {
 
 onMounted(async () => {
   sess.clearGeneratedNotice(props.id);
-  store.setJumpHandler((idx: number) => { loadCursor(idx); });
+  // 跳页入口已关闭，保留 handler 清理以兼容旧状态。
+  store.setJumpHandler(null);
   try {
     // 先判断有没有"进行中"快照（本地 + 远程）；如果 URL 指定 sid，只看该故事下该会话。
     // 只有真正翻过第 1 页（cursor > 0 且尚未翻到末页）才算"进行中"，避免空状态弹"继续"框。
@@ -608,7 +579,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
     <BaseModal :open="resumeModalOpen" title="继续上次的玩法？" :max-width="'460px'" @close="onResumeCancel">
       <p class="text-sm text-ink-soft m-0 mb-2">
         你之前玩这个故事到
-        <span class="font-semibold text-ink">第 {{ ((resumePlayState?.cursor ?? 0) + 1) }} / {{ resumePlayState?.flow.length ?? 0 }} 页</span>
+        <span class="font-semibold text-ink">第 {{ Math.min((resumePlayState?.cursor ?? 0) + 1, resumePlayState?.flow.length || 1) }} / {{ resumePlayState?.flow.length || 1 }} 页</span>
         ，所有摆放、道具和已生成的段落都保留了。
       </p>
       <p class="text-xs text-ink-mute m-0">选「覆盖」会清空上次进度从头开始。</p>
@@ -653,10 +624,6 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
             v-if="scene"
             :key="store.cursor"
             class="story-book-shell relative bg-gradient-to-br from-white to-paper-deep border border-paper-edge rounded-l-xl rounded-r-[32px] overflow-hidden h-full"
-            :class="[
-              flipping === 'next' && 'story-book-shell--turn-next',
-              flipping === 'prev' && 'story-book-shell--turn-prev',
-            ]"
             :style="{
               boxShadow: 'var(--shadow-book)',
             }"
@@ -669,10 +636,6 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
             <!-- grid 3 行：header(auto) / main(1fr) / footer(auto)；footer 永不被截 -->
             <div
               class="story-page-layout p-4 sm:p-6 grid h-full min-h-0 gap-0"
-              :class="[
-                flipping === 'next' && 'story-page-layout--turn-next',
-                flipping === 'prev' && 'story-page-layout--turn-prev',
-              ]"
               style="grid-template-rows: auto minmax(0,1fr) auto;"
             >
               <div class="flex items-center justify-between mb-3">
@@ -747,13 +710,13 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
               <!-- 底部操作条 —— 永远渲染，保证"完成"按钮在视口底部不被 overflow 截 -->
               <div class="mt-3 flex flex-wrap gap-2 justify-between items-center pt-3 border-t border-dashed border-paper-edge">
                 <div class="flex gap-2 flex-wrap">
-                  <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0 || !!flipping" @click="turnPage('prev')">⬅ 上一页</BaseButton>
+                  <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0" @click="retreatNode">⬅ 上一页</BaseButton>
                   <BaseButton
                     v-if="activeStoryboard.length > 0"
                     variant="ghost"
                     size="sm"
                     pill
-                    :disabled="lineCursor <= 1 || !!flipping"
+                    :disabled="lineCursor <= 1"
                     @click="retreatLine"
                   >◀ 上一句</BaseButton>
                   <BaseButton
@@ -761,7 +724,6 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     variant="ghost"
                     size="sm"
                     pill
-                    :disabled="!!flipping"
                     @click="advanceLine"
                   >🔊 下一句</BaseButton>
                 </div>
@@ -769,15 +731,15 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                   <BaseButton
                     size="sm"
                     pill
-                    :disabled="interactiveOps.length === 0 || interactiveGenerating || !!flipping"
+                    :disabled="interactiveOps.length === 0 || interactiveGenerating"
                     @click="callInteractiveComplete"
                   >
                     {{ interactiveGenerating ? "AI 正在画…" : `✨ 完成 (${interactiveOps.length}) 并生成下一幕` }}
                   </BaseButton>
                 </template>
                 <template v-else>
-                  <BaseButton size="sm" pill :disabled="!!flipping" @click="turnPage('next')">
-                    {{ isLast ? "📊 查看报告" : "翻下一页 ⏭" }}
+                  <BaseButton size="sm" pill @click="advanceNode">
+                    {{ isLast ? "📊 查看报告" : "继续 ⏭" }}
                   </BaseButton>
                 </template>
               </div>
@@ -938,170 +900,10 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
     linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 237, 213, 0.9));
 }
 
-.story-book-shell::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  background:
-    linear-gradient(90deg, rgba(80, 52, 25, 0.28), transparent 18%),
-    radial-gradient(120% 80% at 0% 50%, rgba(90, 58, 28, 0.26), transparent 56%);
-  z-index: 12;
-}
-
-.story-book-shell--turn-next::after,
-.story-book-shell--turn-prev::after {
-  animation: story-shell-shadow 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
-}
-
 .story-page-layout {
   position: relative;
   z-index: 2;
   overflow: hidden;
-  transform-style: preserve-3d;
-  backface-visibility: hidden;
-  will-change: transform, filter;
-}
-
-.story-page-layout::before,
-.story-page-layout::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  z-index: 20;
-}
-
-.story-page-layout::before {
-  background:
-    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.5) 42%, rgba(109, 75, 36, 0.2) 50%, transparent 63%),
-    linear-gradient(90deg, rgba(74, 49, 24, 0.12), transparent 20%, transparent 80%, rgba(74, 49, 24, 0.18));
-  mix-blend-mode: multiply;
-}
-
-.story-page-layout::after {
-  background:
-    linear-gradient(90deg, transparent 0%, rgba(57, 38, 19, 0.34) 48%, rgba(255, 249, 233, 0.7) 55%, transparent 70%);
-  transform: translateX(100%);
-}
-
-.story-page-layout--turn-next {
-  transform-origin: left center;
-  animation: story-page-turn-next 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
-}
-
-.story-page-layout--turn-prev {
-  transform-origin: right center;
-  animation: story-page-turn-prev 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
-}
-
-.story-page-layout--turn-next::before,
-.story-page-layout--turn-prev::before {
-  animation: story-paper-fold 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
-}
-
-.story-page-layout--turn-next::after {
-  animation: story-page-highlight-next 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
-}
-
-.story-page-layout--turn-prev::after {
-  animation: story-page-highlight-prev 720ms cubic-bezier(0.24, 0.7, 0.25, 1) both;
-}
-
-@keyframes story-page-turn-next {
-  0% {
-    transform: translateX(0) rotateY(0deg) skewY(0deg);
-    filter: brightness(1);
-  }
-  34% {
-    transform: translateX(-8px) rotateY(-24deg) skewY(-0.8deg);
-    filter: brightness(0.98);
-  }
-  68% {
-    transform: translateX(-22px) rotateY(-64deg) skewY(-1.2deg);
-    filter: brightness(0.9);
-  }
-  100% {
-    transform: translateX(-36px) rotateY(-92deg) skewY(-1.4deg);
-    filter: brightness(0.82);
-  }
-}
-
-@keyframes story-page-turn-prev {
-  0% {
-    transform: translateX(0) rotateY(0deg) skewY(0deg);
-    filter: brightness(1);
-  }
-  34% {
-    transform: translateX(8px) rotateY(24deg) skewY(0.8deg);
-    filter: brightness(0.98);
-  }
-  68% {
-    transform: translateX(22px) rotateY(64deg) skewY(1.2deg);
-    filter: brightness(0.9);
-  }
-  100% {
-    transform: translateX(36px) rotateY(92deg) skewY(1.4deg);
-    filter: brightness(0.82);
-  }
-}
-
-@keyframes story-paper-fold {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  28% {
-    opacity: 0.35;
-  }
-  58% {
-    opacity: 0.78;
-  }
-  82% {
-    opacity: 0.44;
-  }
-}
-
-@keyframes story-page-highlight-next {
-  0% {
-    opacity: 0;
-    transform: translateX(80%);
-  }
-  42% {
-    opacity: 0.72;
-    transform: translateX(10%);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(-58%);
-  }
-}
-
-@keyframes story-page-highlight-prev {
-  0% {
-    opacity: 0;
-    transform: translateX(-80%) scaleX(-1);
-  }
-  42% {
-    opacity: 0.72;
-    transform: translateX(-10%) scaleX(-1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(58%) scaleX(-1);
-  }
-}
-
-@keyframes story-shell-shadow {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  45% {
-    opacity: 0.62;
-  }
 }
 
 /* P-S5 动态段落 — 极淡金色光晕 + 星点漂浮 */
@@ -1137,16 +939,6 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
           mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
 }
 @media (prefers-reduced-motion: reduce) {
-  .story-book-shell--turn-next::after,
-  .story-book-shell--turn-prev::after,
-  .story-page-layout--turn-next,
-  .story-page-layout--turn-prev,
-  .story-page-layout--turn-next::before,
-  .story-page-layout--turn-prev::before,
-  .story-page-layout--turn-next::after,
-  .story-page-layout--turn-prev::after {
-    animation: none;
-  }
   .narrative-magic::after { animation: none; }
 }
 </style>

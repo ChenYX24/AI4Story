@@ -59,14 +59,21 @@ _TONE_STYLE_MAP = {
 
 
 CHARACTER_VOICE_MAP: dict[str, str] = {
-    "小红帽": "冰糖",      # young female
-    "妈妈": "茉莉",        # adult female
-    "外婆": "茉莉",        # elder female (same voice, softer tone via style)
-    "大灰狼": "白桦",      # adult male
-    "猎人": "苏打",        # adult male
-    "旁白": "冰糖",        # narrator = default
+    "小红帽": "default_zh",
+    "妈妈": "default_zh",
+    "外婆": "default_zh",
+    "大灰狼": "default_zh",
+    "猎人": "default_zh",
+    "旁白": "default_zh",
 }
-DEFAULT_CHARACTER_VOICE = "冰糖"
+DEFAULT_CHARACTER_VOICE = "default_zh"
+_ALLOWED_VOICES = {"mimo_default", "default_zh", "default_en"}
+_LEGACY_VOICE_MAP = {
+    "冰糖": "default_zh",
+    "茉莉": "default_zh",
+    "白桦": "default_zh",
+    "苏打": "default_zh",
+}
 
 
 def _derive_style(tone: str | None) -> str:
@@ -108,6 +115,9 @@ def synthesize_bytes(
         resolved_voice = CHARACTER_VOICE_MAP.get(speaker, DEFAULT_CHARACTER_VOICE)
     if resolved_voice is None:
         resolved_voice = XIAOMI_TTS_VOICE
+    resolved_voice = _LEGACY_VOICE_MAP.get(resolved_voice, resolved_voice)
+    if resolved_voice not in _ALLOWED_VOICES:
+        resolved_voice = DEFAULT_CHARACTER_VOICE
 
     input_text = _build_input(text, tone)
     style_label = _derive_style(tone) or "温柔"

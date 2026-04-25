@@ -134,8 +134,10 @@ export const createSessionApi = (body: { story_id: string; play_state: object })
   apiPost<SessionOut>("/api/sessions", body);
 export const updateSessionApi = (id: string, body: { play_state: object; status?: string }) =>
   apiPut<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, body);
-export const fetchSessionsApi = (storyId: string) =>
-  apiGet<{ sessions: SessionOut[] }>(`/api/sessions?story_id=${encodeURIComponent(storyId)}`);
+export const fetchSessionsApi = (storyId?: string) => {
+  const qs = storyId ? `?story_id=${encodeURIComponent(storyId)}` : "";
+  return apiGet<{ sessions: SessionOut[] }>(`/api/sessions${qs}`);
+};
 export const deleteSessionApi = (id: string) =>
   apiDelete<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`);
 

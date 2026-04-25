@@ -28,7 +28,9 @@ export const useUserStore = defineStore("user", () => {
       user.value = { id: me.id, nickname: me.nickname, created_at: me.created_at };
       const assets = useAssetShelfStore();
       assets.loadScope(me.id);
-      useSessionStore().loadScope(me.id);
+      const sessions = useSessionStore();
+      sessions.loadScope(me.id);
+      void sessions.fetchRemoteSessionsAll();
       void assets.pullFromServer();
     } catch {
       user.value = null;
@@ -46,8 +48,9 @@ export const useUserStore = defineStore("user", () => {
     user.value = { id: r.id, nickname: r.nickname };
     const assets = useAssetShelfStore();
     assets.loadScope(r.id);
-    useSessionStore().loadScope(r.id);
-    await assets.pullFromServer();
+    const sessions = useSessionStore();
+    sessions.loadScope(r.id);
+    await Promise.all([assets.pullFromServer(), sessions.fetchRemoteSessionsAll()]);
   }
 
   async function register(nickname: string, password: string) {
@@ -56,8 +59,9 @@ export const useUserStore = defineStore("user", () => {
     user.value = { id: r.id, nickname: r.nickname };
     const assets = useAssetShelfStore();
     assets.loadScope(r.id);
-    useSessionStore().loadScope(r.id);
-    await assets.pullFromServer();
+    const sessions = useSessionStore();
+    sessions.loadScope(r.id);
+    await Promise.all([assets.pullFromServer(), sessions.fetchRemoteSessionsAll()]);
   }
 
   async function logout() {

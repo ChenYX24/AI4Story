@@ -9,6 +9,7 @@ from ..db import (
     create_session,
     update_session,
     get_sessions_for_story,
+    get_sessions_for_user,
     delete_session,
 )
 
@@ -52,9 +53,10 @@ def api_update(session_id: str, body: UpdateBody, authorization: Optional[str] =
 
 
 @router.get("")
-def api_list(story_id: str, authorization: Optional[str] = Header(None)):
+def api_list(story_id: Optional[str] = None, authorization: Optional[str] = Header(None)):
     u = _require_user(authorization)
-    return {"sessions": get_sessions_for_story(u["id"], story_id)}
+    sessions = get_sessions_for_story(u["id"], story_id) if story_id else get_sessions_for_user(u["id"])
+    return {"sessions": sessions}
 
 
 @router.delete("/{session_id}")

@@ -54,12 +54,6 @@ function thumbUrl(it: TimelineItem): string {
     : `/assets/scenes/${pad}/background/background.png`;
 }
 
-function onJump(i: number) {
-  const unlocked = i <= (story.highestUnlocked ?? 0);
-  if (!unlocked) return;
-  story.requestJump(i);
-}
-
 function onStoreClick() {
   if (route.name === "store") return;
   router.push("/store");
@@ -89,11 +83,10 @@ function onStoreClick() {
         :key="i"
         class="relative shrink-0 w-11 h-8 rounded-md overflow-hidden transition border-2 bg-paper"
         :class="[
-          i === story.cursor ? 'border-accent shadow-sm scale-110' : 'border-transparent opacity-80 hover:opacity-100',
-          i > (story.highestUnlocked ?? 0) ? 'grayscale cursor-not-allowed opacity-40' : 'cursor-pointer',
+          i === story.cursor ? 'border-accent shadow-sm scale-110' : 'border-transparent opacity-70',
+          i > (story.highestUnlocked ?? 0) ? 'grayscale opacity-40' : '',
         ]"
         :title="`${it.type === 'narrative' ? '叙事' : '互动'} · 第 ${it.sceneIdx} 幕${i > (story.highestUnlocked ?? 0) ? ' (未解锁)' : ''}${it.dynamicThumb ? ' · 已玩过' : ''}`"
-        @click="onJump(i)"
       >
         <img
           v-if="thumbUrl(it)"
