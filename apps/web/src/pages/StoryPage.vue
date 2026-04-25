@@ -433,9 +433,16 @@ void onInteractDone;
 
 // E3：进行中 session 恢复弹窗
 const resumeModalOpen = ref(false);
-const resumePlayState = computed(() => (
-  resumeSessionId.value ? sess.getSessionState(resumeSessionId.value) : undefined
-));
+// onMounted 拿到候选时把 candidate.state 缓存到这里。后续 store / playStates 的竞态写入
+// 不会污染弹窗展示，"继续"也用这个 state 做最终回放（如果 sess.getSessionState 还能拿到更新版，
+// 优先用 store 里那份；只在缺失或被竞态清掉时才回退到这里的 override）。
+const resumeStateOverride = ref<any>(null);
+const resumePlayState = computed(() => {
+  const live = resumeSessionId.value ? sess.getSessionState(resumeSessionId.value) : undefined;
+  const liveValid = !!live && Array.isArray(live.flow) && live.flow.length > 1;
+  if (liveValid) return live;
+  return resumeStateOverride.value || live;
+});
 // 恢复弹窗显示的"第 X / Y 页"——X 取当前 cursor 节点对应原故事的 scene_index，
 // Y 取该故事的总场景数（不是 flow.length，因为 flow 还会塞 dynamic 段落）。
 const resumeProgressLabel = computed<string>(() => {
@@ -457,11 +464,13 @@ const resumeProgressLabel = computed<string>(() => {
 
 function onResumeContinue() {
   const sid = resumeSessionId.value;
-  const ps = sid ? sess.getSessionState(sid) : undefined;
+  // 优先用 store 里的实时 state；竞态期间被清掉了就回退到 onMounted 时缓存的候选 state。
+  const ps = (sid ? sess.getSessionState(sid) : undefined) || resumeStateOverride.value;
   if (!ps || !Array.isArray(ps.flow) || ps.flow.length === 0) {
     if (sid) sess.deleteSession(sid);
     resumeModalOpen.value = false;
     resumeSessionId.value = "";
+    resumeStateOverride.value = null;
     activeSessionId.value = "";
     void store.loadStory(props.id).then(() => {
       activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
@@ -493,6 +502,7 @@ function onResumeContinue() {
     chatLogByScene.value = { ...ps.chatLogByScene };
   }
   resumeModalOpen.value = false;
+  resumeStateOverride.value = null;
   toast.push("已恢复上次进度", "success");
   loadCursor(ps.cursor);
 }
@@ -504,6 +514,7 @@ function onResumeOverwrite() {
   }
   activeSessionId.value = "";
   resumeSessionId.value = "";
+  resumeStateOverride.value = null;
   store.reset();
   resumeModalOpen.value = false;
   (async () => {
@@ -514,6 +525,7 @@ function onResumeOverwrite() {
 }
 function onResumeCancel() {
   resumeModalOpen.value = false;
+  resumeStateOverride.value = null;
   router.push("/library");
 }
 
@@ -550,23 +562,19 @@ onMounted(async () => {
       if (remote && hasRealProgress(remote.state)) candidate = remote;
     }
     if (candidate && hasRealProgress(candidate.state)) {
+      // 提前把 activeSessionId 锁到候选会话上：否则 await store.loadStory 后会触发自动快照
+      // watch → currentSessionId() → sess.start() → pruneOpenSessionsForStory()，
+      // 把候选会话从 list / playStates 里抠掉，导致"应该弹框却没弹 / 弹出来空状态"。
+      activeSessionId.value = candidate.sessionId;
+      // 同时把候选 state 缓存下来，弹窗显示页码不再依赖 getSessionState，避免因为竞态读到 stub。
+      resumeStateOverride.value = candidate.state;
       await store.loadStory(props.id);
       if (store.flow.length === 0) {
         toast.push("这个故事暂未准备好", "error");
         router.push("/library");
         return;
       }
-      // 二次校验：candidate.state 当时是合法的，但等到这里再读 store 里取到的 state 可能因为
-      // 异步写入或同步早被覆盖 → 如果 getSessionState 取不出有效 flow，直接走"静默新建"。
-      const verified = sess.getSessionState(candidate.sessionId);
-      if (!verified || !Array.isArray(verified.flow) || verified.flow.length <= 1 || (verified.cursor ?? 0) <= 0) {
-        sess.deleteSession(candidate.sessionId);
-        activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
-        await loadCursor(0);
-        return;
-      }
-      // 找到未完成会话 → 弹"继续上次的玩法"框。在这里不要 sess.start()，
-      // 也不要触发 pruneOpenSessionsForStory，否则后续"继续"就拿不到原会话了。
+      // 找到未完成会话 → 弹"继续上次的玩法"框。
       resumeSessionId.value = candidate.sessionId;
       resumeModalOpen.value = true;
       return;
