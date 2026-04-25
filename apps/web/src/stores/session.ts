@@ -140,7 +140,11 @@ export const useSessionStore = defineStore("session", () => {
 
   function getSessionState(sessionId?: string | null): SessionPlayState | undefined {
     if (!sessionId) return undefined;
-    return playStates.value?.[sessionId] || list.value.find((s) => s.id === sessionId)?.play_state;
+    const live = playStates.value?.[sessionId];
+    if (hasValidFlow(live)) return live;
+    const recorded = list.value.find((s) => s.id === sessionId)?.play_state;
+    if (hasValidFlow(recorded)) return recorded;
+    return live || recorded;
   }
 
   function isOpenState(ps?: SessionPlayState): ps is SessionPlayState {
@@ -433,7 +437,7 @@ export const useSessionStore = defineStore("session", () => {
     record.story_title = state?.story_title || record.story_title || storyId;
     record.started_at = record.started_at || started;
     record.finished_at = remote.status === "finished" ? (record.finished_at || started) : record.finished_at;
-    Object.assign(record, snapshot);
+    if (state) Object.assign(record, snapshot);
     if (state && isOpenState(state) && remote.status === "playing") {
       backendIds.value = { ...backendIds.value, [sessionId]: remote.id };
       playStates.value = { ...playStates.value, [sessionId]: state };

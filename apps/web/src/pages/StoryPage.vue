@@ -472,14 +472,20 @@ onMounted(async () => {
       && ps.flow.length > 1 && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
     const requestedSid = typeof route.query.sid === "string" ? route.query.sid : "";
     const requestedState = requestedSid ? sess.getSessionState(requestedSid) : undefined;
-    let candidate = requestedState?.story_id === props.id && hasRealProgress(requestedState)
-      ? { sessionId: requestedSid, state: requestedState }
-      : sess.getInProgressForStory(props.id);
+    let candidate: { sessionId: string; state: any } | null =
+      requestedState?.story_id === props.id && hasRealProgress(requestedState)
+        ? { sessionId: requestedSid, state: requestedState }
+        : sess.getInProgressForStory(props.id);
+    // localStorage 里残留的 record 可能没有 flow（远端只回了 stub）→ 直接清掉，从头开始。
+    if (requestedSid && !candidate) {
+      const stub = sess.getById(requestedSid);
+      if (stub) sess.deleteSession(requestedSid);
+    }
     if (!candidate) {
       const remote = await sess.fetchRemoteSession(props.id);
       if (remote && hasRealProgress(remote.state)) candidate = remote;
     }
-    if (candidate) {
+    if (candidate && hasRealProgress(candidate.state)) {
       await store.loadStory(props.id);
       if (store.flow.length === 0) {
         toast.push("这个故事暂未准备好", "error");
