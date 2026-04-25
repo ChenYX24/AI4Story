@@ -34,9 +34,20 @@ class UpdateBody(BaseModel):
     status: Optional[str] = None
 
 
+def _is_valid_play_state(payload: object) -> bool:
+    """A real ‘playing’ session must carry a flow with >=2 nodes — otherwise the
+    resume modal renders garbage like 第 1 / 1 页."""
+    if not isinstance(payload, dict):
+        return False
+    flow = payload.get("flow")
+    return isinstance(flow, list) and len(flow) > 1
+
+
 @router.post("")
 def api_create(body: CreateBody, authorization: Optional[str] = Header(None)):
     u = _require_user(authorization)
+    if not _is_valid_play_state(body.play_state):
+        raise HTTPException(status_code=422, detail="play_state.flow must contain at least 2 nodes")
     s = create_session(u["id"], body.story_id, json.dumps(body.play_state, ensure_ascii=False))
     return s
 
@@ -44,6 +55,8 @@ def api_create(body: CreateBody, authorization: Optional[str] = Header(None)):
 @router.put("/{session_id}")
 def api_update(session_id: str, body: UpdateBody, authorization: Optional[str] = Header(None)):
     u = _require_user(authorization)
+    if body.status not in {"finished"} and not _is_valid_play_state(body.play_state):
+        raise HTTPException(status_code=422, detail="play_state.flow must contain at least 2 nodes")
     ok = update_session(session_id, u["id"],
                         json.dumps(body.play_state, ensure_ascii=False),
                         body.status)

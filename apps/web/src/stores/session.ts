@@ -300,7 +300,7 @@ export const useSessionStore = defineStore("session", () => {
     // 跳过持久化 + 不进历史会话列表，避免：
     //   (a) 下次重新进入这个故事时弹"继续上次的玩法？"
     //   (b) 历史会话里堆一堆 0 进度的空记录
-    if (!hasValidFlow(state) || state.cursor === 0) return;
+    if (!hasValidFlow(state) || state.cursor === 0 || state.cursor >= state.flow.length) return;
     let record = list.value.find((s) => s.id === state.session_id && s.story_id === state.story_id);
     if (!record) {
       // 用户翻过第一页 → 把先前 start() 占位的会话真正写入 list。
@@ -437,10 +437,17 @@ export const useSessionStore = defineStore("session", () => {
     record.story_title = state?.story_title || record.story_title || storyId;
     record.started_at = record.started_at || started;
     record.finished_at = remote.status === "finished" ? (record.finished_at || started) : record.finished_at;
-    if (state) Object.assign(record, snapshot);
+    // 只有新 state 有更完整的 flow 时才覆盖现有快照，避免后端的旧 stub 把好记录砍成 1/1。
+    const existingFlow = (record.play_state?.flow?.length || 0) as number;
+    const incomingFlow = (state?.flow?.length || 0) as number;
+    if (state && incomingFlow >= existingFlow) Object.assign(record, snapshot);
     if (state && isOpenState(state) && remote.status === "playing") {
       backendIds.value = { ...backendIds.value, [sessionId]: remote.id };
-      playStates.value = { ...playStates.value, [sessionId]: state };
+      const existingLive = playStates.value?.[sessionId];
+      const liveFlow = (existingLive?.flow?.length || 0) as number;
+      if (incomingFlow >= liveFlow) {
+        playStates.value = { ...playStates.value, [sessionId]: state };
+      }
     }
     if (!existing) list.value.unshift(record);
     return { sessionId, state };
