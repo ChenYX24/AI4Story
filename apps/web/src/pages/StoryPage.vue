@@ -46,6 +46,7 @@ const pendingDynamicError = ref<string | null>(null);
 async function loadCursor(idx: number) {
   if (idx < 0 || idx >= store.flow.length) return;
   loading.value = true;
+  comicView.value = 'custom';
   try {
     const node = store.flow[idx];
     store.cursor = idx;
@@ -225,10 +226,38 @@ async function retreatNode() {
 
 function stopAudio() { tts.stop(); }
 
-// 当前幕的 storyboard —— dynamic 优先（也需要逐句播放）
-const activeStoryboard = computed(() =>
-  dynamicNode.value?.storyboard || scene.value?.storyboard || [],
-);
+// dynamic 幕底部"切换看原故事 / 看新段落"开关；每次 cursor 切换时复位为 'custom'
+const comicView = ref<'custom' | 'original'>('custom');
+
+// 当前幕的 storyboard —— dynamic 优先（也需要逐句播放）；comicView='original' 时回退到源场景的旁白
+const activeStoryboard = computed(() => {
+  if (dynamicNode.value && comicView.value === 'original') {
+    return scene.value?.storyboard || [];
+  }
+  return dynamicNode.value?.storyboard || scene.value?.storyboard || [];
+});
+
+function preloadActiveStoryboard() {
+  const sb = activeStoryboard.value;
+  if (sb.length) {
+    tts.preload(sb.map((l) => ({
+      text: l.text,
+      speaker: l.speaker,
+      tone: l.tone,
+      story_id: props.id,
+      speaker_gender: l.speaker_gender,
+    })));
+  } else {
+    tts.stop();
+  }
+}
+
+function toggleComicView() {
+  comicView.value = comicView.value === 'custom' ? 'original' : 'custom';
+  lineCursor.value = 0;
+  tts.stop();
+  preloadActiveStoryboard();
+}
 
 async function advanceLine() {
   const sb = activeStoryboard.value;
@@ -670,33 +699,39 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                 <template v-if="dynamicNode">
                   <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper narrative-magic">
                     <img
-                      :src="dynamicNode.comic_url"
+                      :src="comicView === 'original' ? (scene?.comic_url || dynamicNode.comic_url) : dynamicNode.comic_url"
                       class="absolute inset-0 w-full h-full object-contain z-10"
-                      alt="新段落"
+                      :alt="comicView === 'original' ? '原故事场景' : '新段落'"
                     />
                   </div>
                   <div class="mt-2 px-3 py-2 bg-gold/10 rounded-lg text-sm text-ink-soft border border-gold/30 shrink-0">
-                    ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
+                    <template v-if="comicView === 'custom'">
+                      ✨ 这是你创造的新段落 — <span class="font-medium">{{ dynamicNode.summary }}</span>
+                    </template>
+                    <template v-else>
+                      📖 原故事场景 — <span class="font-medium">{{ scene?.summary || scene?.narration || '原故事的发展过程' }}</span>
+                    </template>
                   </div>
                 </template>
 
                 <!-- 叙事 -->
                 <template v-else-if="isPendingDynamic">
+                  <!-- 顶部提示条：与"第 XX 页 · 互动" header 视觉同层，紧贴主图上方，不再覆盖图片 -->
+                  <div class="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/95 border border-gold/40 shadow-[var(--shadow-card)] shrink-0 self-start">
+                    <div class="w-4 h-4 border-2 border-gold-mute border-t-accent rounded-full animate-spin"></div>
+                    <div class="text-sm font-semibold text-ink whitespace-nowrap">AI 正在生成新场景…</div>
+                    <div class="text-xs text-ink-soft truncate">
+                      {{ pendingDynamicError ? `生成失败：${pendingDynamicError}` : "你可以继续翻页，生成会在后台继续。" }}
+                    </div>
+                  </div>
                   <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper">
                     <img
                       v-if="pendingDynamicPreview"
                       :src="pendingDynamicPreview"
                       class="absolute inset-0 w-full h-full object-contain"
-                      alt="Generating scene preview"
+                      alt="原故事四格预览"
                     />
                     <div v-else class="absolute inset-0 bg-gradient-to-br from-paper-deep to-gold-mute"></div>
-                    <div class="absolute inset-x-0 bottom-4 mx-auto w-fit max-w-[86%] rounded-2xl bg-white/90 border border-gold/40 px-4 py-3 shadow-[var(--shadow-card)] text-center">
-                      <div class="mx-auto mb-2 w-8 h-8 rounded-full border-[3px] border-gold-mute border-t-accent animate-spin"></div>
-                      <div class="text-sm font-semibold text-ink">AI is generating your new scene</div>
-                      <div class="text-xs text-ink-soft mt-1">
-                        {{ pendingDynamicError ? `Generate failed: ${pendingDynamicError}` : "You can switch pages; generation will keep running in the background." }}
-                      </div>
-                    </div>
                   </div>
                 </template>
 
@@ -727,11 +762,11 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
               </div>
 
               <!-- 底部操作条 —— 永远渲染，保证"完成"按钮在视口底部不被 overflow 截 -->
-              <div class="mt-3 flex flex-wrap gap-2 justify-between items-center pt-3 border-t border-dashed border-paper-edge">
+              <div class="mt-3 flex flex-wrap gap-2 items-center pt-3 border-t border-dashed border-paper-edge">
                 <div class="flex gap-2 flex-wrap">
                   <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0" @click="retreatNode">⬅ 上一页</BaseButton>
                   <BaseButton
-                    v-if="activeStoryboard.length > 0"
+                    v-if="activeStoryboard.length > 0 && (node?.type === 'narrative' || node?.type === 'dynamic')"
                     variant="ghost"
                     size="sm"
                     pill
@@ -739,12 +774,24 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     @click="retreatLine"
                   >◀ 上一句</BaseButton>
                   <BaseButton
-                    v-if="activeStoryboard.length > 0"
+                    v-if="activeStoryboard.length > 0 && (node?.type === 'narrative' || node?.type === 'dynamic')"
                     variant="ghost"
                     size="sm"
                     pill
                     @click="advanceLine"
                   >🔊 下一句</BaseButton>
+                </div>
+                <!-- 中间：原故事 / 自定义 四格漫画切换 —— 仅在 dynamic 段落 ready 后出现 -->
+                <div class="flex-1 flex justify-center">
+                  <BaseButton
+                    v-if="dynamicNode"
+                    variant="soft"
+                    size="sm"
+                    pill
+                    @click="toggleComicView"
+                  >
+                    {{ comicView === 'custom' ? '📖 看原故事四格' : '✨ 看新段落四格' }}
+                  </BaseButton>
                 </div>
                 <template v-if="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic">
                   <BaseButton
@@ -813,9 +860,10 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
           </div>
         </BaseCard>
 
-        <!-- 旁白流（narrative / dynamic 都用同一套逐句展开） -->
+        <!-- 旁白流（narrative / dynamic / pending-dynamic 都用同一套逐句展开；
+             pending 时由 activeStoryboard 自动 fallback 到源场景的 storyboard，展示原故事旁白） -->
         <BaseCard
-          v-if="activeStoryboard.length > 0 && (node?.type === 'narrative' || dynamicNode)"
+          v-if="activeStoryboard.length > 0 && (node?.type === 'narrative' || node?.type === 'dynamic')"
           class="p-5"
         >
           <div class="text-sm font-semibold mb-3 flex items-center gap-2">
