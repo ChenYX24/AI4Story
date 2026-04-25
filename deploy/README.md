@@ -51,7 +51,7 @@ journalctl -u ai4story -f
 
 # 后端单跑（调试）
 cd /root/hackthron/AI4Story
-source /root/miniconda3/etc/profile.d/conda.sh && conda activate ai4story
+source .venv/bin/activate
 set -a; . ./.env; set +a
 python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
 

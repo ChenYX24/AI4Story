@@ -41,17 +41,19 @@ pkill -f "uvicorn apps.api.main:app" || true
 pkill -f "ai4story" || true
 sleep 1
 
-echo "==> Step 3: conda env + pip deps"
-if ! command -v conda >/dev/null; then
-    echo "[ERR] conda not found. Install miniconda first."
-    exit 1
+echo "==> Step 3: venv + pip deps"
+VENV_DIR="$REPO_ROOT/.venv"
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    PYBIN="$(command -v python3.13 || command -v python3.12 || command -v python3)"
+    if [[ -z "$PYBIN" ]]; then
+        echo "[ERR] python3 not found. Install python3 first."
+        exit 1
+    fi
+    "$PYBIN" -m venv "$VENV_DIR"
 fi
 # shellcheck disable=SC1091
-source /root/miniconda3/etc/profile.d/conda.sh
-if ! conda env list | grep -q "^ai4story "; then
-    conda create -n ai4story python=3.13 -y
-fi
-conda activate ai4story
+source "$VENV_DIR/bin/activate"
+pip install --upgrade pip wheel >/dev/null
 pip install -r requirements.txt
 pip install oss2  # 兜底：requirements 应该已经带了
 
