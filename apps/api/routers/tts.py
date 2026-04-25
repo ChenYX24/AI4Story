@@ -16,11 +16,14 @@ def tts(
     voice: str | None = Query(default=None),
     tone: str | None = Query(default=None),
     speaker: str | None = Query(default=None),
+    story_id: str | None = Query(default=None),
 ) -> Response:
     if not text.strip():
         raise HTTPException(status_code=400, detail="empty text")
     try:
-        audio = synthesize_bytes(text=text, voice=voice, tone=tone, speaker=speaker)
+        audio = synthesize_bytes(
+            text=text, voice=voice, tone=tone, speaker=speaker, story_id=story_id,
+        )
     except TTSError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return Response(
@@ -39,7 +42,7 @@ def tts_batch(req: TTSBatchRequest):
 
     raw_items = [item.model_dump() for item in req.items]
     try:
-        audio_list = synthesize_batch(raw_items)
+        audio_list = synthesize_batch(raw_items, story_id=req.story_id)
     except TTSError as e:
         raise HTTPException(status_code=502, detail=str(e))
 

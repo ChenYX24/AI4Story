@@ -12,6 +12,7 @@ export interface LineSpec {
   text: string;
   speaker?: string;
   tone?: string;
+  story_id?: string;
 }
 
 let currentCtrl: TTSControl | null = null;
@@ -20,6 +21,7 @@ function buildUrl(line: LineSpec): string {
   const q = new URLSearchParams({ text: line.text });
   if (line.speaker) q.set("speaker", line.speaker);
   if (line.tone) q.set("tone", line.tone);
+  if (line.story_id) q.set("story_id", line.story_id);
   return `/api/tts?${q.toString()}`;
 }
 

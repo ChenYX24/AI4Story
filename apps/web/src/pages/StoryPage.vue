@@ -81,7 +81,7 @@ async function loadCursor(idx: number) {
         interactiveOps.value = [];
         store.trackComic(dyn.payload.comic_url);
         if (dyn.payload.storyboard?.length) {
-          tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+          tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id })));
         } else {
           tts.stop();
         }
@@ -99,7 +99,7 @@ async function loadCursor(idx: number) {
         : undefined;
       interactiveOps.value = savedInteract?.ops?.map((o) => ({ ...o })) || [];
       if (sc.type === "narrative" && sc.storyboard?.length) {
-        tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
+        tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id })));
       } else {
         tts.stop();
       }
@@ -304,7 +304,7 @@ async function sendChat(textOverride?: string) {
     chatLog.value.push({ role: "assistant", text: r.reply });
     // 朗读 reply
     tts.stop();
-    tts.playOne({ text: r.reply, tone: "温柔" });
+    tts.playOne({ text: r.reply, tone: "温柔", story_id: props.id });
   } catch (e: any) {
     toast.push(`聊天失败：${e.message}`, "error");
   } finally {

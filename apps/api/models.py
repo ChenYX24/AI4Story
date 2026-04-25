@@ -100,10 +100,13 @@ class TTSItem(BaseModel):
     voice: str | None = None
     tone: str | None = None
     speaker: str | None = None
+    # 可选：用于服务端按 (story_id, speaker) 稳定分配音色，避免同一故事内不同角色撞声。
+    story_id: str | None = None
 
 
 class TTSBatchRequest(BaseModel):
     items: list[TTSItem]
+    story_id: str | None = None
 
 
 class TTSBatchResponseItem(BaseModel):

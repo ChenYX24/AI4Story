@@ -1,5 +1,8 @@
 import base64
+import hashlib
 import re
+import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -58,17 +61,7 @@ _TONE_STYLE_MAP = {
 }
 
 
-CHARACTER_VOICE_MAP: dict[str, str] = {
-    "小红帽": "mimo_default",
-    "妈妈": "mimo_default",
-    "外婆": "mimo_default",
-    "大灰狼": "mimo_default",
-    "猎人": "mimo_default",
-    "旁白": "mimo_default",
-}
-DEFAULT_CHARACTER_VOICE = "mimo_default"
 # Xiaomi MiMo TTS 实际接受的 voice 名（来自上游报错信息）。
-# 我们之前误把 default_zh / default_en 当作合法名字，结果 Xiaomi 直接 400。
 _ALLOWED_VOICES = {
     "mimo_default",
     "冰糖", "茉莉", "苏打", "白桦",
@@ -79,6 +72,89 @@ _LEGACY_VOICE_MAP = {
     "default_zh": "mimo_default",
     "default_en": "mimo_default",
 }
+
+# 旁白固定使用一个偏中性的音色，所有故事共用，一眼能识别"这是叙述"。
+_NARRATOR_VOICE = "mimo_default"
+_NARRATOR_ALIASES = {
+    "旁白", "叙述", "叙述者", "讲述", "讲述者", "解说",
+    "narrator", "narration",
+}
+
+# 角色音色池：旁白单独占用 mimo_default，其余角色按名字哈希分配，
+# 中文名走中文池，英文/拉丁名走英文池，从而：
+#   - 同一角色名永远拿到同一个音色（跨请求/跨故事）
+#   - 同一个故事里不同角色尽量落在不同音色上（5/4 个槽位足够大多数儿童绘本）
+#   - 不依赖任何故事/角色硬编码
+_ZH_CHARACTER_VOICES: list[str] = ["冰糖", "茉莉", "苏打", "白桦"]
+_EN_CHARACTER_VOICES: list[str] = ["Mia", "Chloe", "Milo", "Dean"]
+
+DEFAULT_CHARACTER_VOICE = _NARRATOR_VOICE
+
+
+def _is_narrator(name: str) -> bool:
+    s = (name or "").strip()
+    if not s:
+        return True
+    return s in _NARRATOR_ALIASES or s.lower() in _NARRATOR_ALIASES
+
+
+def _has_chinese(name: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in name)
+
+
+# 进程内的"故事-说话人 -> voice"分配缓存。同一 story_id 下，新出现的说话人
+# 优先选当前用得最少的音色，从而让一个故事里的不同角色尽量分到不同声音；
+# 旧说话人复用已分配的音色，保证同一段对话音色稳定。
+_VOICE_CACHE_LOCK = threading.Lock()
+_VOICE_CACHE: dict[tuple[str, str], str] = {}
+_VOICE_USAGE: dict[str, Counter] = {}
+
+
+def voice_for_speaker(speaker: str | None, story_id: str | None = None) -> str:
+    """speaker -> voice，按 (story_id, speaker) 稳定分配。
+
+    - 旁白类名字固定 _NARRATOR_VOICE。
+    - 其余名字按"当前 story 用得最少的音色"分配；并列时用 md5 哈希决定，
+      保证同一 (story_id, speaker) 永远落到同一个音色。
+    - 没有 story_id 时退化为全局共享缓存（key 用 "_default"）。
+    """
+    s = (speaker or "").strip()
+    if _is_narrator(s):
+        return _NARRATOR_VOICE
+    pool = _EN_CHARACTER_VOICES if not _has_chinese(s) else _ZH_CHARACTER_VOICES
+    sid = (story_id or "").strip() or "_default"
+    key = (sid, s)
+    with _VOICE_CACHE_LOCK:
+        cached = _VOICE_CACHE.get(key)
+        if cached and cached in pool:
+            return cached
+        usage = _VOICE_USAGE.setdefault(sid, Counter())
+        digest = hashlib.md5(f"{sid}|{s}".encode("utf-8")).digest()
+        seed = int.from_bytes(digest[:4], "big")
+        # 排序键：(当前使用次数, 哈希派生的稳定 tie-breaker)，
+        # 这样并列时同一 (story_id, speaker) 永远拿到相同结果。
+        ranked = sorted(
+            range(len(pool)),
+            key=lambda i: (usage[pool[i]], (seed + i) % len(pool)),
+        )
+        chosen = pool[ranked[0]]
+        _VOICE_CACHE[key] = chosen
+        usage[chosen] += 1
+        return chosen
+
+
+def reset_voice_cache(story_id: str | None = None) -> None:
+    """测试 / 维护用：清空整张缓存或某个故事的缓存。"""
+    with _VOICE_CACHE_LOCK:
+        if story_id is None:
+            _VOICE_CACHE.clear()
+            _VOICE_USAGE.clear()
+            return
+        sid = (story_id or "").strip() or "_default"
+        _VOICE_USAGE.pop(sid, None)
+        for k in list(_VOICE_CACHE.keys()):
+            if k[0] == sid:
+                _VOICE_CACHE.pop(k, None)
 
 
 def _derive_style(tone: str | None) -> str:
@@ -108,21 +184,22 @@ def synthesize_bytes(
     voice: str | None = None,
     tone: str | None = None,
     speaker: str | None = None,
+    story_id: str | None = None,
 ) -> bytes:
     if not XIAOMI_TTS_API_KEY:
         raise TTSError("XIAOMI_TTS_API_KEY not set")
     if not text or not text.strip():
         raise TTSError("empty text")
 
-    # Resolve voice: explicit > character map > config default
-    resolved_voice = voice
-    if resolved_voice is None and speaker:
-        resolved_voice = CHARACTER_VOICE_MAP.get(speaker, DEFAULT_CHARACTER_VOICE)
+    # Resolve voice: 显式 voice 优先 -> 按 (story_id, speaker) 分配 -> 配置默认
+    resolved_voice = (voice or "").strip() or None
     if resolved_voice is None:
-        resolved_voice = XIAOMI_TTS_VOICE
+        resolved_voice = voice_for_speaker(speaker, story_id=story_id)
     resolved_voice = _LEGACY_VOICE_MAP.get(resolved_voice, resolved_voice)
     if resolved_voice not in _ALLOWED_VOICES:
-        resolved_voice = DEFAULT_CHARACTER_VOICE
+        # 配置层默认（XIAOMI_TTS_VOICE）也走一次合法化，如果还非法就回落 narrator
+        candidate = _LEGACY_VOICE_MAP.get(XIAOMI_TTS_VOICE, XIAOMI_TTS_VOICE)
+        resolved_voice = candidate if candidate in _ALLOWED_VOICES else _NARRATOR_VOICE
 
     input_text = _build_input(text, tone)
     style_label = _derive_style(tone) or "温柔"
@@ -165,18 +242,31 @@ def synthesize_bytes(
     return base64.b64decode(audio_b64)
 
 
-def synthesize_batch(items: list[dict]) -> list[bytes]:
+def synthesize_batch(items: list[dict], story_id: str | None = None) -> list[bytes]:
     """Synthesize multiple TTS items in parallel.
 
-    items: [{"text": str, "voice": str|None, "tone": str|None, "speaker": str|None}]
+    items: [{"text": str, "voice": str|None, "tone": str|None, "speaker": str|None, "story_id": str|None}]
     Returns a list of audio bytes in the same order as input items.
+
+    在并发触发前，先把所有未指定 voice 的 (story_id, speaker) 串行预分配一遍，
+    避免多线程同时撞同一把锁、又或并列时拿到不同 voice。
     """
+    # 预分配：同一批次里同一 (story_id, speaker) 命中同一 voice，且让每个 story
+    # 内的不同 speaker 走 least-used 分配。
+    for item in items:
+        if item.get("voice"):
+            continue
+        sp = item.get("speaker")
+        sid = item.get("story_id") or story_id
+        voice_for_speaker(sp, story_id=sid)
+
     def _do(item: dict) -> bytes:
         return synthesize_bytes(
             text=item.get("text", ""),
             voice=item.get("voice"),
             tone=item.get("tone"),
             speaker=item.get("speaker"),
+            story_id=item.get("story_id") or story_id,
         )
 
     with ThreadPoolExecutor(max_workers=4) as pool:
