@@ -103,6 +103,6 @@ systemctl is-active nginx >/dev/null && echo "  ✓ nginx is running" || echo " 
 
 echo
 echo "Done."
-echo "前端：  http://115.190.116.57/"
-echo "后端：  http://115.190.116.57/api/"
+echo "前端：  http://115.190.116.57:8818/"
+echo "后端：  http://115.190.116.57:8818/api/"
 echo "日志：  journalctl -u ai4story -f"
