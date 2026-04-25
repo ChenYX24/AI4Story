@@ -73,6 +73,9 @@ export const useSessionStore = defineStore("session", () => {
   const reportPromises = new Map<string, Promise<any>>();
   // 待写入 list 的"占位"会话 — 用户没翻过第一页就不会真的写进历史。
   const pendingStarts = new Map<string, { story_id: string; story_title: string; started_at: string }>();
+  // 显式删除过的 session id（local + backend），防止后端 DELETE 失败 / 同步延迟时 fetchRemoteSession
+  // 把幽灵会话拉回来又触发"继续上次的玩法"弹窗。loadScope 时从 localStorage 读，反应式持久化。
+  const deletedIds = ref<string[]>([]);
 
   const key = (name: string) => `mindshow_${scope.value}_${name}`;
 
@@ -95,6 +98,7 @@ export const useSessionStore = defineStore("session", () => {
       Object.entries(rawStates).filter(([sid, state]) => state?.session_id === sid && hasValidFlow(state)),
     );
     generatedNotices.value = readJson<Record<string, boolean>>(key("generated_notices"), {});
+    deletedIds.value = readJson<string[]>(key("deleted_ids"), []);
     normalizeOpenSessions();
   }
 
@@ -102,10 +106,28 @@ export const useSessionStore = defineStore("session", () => {
     localStorage.setItem(key("sessions"), JSON.stringify(list.value));
     localStorage.setItem(key("play_states"), JSON.stringify(playStates.value));
     localStorage.setItem(key("generated_notices"), JSON.stringify(generatedNotices.value));
+    // 同步 tombstone（被显式删除的 session id）。容量小，无需独立防抖。
+    localStorage.setItem(key("deleted_ids"), JSON.stringify(deletedIds.value));
   }
 
   loadScope(null);
-  watch([list, playStates, generatedNotices], persistScope, { deep: true });
+  watch([list, playStates, generatedNotices, deletedIds], persistScope, { deep: true });
+
+  function isDeletedId(...ids: (string | undefined | null)[]): boolean {
+    if (!deletedIds.value.length) return false;
+    const set = new Set(deletedIds.value);
+    return ids.some((id) => !!id && set.has(id));
+  }
+
+  function rememberDeletion(...ids: (string | undefined | null)[]) {
+    const merged = new Set(deletedIds.value);
+    for (const id of ids) {
+      if (id) merged.add(id);
+    }
+    if (merged.size === deletedIds.value.length) return;
+    // 控制大小：保留最近 200 个就够了，避免无限膨胀。
+    deletedIds.value = Array.from(merged).slice(-200);
+  }
 
   function start(story_id: string, story_title: string): string {
     pruneOpenSessionsForStory(story_id);
@@ -276,6 +298,8 @@ export const useSessionStore = defineStore("session", () => {
     reportPromises.delete(sessionId);
     pendingStarts.delete(sessionId);
     list.value = list.value.filter((s) => s.id !== sessionId);
+    // 把本地 + 后端 id 一并打上 tombstone，防止远端尚未清理时 fetchRemoteSession 重新拉回这条会话
+    rememberDeletion(sessionId, bid);
     return record;
   }
 
@@ -426,6 +450,12 @@ export const useSessionStore = defineStore("session", () => {
     const hasFlow = hasValidFlow(ps);
     if (!hasFlow && remote.status !== "finished") return null;
     const sessionId = String((hasFlow && ps?.session_id) || remote.id);
+    // 用户在 Profile 里显式删过的会话，即便后端 DELETE 没成功 / 还没同步，也别拉回来。
+    if (isDeletedId(sessionId, remote.id)) {
+      // 顺手再发一次远端 DELETE，逐步清理后端残留。
+      if (remote.id && getAuthToken()) deleteSessionApi(remote.id).catch(() => {});
+      return null;
+    }
     const state = hasFlow ? { ...ps, session_id: sessionId, story_id: storyId } : undefined;
     const started = state?.updatedAt || (remote.created_at ? new Date(remote.created_at * 1000).toISOString() : new Date().toISOString());
     const existing = list.value.find((s) => s.id === sessionId || s.backend_session_id === remote.id);

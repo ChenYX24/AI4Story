@@ -436,6 +436,25 @@ const resumeModalOpen = ref(false);
 const resumePlayState = computed(() => (
   resumeSessionId.value ? sess.getSessionState(resumeSessionId.value) : undefined
 ));
+// 恢复弹窗显示的"第 X / Y 页"——X 取当前 cursor 节点对应原故事的 scene_index，
+// Y 取该故事的总场景数（不是 flow.length，因为 flow 还会塞 dynamic 段落）。
+const resumeProgressLabel = computed<string>(() => {
+  const ps = resumePlayState.value;
+  if (!ps || !Array.isArray(ps.flow) || ps.flow.length === 0) return "";
+  const idx = Math.min(Math.max(0, ps.cursor || 0), ps.flow.length - 1);
+  const node: any = ps.flow[idx];
+  const fallbackTotal = ps.flow.filter((f: any) => f && f.type !== "dynamic").length || ps.flow.length;
+  const total = store.current?.scene_count
+    || (Array.isArray(store.current?.scenes) ? store.current?.scenes.length : 0)
+    || fallbackTotal;
+  // sceneIdx 已经是 1-based（来自 scene_index）；保护一下取不到的情况。
+  let sceneNo = node?.sceneIdx;
+  if (typeof sceneNo !== "number" || sceneNo <= 0) {
+    sceneNo = ps.flow.slice(0, idx + 1).filter((f: any) => f && f.type !== "dynamic").length || 1;
+  }
+  return `${Math.min(sceneNo, total)} / ${total}`;
+});
+
 function onResumeContinue() {
   const sid = resumeSessionId.value;
   const ps = sid ? sess.getSessionState(sid) : undefined;
@@ -535,6 +554,15 @@ onMounted(async () => {
       if (store.flow.length === 0) {
         toast.push("这个故事暂未准备好", "error");
         router.push("/library");
+        return;
+      }
+      // 二次校验：candidate.state 当时是合法的，但等到这里再读 store 里取到的 state 可能因为
+      // 异步写入或同步早被覆盖 → 如果 getSessionState 取不出有效 flow，直接走"静默新建"。
+      const verified = sess.getSessionState(candidate.sessionId);
+      if (!verified || !Array.isArray(verified.flow) || verified.flow.length <= 1 || (verified.cursor ?? 0) <= 0) {
+        sess.deleteSession(candidate.sessionId);
+        activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
+        await loadCursor(0);
         return;
       }
       // 找到未完成会话 → 弹"继续上次的玩法"框。在这里不要 sess.start()，
@@ -645,7 +673,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
     <BaseModal :open="resumeModalOpen" title="继续上次的玩法？" :max-width="'460px'" @close="onResumeCancel">
       <p class="text-sm text-ink-soft m-0 mb-2">
         你之前玩这个故事到
-        <span class="font-semibold text-ink">第 {{ Math.min((resumePlayState?.cursor ?? 0) + 1, resumePlayState?.flow.length || 1) }} / {{ resumePlayState?.flow.length || 1 }} 页</span>
+        <span v-if="resumeProgressLabel" class="font-semibold text-ink">第 {{ resumeProgressLabel }} 页</span>
         ，所有摆放、道具和已生成的段落都保留了。
       </p>
       <p class="text-xs text-ink-mute m-0">选「覆盖」会清空上次进度从头开始。</p>
