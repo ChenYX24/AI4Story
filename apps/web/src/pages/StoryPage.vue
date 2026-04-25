@@ -503,14 +503,22 @@ onMounted(async () => {
   // 跳页入口已关闭，保留 handler 清理以兼容旧状态。
   store.setJumpHandler(null);
   try {
-    // 先判断有没有"进行中"快照（本地 + 远程）；如果 URL 指定 sid，只看该故事下该会话。
-    // 只有真正翻过第 1 页（cursor > 0 且尚未翻到末页）才算"进行中"，避免空状态弹"继续"框。
+    // 进入故事时先看 (user_id, story_id) 下有没有未完成会话：
+    //   未完成 = 报告未生成完成（!report_ready 且 report_status !== 'ready'）+ 进度 > 1 页（cursor > 0）。
+    // 该判定由 sess.getInProgressForStory + sess.fetchRemoteSession 内部的 isOpenState/openStateCandidates 完成。
+    // 这里只在拿到 URL ?sid= 时做一次同等的本地校验，确保跨页进入仍能命中那条会话。
     const hasRealProgress = (ps?: any) => !!ps && Array.isArray(ps.flow)
-      && ps.flow.length > 1 && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
+      && ps.flow.length > 1 && ps.cursor > 0;
     const requestedSid = typeof route.query.sid === "string" ? route.query.sid : "";
     const requestedState = requestedSid ? sess.getSessionState(requestedSid) : undefined;
+    const requestedRec = requestedSid ? sess.getById(requestedSid) : undefined;
+    const requestedReportDone = !!(requestedRec?.report_ready
+      || requestedRec?.report_status === "ready"
+      || requestedRec?.finished_at);
     let candidate: { sessionId: string; state: any } | null =
-      requestedState?.story_id === props.id && hasRealProgress(requestedState)
+      requestedState?.story_id === props.id
+        && hasRealProgress(requestedState)
+        && !requestedReportDone
         ? { sessionId: requestedSid, state: requestedState }
         : sess.getInProgressForStory(props.id);
     // localStorage 里残留的 record 可能没有 flow（远端只回了 stub）→ 直接清掉，从头开始。
@@ -529,6 +537,8 @@ onMounted(async () => {
         router.push("/library");
         return;
       }
+      // 找到未完成会话 → 弹"继续上次的玩法"框。在这里不要 sess.start()，
+      // 也不要触发 pruneOpenSessionsForStory，否则后续"继续"就拿不到原会话了。
       resumeSessionId.value = candidate.sessionId;
       resumeModalOpen.value = true;
       return;
@@ -540,6 +550,7 @@ onMounted(async () => {
       router.push("/library");
       return;
     }
+    // 该故事下没有未完成会话 → 静默新建一个 session_id，绝对不弹框。
     activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
     await loadCursor(0);
   } catch (e: any) {

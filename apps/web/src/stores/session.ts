@@ -148,7 +148,11 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   function isOpenState(ps?: SessionPlayState): ps is SessionPlayState {
-    return hasValidFlow(ps) && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
+    // 进度 > 1 页就算"未完成"。报告状态由 record.report_ready / finished_at /
+    // report_status === 'generating' 在 openStateCandidates 里另行过滤——这里只关心"翻过第一页"。
+    // 早先版本要求 cursor < flow.length - 1，会把"已经到末页但还没生成报告"的会话排除在外，
+    // 然后被 pruneOpenSessionsForStory 当成无主开放会话清掉，造成进入故事时数据丢失。
+    return hasValidFlow(ps) && ps.cursor > 0;
   }
 
   function markReportReady(id: string) {
