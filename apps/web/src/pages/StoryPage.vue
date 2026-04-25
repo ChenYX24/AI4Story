@@ -469,7 +469,7 @@ onMounted(async () => {
     // 先判断有没有"进行中"快照（本地 + 远程）；如果 URL 指定 sid，只看该故事下该会话。
     // 只有真正翻过第 1 页（cursor > 0 且尚未翻到末页）才算"进行中"，避免空状态弹"继续"框。
     const hasRealProgress = (ps?: any) => !!ps && Array.isArray(ps.flow)
-      && ps.flow.length > 0 && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
+      && ps.flow.length > 1 && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
     const requestedSid = typeof route.query.sid === "string" ? route.query.sid : "";
     const requestedState = requestedSid ? sess.getSessionState(requestedSid) : undefined;
     let candidate = requestedState?.story_id === props.id && hasRealProgress(requestedState)

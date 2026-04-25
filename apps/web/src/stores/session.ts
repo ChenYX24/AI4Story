@@ -77,7 +77,8 @@ export const useSessionStore = defineStore("session", () => {
   const key = (name: string) => `mindshow_${scope.value}_${name}`;
 
   function hasValidFlow(ps?: SessionPlayState): ps is SessionPlayState {
-    return !!ps && !!ps.story_id && Array.isArray(ps.flow) && ps.flow.length > 0;
+    // flow 至少要有 2 个节点才算"完整"——单节点的旧记录会让恢复弹窗显示 1 / 1。
+    return !!ps && !!ps.story_id && Array.isArray(ps.flow) && ps.flow.length > 1;
   }
 
   function loadScope(userId?: string | null) {
