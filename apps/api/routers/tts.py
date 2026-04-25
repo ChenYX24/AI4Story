@@ -17,12 +17,14 @@ def tts(
     tone: str | None = Query(default=None),
     speaker: str | None = Query(default=None),
     story_id: str | None = Query(default=None),
+    speaker_gender: str | None = Query(default=None),
 ) -> Response:
     if not text.strip():
         raise HTTPException(status_code=400, detail="empty text")
     try:
         audio = synthesize_bytes(
-            text=text, voice=voice, tone=tone, speaker=speaker, story_id=story_id,
+            text=text, voice=voice, tone=tone, speaker=speaker,
+            story_id=story_id, speaker_gender=speaker_gender,
         )
     except TTSError as e:
         raise HTTPException(status_code=502, detail=str(e))

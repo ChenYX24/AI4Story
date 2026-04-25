@@ -30,6 +30,7 @@ def build_messages(story_text: str, target_total_scenes: int | None, max_narrati
             "characters": [
                 {
                     "name": "角色名",
+                    "gender": "male / female / neutral，用于后续 TTS 选音色",
                     "appearance_description": "跨多个场景保持一致的整体外观描述",
                 }
             ],
@@ -56,6 +57,7 @@ def build_messages(story_text: str, target_total_scenes: int | None, max_narrati
                 "characters": [
                     {
                         "name": "角色名",
+                        "gender": "male / female / neutral，与 global_content 中同名角色保持一致",
                         "pose": "只描述人物自己的动作、姿态、表情,描述中严禁出现别的人物",
                         "related_objects": [
                             {
@@ -84,7 +86,7 @@ def build_messages(story_text: str, target_total_scenes: int | None, max_narrati
 2. 输出语言必须是中文。
 3. 顶层必须包含 `story_summary`、`global_content`、`scenes`。
 4. `global_content.characters` 和 `global_content.objects` 只放会在多个场景重复出现、需要提前统一生成参考图的人物和物体。
-5. `characters` 中只列出人物，以及人物自己的动作姿态和表情。
+5. `characters` 中只列出人物，以及人物自己的动作姿态和表情。每个 `characters` 条目必须带 `gender` 字段，取值只能是 `male` / `female` / `neutral`，用于后续 TTS 选用同性别音色；动物或拟人化角色按其在故事中的呈现性别标注，无法判断时填 `neutral`。`global_content.characters` 与每个场景里的同名角色 gender 必须保持一致。
 6. 【极度重要】`pose` 必须是“绿幕单人棚拍 / 动作捕捉参考照”视角的去场景化描述。请把人物想象成站在纯白背景下单独拍定妆照，只描述这个人物自己的身体姿态、手势、朝向、表情、视线状态。
 7. `pose` 严禁提及任何环境参照物和其他人物。不要写床、门、窗、桌椅、树木、道路、房间，也不要写“看着某人”“站在某人身后”“抓住某人”等关系性描述。
 8. 视线与朝向必须使用绝对方向或中性描述，例如“看向右下方”“平视前方”“侧身站立”“低头”。绝不能写“看着外婆”“面向猎人”“躲在树后”。
@@ -104,10 +106,10 @@ def build_messages(story_text: str, target_total_scenes: int | None, max_narrati
 16. `event_outcome` 只描述无论中间如何交互，这个场景最终会落到什么结果。
 17. `{INTERACTIVE_SCENE}` 的 `event_summary` 需要是对 `initial_frame + interaction_goal + event_outcome` 的简短汇总。
 18. `characters[].pose` 必须按照 `initial_frame` 来写，只能反映交互开始前的初始姿态，不能提前写进过程或结局信息。
-19. 每个场景都必须包含 `narration` 和 `dialogue`。
-20. 只有 `{NARRATIVE_SCENE}` 需要生成 `dialogue`。`dialogue` 是简短台词数组，每条都要包含 `speaker`、`content`、`tone`，用于辅助后续叙事连环画推进。
-21. `{INTERACTIVE_SCENE}` 的 `dialogue` 必须为空数组，不需要生成台词内容。
-22. 叙事场景的台词必须简短、适合儿童故事连环画，一般 0 到 2 句即可；如果该叙事场景没有自然台词，也要保留空数组。
+19. 每个场景都必须包含 `narration` 和 `dialogue`，旁白和台词都用于后续连环画 + TTS 朗读。
+20. `dialogue` 是简短台词数组，每条都要包含 `speaker`、`content`、`tone`，用于辅助后续叙事连环画推进。
+21. `{INTERACTIVE_SCENE}` 也需要为"原故事中该场景的发展过程"生成 0 到 2 句简短 dialogue（同样要 speaker / content / tone）。注意：这些台词只是描述原故事里的对白，不是用户互动产生的台词；用户的互动仍然由前端实时生成，不要写进这里。
+22. 所有场景的台词必须简短、适合儿童故事连环画，每场景 0 到 2 句即可；没有自然台词时返回空数组。
 23. `{NARRATIVE_SCENE}` 继续使用 `event_summary`，只描述该场景的开头状态和结果状态。
 24. 第一个场景必须是 `{NARRATIVE_SCENE}`。
 25. 最后一个场景必须是 `{NARRATIVE_SCENE}`。
@@ -226,9 +228,9 @@ def build_repair_messages(bad_json_text: str, error_message: str | None = None) 
 18. 在 `{INTERACTIVE_SCENE}` 中，`characters[].related_objects` 不能引用同场景 `objects` 中的物体；这些与人物绑定的物体应来自 `global_content.objects`，或者直接删除该引用。
 19. 在 `{INTERACTIVE_SCENE}` 中，`objects` 只保留与人物解绑的独立交互道具，总数必须仍然保持 9 个。
 20. 在 `{NARRATIVE_SCENE}` 中，`objects` 只保留需要保证一致性的物体，不需要满足 9 个。
-21. 每个场景都必须包含 `narration` 和 `dialogue`。
-22. 只有 `{NARRATIVE_SCENE}` 需要保留非空或可选的简短 `dialogue`；`{INTERACTIVE_SCENE}` 的 `dialogue` 必须修正为空数组。
-23. `dialogue` 里的台词必须简短、适合连环画，不要过长；没有自然台词时可以返回空数组。
+21. 每个场景都必须包含 `narration` 和 `dialogue`，旁白与台词同时为连环画 + TTS 朗读使用。
+22. `{NARRATIVE_SCENE}` 与 `{INTERACTIVE_SCENE}` 都允许 0 到 2 句简短 `dialogue`；`{INTERACTIVE_SCENE}` 的台词描述的是原故事中该场景发展过程的对白，不是用户互动产生的内容。
+23. `dialogue` 里的台词必须简短、适合连环画，不要过长；没有自然台词时返回空数组。
 
 {error_hint}
 待修复内容：
@@ -291,8 +293,8 @@ Focus especially on interactive scenes and rewrite them with these hard rules:
    - Good: `侧向站立，身体微微前倾，嘴角上扬露出狡猾的笑容，视线看向侧前方`
    - Bad: `站在床边，眼神充满疑惑地看着床上的人`
    - Good: `双腿并拢站立，身体微微前倾，眉头微皱，眼神看向斜下方`
-9. Add concise `narration` for every scene, but only keep `dialogue` content for narrative scenes.
-10. `dialogue` lines must remain short and story-forwarding, with explicit speaker and tone. Interactive scenes must use an empty dialogue array.
+9. Add concise `narration` for every scene. Both narrative and interactive scenes may also carry 0-2 short `dialogue` lines describing the source story's development arc (these are not user-generated turns).
+10. `dialogue` lines must remain short and story-forwarding, with explicit speaker and tone. Empty arrays are fine when the source story has no natural lines.
 
 Examples:
 - Bad interaction_goal: "大灰狼想办法诱骗小红帽离开大路去采更多的花，从而拖延她的时间。"
@@ -384,6 +386,60 @@ def is_narrative_scene(scene_type: Any) -> bool:
     return scene_type == NARRATIVE_SCENE
 
 
+_VALID_GENDERS = {"male", "female", "neutral"}
+
+
+def _normalize_gender(value: Any) -> str:
+    if not isinstance(value, str):
+        return "neutral"
+    v = value.strip().lower()
+    if v in _VALID_GENDERS:
+        return v
+    # 常见自由文本兜底
+    if v in {"男", "男性", "boy", "man", "m"}:
+        return "male"
+    if v in {"女", "女性", "girl", "woman", "f"}:
+        return "female"
+    return "neutral"
+
+
+def harmonize_character_genders(payload: dict[str, Any]) -> dict[str, Any]:
+    """统一全局角色 + 场景角色的 gender 字段。
+
+    - 缺失或非法值 → "neutral"
+    - 场景里同名角色与 global_content 不一致时，以 global_content 为准。
+    """
+    if not isinstance(payload, dict):
+        return payload
+    global_content = payload.get("global_content")
+    if not isinstance(global_content, dict):
+        return payload
+    name_to_gender: dict[str, str] = {}
+    for char in global_content.get("characters", []) or []:
+        if not isinstance(char, dict):
+            continue
+        name = char.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        g = _normalize_gender(char.get("gender"))
+        char["gender"] = g
+        name_to_gender[normalize_name(name)] = g
+    for scene in payload.get("scenes", []) or []:
+        if not isinstance(scene, dict):
+            continue
+        for char in scene.get("characters", []) or []:
+            if not isinstance(char, dict):
+                continue
+            name = char.get("name")
+            if isinstance(name, str) and name.strip():
+                key = normalize_name(name)
+                if key in name_to_gender:
+                    char["gender"] = name_to_gender[key]
+                    continue
+            char["gender"] = _normalize_gender(char.get("gender"))
+    return payload
+
+
 def is_interactive_scene(scene_type: Any) -> bool:
     return scene_type == INTERACTIVE_SCENE
 
@@ -430,8 +486,8 @@ def sanitize_related_objects(payload: dict[str, Any]) -> dict[str, Any]:
         scene["narration"] = normalize_text_value(scene.get("narration")) or scene["event_summary"]
         if not isinstance(scene.get("dialogue"), list):
             scene["dialogue"] = []
-        if is_interactive_scene(scene.get("scene_type")):
-            scene["dialogue"] = []
+        # 交互场景也允许 0-2 句简短 dialogue（来自原故事的发展过程对白），用于
+        # 后续四格漫画 + TTS 朗读，与用户运行时的互动操作无关。
 
         scene_object_names: set[str] = set()
         objects = scene.get("objects", [])
@@ -494,6 +550,7 @@ def sanitize_related_objects(payload: dict[str, Any]) -> dict[str, Any]:
                     filtered.append(rel)
             char["related_objects"] = filtered
 
+    harmonize_character_genders(payload)
     return payload
 
 
@@ -554,8 +611,9 @@ def validate_scene_payload(payload: dict[str, Any]) -> None:
         dialogue = scene.get("dialogue")
         if not isinstance(dialogue, list):
             raise ValueError(f"Scene {index} dialogue must be an array.")
-        if is_interactive_scene(scene_type) and dialogue:
-            raise ValueError(f"Scene {index} is {INTERACTIVE_SCENE} and dialogue must be an empty array.")
+        # 同时允许 narrative / interactive 携带 0-2 句简短 dialogue。用最长 4 条做软上限以防模型话痨。
+        if len(dialogue) > 4:
+            raise ValueError(f"Scene {index} dialogue must contain at most 4 lines.")
         for line in dialogue:
             if not isinstance(line, dict):
                 raise ValueError(f"Scene {index} contains an invalid dialogue item.")

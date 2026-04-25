@@ -823,6 +823,7 @@ def build_interactive_storyboard_prompt(scene: dict[str, Any]) -> str:
         "initial_frame": scene.get("initial_frame"),
         "event_outcome": scene.get("event_outcome"),
         "narration": scene.get("narration"),
+        "dialogue": scene.get("dialogue", []),
         "characters": scene.get("characters", []),
         "objects": scene.get("objects", []),
         "background_visual_description": scene.get("background_visual_description"),
@@ -877,6 +878,19 @@ def build_interactive_comic_prompt(scene: dict[str, Any], storyboard_text: str) 
     event_outcome = str(scene.get("event_outcome", "")).strip()
     narration = str(scene.get("narration", "")).strip()
 
+    dialogue_lines: list[str] = []
+    for line in scene.get("dialogue", []) or []:
+        if not isinstance(line, dict):
+            continue
+        speaker = str(line.get("speaker", "")).strip()
+        content = str(line.get("content", "")).strip()
+        tone = str(line.get("tone", "")).strip()
+        if speaker and content:
+            if tone:
+                dialogue_lines.append(f"{speaker}（{tone}）：“{content}”")
+            else:
+                dialogue_lines.append(f"{speaker}：“{content}”")
+
     prompt_parts = [
         "Generate one single children's story comic page arranged as four continuous comic panels in one image.",
         "The image must contain exactly 4 connected narrative panels that read in order from panel 1 to panel 4.",
@@ -890,6 +904,11 @@ def build_interactive_comic_prompt(scene: dict[str, Any], storyboard_text: str) 
     ]
     if narration:
         prompt_parts.append(f"Narration caption (for staging only, do not render): {narration}.")
+    if dialogue_lines:
+        prompt_parts.append(
+            "Use these dialogue beats only as storytelling guidance for facial expression and staging, not as visible text: "
+            + " ".join(dialogue_lines)
+        )
     if character_lines:
         prompt_parts.append("Characters to keep consistent with references: " + " ".join(character_lines))
     if object_lines:

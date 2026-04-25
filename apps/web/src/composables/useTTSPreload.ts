@@ -13,6 +13,7 @@ export interface LineSpec {
   speaker?: string;
   tone?: string;
   story_id?: string;
+  speaker_gender?: "male" | "female" | "neutral";
 }
 
 let currentCtrl: TTSControl | null = null;
@@ -22,6 +23,7 @@ function buildUrl(line: LineSpec): string {
   if (line.speaker) q.set("speaker", line.speaker);
   if (line.tone) q.set("tone", line.tone);
   if (line.story_id) q.set("story_id", line.story_id);
+  if (line.speaker_gender) q.set("speaker_gender", line.speaker_gender);
   return `/api/tts?${q.toString()}`;
 }
 

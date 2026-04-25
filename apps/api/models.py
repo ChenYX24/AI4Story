@@ -46,6 +46,7 @@ class StoryboardLine(BaseModel):
     text: str
     kind: Literal["narration", "dialogue"]
     tone: str = ""
+    speaker_gender: Literal["male", "female", "neutral"] = "neutral"
 
 
 class InteractResponse(BaseModel):
@@ -100,6 +101,8 @@ class TTSItem(BaseModel):
     voice: str | None = None
     tone: str | None = None
     speaker: str | None = None
+    # 用于按性别筛选音色，避免女角色配男声等错配。
+    speaker_gender: Literal["male", "female", "neutral"] | None = None
     # 可选：用于服务端按 (story_id, speaker) 稳定分配音色，避免同一故事内不同角色撞声。
     story_id: str | None = None
 

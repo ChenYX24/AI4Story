@@ -189,10 +189,12 @@ def _scene_payload_from_db(story_id: str, scene: dict) -> dict:
         "narration": scene.get("narration", ""),
         "comic_url": scene.get("comic_url") or "",
         "background_url": scene.get("background_url") or "",
+        "storyboard": _build_storyboard(raw),
         "characters": [
             {
                 "name": c["name"],
                 "url": (a or {}).get("url") or "",
+                "gender": _normalize_gender(c.get("gender")),
                 "default_x": default_x,
                 "default_y": 0.70,
             }
@@ -240,10 +242,12 @@ def _scene_payload_from_fs(idx: int, story_id: str) -> dict:
         "narration": scene.get("narration", ""),
         "comic_url": comic_url,
         "background_url": asset_resolver.url_for(idx, "background", story_id=story_id),
+        "storyboard": _build_storyboard(scene),
         "characters": [
             {
                 "name": c["name"],
                 "url": _resolve_character_url_fs(idx, c["name"], story_id),
+                "gender": _normalize_gender(c.get("gender")),
                 "default_x": default_x,
                 "default_y": 0.70,
             }
@@ -301,13 +305,47 @@ def _load_scene_json(idx: int, story_id: str | None = None) -> dict[str, Any]:
         return json.load(f)
 
 
+_GENDER_NEUTRAL = "neutral"
+
+
+def _normalize_gender(value: Any) -> str:
+    if not isinstance(value, str):
+        return _GENDER_NEUTRAL
+    v = value.strip().lower()
+    if v in {"male", "female", "neutral"}:
+        return v
+    if v in {"男", "男性", "boy", "man", "m"}:
+        return "male"
+    if v in {"女", "女性", "girl", "woman", "f"}:
+        return "female"
+    return _GENDER_NEUTRAL
+
+
+def _gender_lookup_for_scene(scene: dict[str, Any]) -> dict[str, str]:
+    table: dict[str, str] = {}
+    for c in scene.get("characters", []) or []:
+        if not isinstance(c, dict):
+            continue
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        table[name] = _normalize_gender(c.get("gender"))
+    return table
+
+
 def _build_storyboard(scene: dict[str, Any]) -> list[dict[str, str]]:
     lines: list[dict[str, str]] = []
+    gender_by_name = _gender_lookup_for_scene(scene)
     narration = (scene.get("narration") or "").strip()
     if narration:
-        lines.append({"speaker": "旁白", "text": narration, "kind": "narration"})
+        lines.append({
+            "speaker": "旁白",
+            "text": narration,
+            "kind": "narration",
+            "speaker_gender": _GENDER_NEUTRAL,
+        })
     for d in scene.get("dialogue", []) or []:
-        speaker = d.get("speaker", "").strip() or "角色"
+        speaker = (d.get("speaker") or "").strip() or "角色"
         content = (d.get("content") or "").strip()
         if not content:
             continue
@@ -316,5 +354,6 @@ def _build_storyboard(scene: dict[str, Any]) -> list[dict[str, str]]:
             "text": content,
             "kind": "dialogue",
             "tone": d.get("tone", ""),
+            "speaker_gender": gender_by_name.get(speaker, _GENDER_NEUTRAL),
         })
     return lines

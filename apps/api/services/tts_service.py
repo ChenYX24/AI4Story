@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import os
 import re
 import threading
 from collections import Counter
@@ -88,6 +89,49 @@ _NARRATOR_ALIASES = {
 _ZH_CHARACTER_VOICES: list[str] = ["冰糖", "茉莉", "苏打", "白桦"]
 _EN_CHARACTER_VOICES: list[str] = ["Mia", "Chloe", "Milo", "Dean"]
 
+# 默认 voice -> 性别 映射（小米 MiMo 没有公开声纹性别，取常见命名/听感作默认）。
+# 部署侧可通过 XIAOMI_TTS_VOICE_GENDERS=冰糖:female,白桦:male,... 覆盖。
+_DEFAULT_VOICE_GENDERS: dict[str, str] = {
+    "mimo_default": "neutral",
+    "冰糖": "female",
+    "茉莉": "female",
+    "苏打": "male",
+    "白桦": "male",
+    "Mia": "female",
+    "Chloe": "female",
+    "Milo": "male",
+    "Dean": "male",
+}
+
+
+def _load_voice_gender_overrides() -> dict[str, str]:
+    raw = os.getenv("XIAOMI_TTS_VOICE_GENDERS", "").strip()
+    if not raw:
+        return {}
+    overrides: dict[str, str] = {}
+    for chunk in raw.split(","):
+        if ":" not in chunk:
+            continue
+        name, gender = chunk.split(":", 1)
+        name = name.strip()
+        gender = gender.strip().lower()
+        if name and gender in {"male", "female", "neutral"}:
+            overrides[name] = gender
+    return overrides
+
+
+_VOICE_GENDERS: dict[str, str] = {**_DEFAULT_VOICE_GENDERS, **_load_voice_gender_overrides()}
+
+
+def _voice_pool_for(language_pool: list[str], gender: str | None) -> list[str]:
+    """从语言池里筛出与 gender 匹配的子集；性别未知/匹配为空时退化到原池。"""
+    g = (gender or "").strip().lower()
+    if g not in {"male", "female"}:
+        return language_pool
+    matched = [v for v in language_pool if _VOICE_GENDERS.get(v, "neutral") == g]
+    return matched or language_pool
+
+
 DEFAULT_CHARACTER_VOICE = _NARRATOR_VOICE
 
 
@@ -110,29 +154,34 @@ _VOICE_CACHE: dict[tuple[str, str], str] = {}
 _VOICE_USAGE: dict[str, Counter] = {}
 
 
-def voice_for_speaker(speaker: str | None, story_id: str | None = None) -> str:
-    """speaker -> voice，按 (story_id, speaker) 稳定分配。
+def voice_for_speaker(
+    speaker: str | None,
+    story_id: str | None = None,
+    gender: str | None = None,
+) -> str:
+    """speaker -> voice，按 (story_id, speaker, gender) 稳定分配。
 
     - 旁白类名字固定 _NARRATOR_VOICE。
-    - 其余名字按"当前 story 用得最少的音色"分配；并列时用 md5 哈希决定，
-      保证同一 (story_id, speaker) 永远落到同一个音色。
-    - 没有 story_id 时退化为全局共享缓存（key 用 "_default"）。
+    - 其余名字先按语言（中/英）选语言池，再按 gender（male/female）裁剪到子池，
+      然后在子池内挑"当前 story 用得最少的音色"；并列时用 md5 哈希决定，保证同一
+      (story_id, speaker, gender) 永远落到同一个音色。
+    - 性别未知或子池为空时，回退到完整语言池。
     """
     s = (speaker or "").strip()
     if _is_narrator(s):
         return _NARRATOR_VOICE
-    pool = _EN_CHARACTER_VOICES if not _has_chinese(s) else _ZH_CHARACTER_VOICES
+    language_pool = _EN_CHARACTER_VOICES if not _has_chinese(s) else _ZH_CHARACTER_VOICES
+    pool = _voice_pool_for(language_pool, gender)
     sid = (story_id or "").strip() or "_default"
-    key = (sid, s)
+    g_label = (gender or "").strip().lower() or "?"
+    key = (sid, f"{g_label}|{s}")
     with _VOICE_CACHE_LOCK:
         cached = _VOICE_CACHE.get(key)
         if cached and cached in pool:
             return cached
         usage = _VOICE_USAGE.setdefault(sid, Counter())
-        digest = hashlib.md5(f"{sid}|{s}".encode("utf-8")).digest()
+        digest = hashlib.md5(f"{sid}|{g_label}|{s}".encode("utf-8")).digest()
         seed = int.from_bytes(digest[:4], "big")
-        # 排序键：(当前使用次数, 哈希派生的稳定 tie-breaker)，
-        # 这样并列时同一 (story_id, speaker) 永远拿到相同结果。
         ranked = sorted(
             range(len(pool)),
             key=lambda i: (usage[pool[i]], (seed + i) % len(pool)),
@@ -185,16 +234,17 @@ def synthesize_bytes(
     tone: str | None = None,
     speaker: str | None = None,
     story_id: str | None = None,
+    speaker_gender: str | None = None,
 ) -> bytes:
     if not XIAOMI_TTS_API_KEY:
         raise TTSError("XIAOMI_TTS_API_KEY not set")
     if not text or not text.strip():
         raise TTSError("empty text")
 
-    # Resolve voice: 显式 voice 优先 -> 按 (story_id, speaker) 分配 -> 配置默认
+    # Resolve voice: 显式 voice 优先 -> 按 (story_id, speaker, gender) 分配 -> 配置默认
     resolved_voice = (voice or "").strip() or None
     if resolved_voice is None:
-        resolved_voice = voice_for_speaker(speaker, story_id=story_id)
+        resolved_voice = voice_for_speaker(speaker, story_id=story_id, gender=speaker_gender)
     resolved_voice = _LEGACY_VOICE_MAP.get(resolved_voice, resolved_voice)
     if resolved_voice not in _ALLOWED_VOICES:
         # 配置层默认（XIAOMI_TTS_VOICE）也走一次合法化，如果还非法就回落 narrator
@@ -245,20 +295,21 @@ def synthesize_bytes(
 def synthesize_batch(items: list[dict], story_id: str | None = None) -> list[bytes]:
     """Synthesize multiple TTS items in parallel.
 
-    items: [{"text": str, "voice": str|None, "tone": str|None, "speaker": str|None, "story_id": str|None}]
+    items: [{"text": str, "voice": str|None, "tone": str|None, "speaker": str|None,
+             "speaker_gender": str|None, "story_id": str|None}]
     Returns a list of audio bytes in the same order as input items.
 
-    在并发触发前，先把所有未指定 voice 的 (story_id, speaker) 串行预分配一遍，
+    在并发触发前，先把所有未指定 voice 的 (story_id, speaker, gender) 串行预分配一遍，
     避免多线程同时撞同一把锁、又或并列时拿到不同 voice。
     """
-    # 预分配：同一批次里同一 (story_id, speaker) 命中同一 voice，且让每个 story
-    # 内的不同 speaker 走 least-used 分配。
+    # 预分配
     for item in items:
         if item.get("voice"):
             continue
         sp = item.get("speaker")
         sid = item.get("story_id") or story_id
-        voice_for_speaker(sp, story_id=sid)
+        gender = item.get("speaker_gender")
+        voice_for_speaker(sp, story_id=sid, gender=gender)
 
     def _do(item: dict) -> bytes:
         return synthesize_bytes(
@@ -267,6 +318,7 @@ def synthesize_batch(items: list[dict], story_id: str | None = None) -> list[byt
             tone=item.get("tone"),
             speaker=item.get("speaker"),
             story_id=item.get("story_id") or story_id,
+            speaker_gender=item.get("speaker_gender"),
         )
 
     with ThreadPoolExecutor(max_workers=4) as pool:

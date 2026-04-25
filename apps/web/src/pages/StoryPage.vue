@@ -81,7 +81,7 @@ async function loadCursor(idx: number) {
         interactiveOps.value = [];
         store.trackComic(dyn.payload.comic_url);
         if (dyn.payload.storyboard?.length) {
-          tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id })));
+          tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id, speaker_gender: l.speaker_gender })));
         } else {
           tts.stop();
         }
@@ -98,8 +98,9 @@ async function loadCursor(idx: number) {
         ? interactStore.get(activeSessionId.value, sc.index)
         : undefined;
       interactiveOps.value = savedInteract?.ops?.map((o) => ({ ...o })) || [];
-      if (sc.type === "narrative" && sc.storyboard?.length) {
-        tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id })));
+      // narrative + interactive 都可能携带 storyboard（旁白 + 0-2 句对白）
+      if (sc.storyboard?.length) {
+        tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id, speaker_gender: l.speaker_gender })));
       } else {
         tts.stop();
       }

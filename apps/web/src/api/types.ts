@@ -20,15 +20,17 @@ export interface StoriesResponse {
 }
 
 export interface StoryboardLine {
-  kind: "narrator" | "character" | "assistant";
+  kind: "narrator" | "character" | "assistant" | "narration" | "dialogue";
   speaker: string;
   text: string;
   tone?: string;
+  speaker_gender?: "male" | "female" | "neutral";
 }
 
 export interface SceneCharacter {
   name: string;
   url: string;
+  gender?: "male" | "female" | "neutral";
   default_x?: number;
   default_y?: number;
   default_scale?: number;
