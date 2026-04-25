@@ -59,20 +59,25 @@ _TONE_STYLE_MAP = {
 
 
 CHARACTER_VOICE_MAP: dict[str, str] = {
-    "小红帽": "default_zh",
-    "妈妈": "default_zh",
-    "外婆": "default_zh",
-    "大灰狼": "default_zh",
-    "猎人": "default_zh",
-    "旁白": "default_zh",
+    "小红帽": "mimo_default",
+    "妈妈": "mimo_default",
+    "外婆": "mimo_default",
+    "大灰狼": "mimo_default",
+    "猎人": "mimo_default",
+    "旁白": "mimo_default",
 }
-DEFAULT_CHARACTER_VOICE = "default_zh"
-_ALLOWED_VOICES = {"mimo_default", "default_zh", "default_en"}
+DEFAULT_CHARACTER_VOICE = "mimo_default"
+# Xiaomi MiMo TTS 实际接受的 voice 名（来自上游报错信息）。
+# 我们之前误把 default_zh / default_en 当作合法名字，结果 Xiaomi 直接 400。
+_ALLOWED_VOICES = {
+    "mimo_default",
+    "冰糖", "茉莉", "苏打", "白桦",
+    "Mia", "Chloe", "Milo", "Dean",
+}
+# 历史调用方 / 旧代码可能仍传 default_zh / default_en —— 在这里翻译成真实 voice。
 _LEGACY_VOICE_MAP = {
-    "冰糖": "default_zh",
-    "茉莉": "default_zh",
-    "白桦": "default_zh",
-    "苏打": "default_zh",
+    "default_zh": "mimo_default",
+    "default_en": "mimo_default",
 }
 
 
