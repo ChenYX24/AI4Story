@@ -43,6 +43,11 @@ const timelineItems = computed<TimelineItem[]>(() =>
 function thumbUrl(it: TimelineItem): string {
   if (it.pendingThumb) return it.pendingThumb;
   if (it.dynamicThumb) return it.dynamicThumb;
+  const storyId = story.current?.id || String(route.params.id || "");
+  const cached = story.sceneCache?.get?.(`${storyId}:` + it.sceneIdx);
+  if (cached?.comic_url) return cached.comic_url;
+  if (cached?.background_url) return cached.background_url;
+  if (storyId && storyId !== "little_red_riding_hood") return "";
   const pad = String(it.sceneIdx).padStart(3, "0");
   return it.type === "narrative"
     ? `/assets/scenes/${pad}/comic/panel.png`
@@ -91,11 +96,15 @@ function onStoreClick() {
         @click="onJump(i)"
       >
         <img
+          v-if="thumbUrl(it)"
           :src="thumbUrl(it)"
           loading="lazy"
           class="w-full h-full object-cover pointer-events-none"
           @error="(ev: any) => (ev.target.style.display = 'none')"
         />
+        <div v-else class="absolute inset-0 grid place-items-center text-[10px] font-semibold text-ink-mute">
+          {{ it.sceneIdx }}
+        </div>
         <div
           v-if="it.generated"
           class="absolute inset-0 ring-2 ring-gold/60 rounded-md pointer-events-none"

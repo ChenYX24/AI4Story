@@ -26,7 +26,7 @@ export interface PendingDynamicRecord {
 export const useStoryStore = defineStore("story", () => {
   const list = ref<StoryCard[]>([]);
   const current = ref<StoryDetail | null>(null);
-  const sceneCache = ref<Map<number, Scene>>(new Map());
+  const sceneCache = ref<Map<string, Scene>>(new Map());
 
   // 节点流：narrative + interactive 穿插；互动完成生成 dynamic 幕，splice 插入在 interactive 之后
   // 对 dynamic 类型，sceneIdx 等于其源 interactive 场景的 sceneIdx（作为 dynamicByScene 的 key）
@@ -137,6 +137,15 @@ export const useStoryStore = defineStore("story", () => {
   }
 
   async function loadStory(id: string) {
+    flow.value = [];
+    cursor.value = 0;
+    highestUnlocked.value = 0;
+    sceneCache.value.clear();
+    interactions.value = [];
+    comicUrls.value = [];
+    dynamicByScene.value.clear();
+    pendingDynamicByScene.value.clear();
+    pendingPropCounts.value = {};
     const s = await fetchStory(id);
     // 后端不回 id，前端手工补上以便后续判断 current.id === routeId
     s.id = id;
@@ -150,8 +159,6 @@ export const useStoryStore = defineStore("story", () => {
       sceneIdx: sc.index,
       visited: false,
     }));
-    cursor.value = 0;
-    highestUnlocked.value = 0;
     return s;
   }
 
@@ -159,9 +166,10 @@ export const useStoryStore = defineStore("story", () => {
     // 把 story_id 带上 —— 否则后端会回退到默认故事（小红帽），
     // 当用户打开一个自定义故事时仍然加载到的是小红帽的 scene.json。
     const storyId = current.value?.id;
-    if (sceneCache.value.has(idx)) return sceneCache.value.get(idx)!;
+    const cacheKey = `${storyId || "default"}:${idx}`;
+    if (sceneCache.value.has(cacheKey)) return sceneCache.value.get(cacheKey)!;
     const sc = await fetchScene(idx, storyId);
-    sceneCache.value.set(idx, sc);
+    sceneCache.value.set(cacheKey, sc);
     return sc;
   }
 

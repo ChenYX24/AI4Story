@@ -25,23 +25,26 @@ export interface InteractSceneState {
 
 export const useInteractStore = defineStore("interact", () => {
   const states = ref<Map<string, InteractSceneState>>(new Map());
-  const k = (storyId: string, sceneIdx: number) => `${storyId}:${sceneIdx}`;
+  const k = (sessionId: string, sceneIdx: number) => `${sessionId}:${sceneIdx}`;
 
-  function get(storyId: string, sceneIdx: number): InteractSceneState | undefined {
-    return states.value?.get?.(k(storyId, sceneIdx));
+  function get(sessionId: string, sceneIdx: number): InteractSceneState | undefined {
+    return states.value?.get?.(k(sessionId, sceneIdx));
   }
-  function save(storyId: string, sceneIdx: number, s: InteractSceneState) {
+  function save(sessionId: string, sceneIdx: number, s: InteractSceneState) {
     if (!states.value) states.value = new Map();
-    states.value.set(k(storyId, sceneIdx), {
+    states.value.set(k(sessionId, sceneIdx), {
       placed: s.placed.map((p) => ({ ...p })),
       ops: s.ops.map((o) => ({ ...o })),
       customProps: s.customProps.map((c) => ({ ...c })),
     });
   }
-  function clear(storyId: string, sceneIdx: number) {
-    states.value?.delete?.(k(storyId, sceneIdx));
+  function clear(sessionId: string, sceneIdx: number) {
+    states.value?.delete?.(k(sessionId, sceneIdx));
+  }
+  function clearSession(sessionId: string) {
+    states.value = new Map([...states.value].filter(([key]) => !key.startsWith(`${sessionId}:`)));
   }
   function clearAll() { states.value = new Map(); }
 
-  return { states, get, save, clear, clearAll };
+  return { states, get, save, clear, clearSession, clearAll };
 });

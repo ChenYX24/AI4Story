@@ -104,6 +104,8 @@ AGENTS.md             对外协作指南 (给 AI / 开发者接手)
 
 **开发文档详见 [AGENTS.md](AGENTS.md)** — 架构地图、已完成里程碑、TODO 清单、协作规范。
 
+**数据与资产存储约定详见 [docs/DATA_STORAGE.md](docs/DATA_STORAGE.md)** — 账号、会话、官方资产、用户故事、上传/生成图片分别存在哪里，以及哪些内容不能 push 到 GitHub。
+
 ## 技术栈
 
 | 层 | 选型 |

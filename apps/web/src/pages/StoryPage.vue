@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import BaseButton from "@/components/BaseButton.vue";
 import BaseCard from "@/components/BaseCard.vue";
 import InteractiveView from "@/components/InteractiveView.vue";
@@ -16,6 +16,7 @@ import { postChat, postInteract, postReport, fetchChatSuggestions } from "@/api/
 import type { Scene, InteractRequest, InteractResponse, Operation } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
+const route = useRoute();
 const router = useRouter();
 const store = useStoryStore();
 const sess = useSessionStore();
@@ -30,6 +31,8 @@ const flipping = ref<"next" | "prev" | null>(null);
 const flipIn = ref(true);
 const lineCursor = ref(0);
 const inputText = ref("");
+const activeSessionId = ref("");
+const resumeSessionId = ref("");
 
 // 聊天记录 — 按场景持久化
 interface ChatMsg { role: "user" | "assistant"; text: string; }
@@ -93,7 +96,9 @@ async function loadCursor(idx: number) {
       dynamicNode.value = null;
       pendingDynamicPreview.value = null;
       pendingDynamicError.value = null;
-      const savedInteract = sc.type === "interactive" ? interactStore.get(props.id, sc.index) : undefined;
+      const savedInteract = sc.type === "interactive" && activeSessionId.value
+        ? interactStore.get(activeSessionId.value, sc.index)
+        : undefined;
       interactiveOps.value = savedInteract?.ops?.map((o) => ({ ...o })) || [];
       if (sc.type === "narrative" && sc.storyboard?.length) {
         tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone })));
@@ -107,6 +112,9 @@ async function loadCursor(idx: number) {
     requestAnimationFrame(() => { flipIn.value = true; });
     // 下一幕预取（scene + 图片）
     prefetchNode(idx + 1);
+    if (idx === store.flow.length - 1) {
+      sess.completeSession(currentSessionId(), buildCurrentPlayState());
+    }
   } finally { loading.value = false; flipping.value = null; }
 }
 
@@ -125,25 +133,62 @@ async function prefetchNode(idx: number) {
 }
 
 function currentSessionId(): string {
-  return sess.ensure(props.id, store.current?.title || props.id);
+  if (!activeSessionId.value) {
+    activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
+  }
+  return activeSessionId.value;
 }
 
 function currentPlayState() {
-  return sess.getPlayState(props.id);
+  return activeSessionId.value ? sess.getSessionState(activeSessionId.value) : undefined;
+}
+
+function buildCurrentPlayState() {
+  if (!store.current || store.current.id !== props.id || store.cursor >= store.flow.length) return undefined;
+  if (scene.value && chatLog.value.length) {
+    chatLogByScene.value = { ...chatLogByScene.value, [String(scene.value.index)]: [...chatLog.value] };
+  }
+  const dynObj: Record<string, any> = {};
+  store.dynamicByScene?.forEach?.((v, k) => { dynObj[String(k)] = v; });
+  const pendingDynObj: Record<string, any> = {};
+  store.pendingDynamicByScene?.forEach?.((v, k) => { pendingDynObj[String(k)] = v; });
+  const interactObj: Record<string, any> = {};
+  const sid = currentSessionId();
+  interactStore.states?.forEach?.((v, k) => {
+    const [sessionId, sidxStr] = k.split(":");
+    if (sessionId !== sid) return;
+    interactObj[sidxStr] = v;
+  });
+  return {
+    session_id: sid,
+    story_id: props.id,
+    story_title: store.current.title,
+    cursor: store.cursor,
+    highestUnlocked: store.highestUnlocked,
+    flow: store.flow.map((f) => ({ ...f })),
+    dynamicByScene: dynObj,
+    pendingDynamicByScene: pendingDynObj,
+    interactByScene: interactObj,
+    interactions: store.interactions.map((i) => ({ ...i })),
+    comicUrls: [...store.comicUrls],
+    chatLogByScene: { ...chatLogByScene.value },
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function startReportInBackground() {
   const sessionId = currentSessionId();
-  sess.updateSnapshot(sessionId, currentPlayState());
+  const state = buildCurrentPlayState() || currentPlayState();
+  sess.updateSnapshot(sessionId, state);
   const current = sess.getById(sessionId);
   if (current?.report_payload || current?.report_status === "generating" || sess.getReportPromise(sessionId)) return;
   sess.markReportGenerating(sessionId);
   const p = postReport({
     session_id: sessionId,
     story_id: props.id,
-    interactions: store.interactions,
+    interactions: state?.interactions || store.interactions,
   }).then((payload) => {
-    sess.saveReport(sessionId, payload, currentPlayState());
+    sess.saveReport(sessionId, payload, state);
     return payload;
   }).catch((e: any) => {
     sess.failReport(sessionId, e?.message || String(e));
@@ -155,6 +200,7 @@ function startReportInBackground() {
 
 function goReport() {
   const sid = currentSessionId();
+  sess.completeSession(sid, buildCurrentPlayState() || currentPlayState());
   startReportInBackground();
   router.push({ name: "report", params: { id: props.id }, query: { sid } });
 }
@@ -379,9 +425,14 @@ void onInteractDone;
 
 // E3：进行中 session 恢复弹窗
 const resumeModalOpen = ref(false);
+const resumePlayState = computed(() => (
+  resumeSessionId.value ? sess.getSessionState(resumeSessionId.value) : undefined
+));
 function onResumeContinue() {
-  const ps = sess.getPlayState(props.id);
+  const sid = resumeSessionId.value;
+  const ps = sid ? sess.getSessionState(sid) : undefined;
   if (!ps) { resumeModalOpen.value = false; return; }
+  activeSessionId.value = sid;
   // 恢复 flow / dynamicByScene / interactStore.states
   store.flow = ps.flow.map((f) => ({ ...f }));
   store.cursor = ps.cursor;
@@ -396,9 +447,9 @@ function onResumeContinue() {
   for (const k in (ps.pendingDynamicByScene || {})) pendingDynMap.set(Number(k), ps.pendingDynamicByScene![k]);
   store.pendingDynamicByScene = pendingDynMap;
   // interactByScene
-  interactStore.clearAll();
+  interactStore.clearSession(sid);
   for (const k in ps.interactByScene) {
-    interactStore.save(props.id, Number(k), ps.interactByScene[k] as any);
+    interactStore.save(sid, Number(k), ps.interactByScene[k] as any);
   }
   // chatLogByScene
   if (ps.chatLogByScene) {
@@ -409,12 +460,18 @@ function onResumeContinue() {
   loadCursor(ps.cursor);
 }
 function onResumeOverwrite() {
-  sess.clearPlayState(props.id);
-  interactStore.clearAll();
+  const oldSid = resumeSessionId.value;
+  if (oldSid) {
+    sess.deleteSession(oldSid);
+    interactStore.clearSession(oldSid);
+  }
+  activeSessionId.value = "";
+  resumeSessionId.value = "";
   store.reset();
   resumeModalOpen.value = false;
   (async () => {
     await store.loadStory(props.id);
+    activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
     if (store.flow.length > 0) loadCursor(0);
   })();
 }
@@ -427,38 +484,38 @@ onMounted(async () => {
   sess.clearGeneratedNotice(props.id);
   store.setJumpHandler((idx: number) => { loadCursor(idx); });
   try {
-    // 先判断有没有"进行中"快照（本地 + 远程）
-    let inProgress = sess.hasInProgress(props.id);
-    if (!inProgress) {
+    // 先判断有没有"进行中"快照（本地 + 远程）；如果 URL 指定 sid，只看该故事下该会话。
+    // 只有真正翻过第 1 页（cursor > 0 且尚未翻到末页）才算"进行中"，避免空状态弹"继续"框。
+    const hasRealProgress = (ps?: any) => !!ps && Array.isArray(ps.flow)
+      && ps.flow.length > 0 && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
+    const requestedSid = typeof route.query.sid === "string" ? route.query.sid : "";
+    const requestedState = requestedSid ? sess.getSessionState(requestedSid) : undefined;
+    let candidate = requestedState?.story_id === props.id && hasRealProgress(requestedState)
+      ? { sessionId: requestedSid, state: requestedState }
+      : sess.getInProgressForStory(props.id);
+    if (!candidate) {
       const remote = await sess.fetchRemoteSession(props.id);
-      // 远程也要求"翻过至少一页"才算进行中
-      if (remote && remote.cursor > 0 && remote.cursor < remote.flow.length - 1) inProgress = true;
+      if (remote && hasRealProgress(remote.state)) candidate = remote;
     }
-    if (inProgress) {
-      if (!store.current || store.current.id !== props.id) {
-        if (store.current && store.current.id !== props.id) store.reset();
-        await store.loadStory(props.id);
-      }
+    if (candidate) {
+      await store.loadStory(props.id);
       if (store.flow.length === 0) {
         toast.push("这个故事暂未准备好", "error");
         router.push("/library");
         return;
       }
-      currentSessionId();
+      resumeSessionId.value = candidate.sessionId;
       resumeModalOpen.value = true;
       return;
     }
 
-    if (!store.current || store.current.id !== props.id) {
-      if (store.current && store.current.id !== props.id) store.reset();
-      await store.loadStory(props.id);
-    }
+    await store.loadStory(props.id);
     if (store.flow.length === 0) {
       toast.push("这个故事暂未准备好", "error");
       router.push("/library");
       return;
     }
-    currentSessionId();
+    activeSessionId.value = sess.start(props.id, store.current?.title || props.id);
     await loadCursor(0);
   } catch (e: any) {
     toast.push(`加载失败：${e.message}`, "error");
@@ -479,36 +536,8 @@ watch(
     chatLog,
   ],
   () => {
-    if (!store.current || store.current.id !== props.id) return;
-    if (store.cursor >= store.flow.length) return;
-    // 保存当前场景的聊天到 chatLogByScene
-    if (scene.value && chatLog.value.length) {
-      chatLogByScene.value = { ...chatLogByScene.value, [String(scene.value.index)]: [...chatLog.value] };
-    }
-    const dynObj: Record<string, any> = {};
-    store.dynamicByScene?.forEach?.((v, k) => { dynObj[String(k)] = v; });
-    const pendingDynObj: Record<string, any> = {};
-    store.pendingDynamicByScene?.forEach?.((v, k) => { pendingDynObj[String(k)] = v; });
-    const interactObj: Record<string, any> = {};
-    interactStore.states?.forEach?.((v, k) => {
-      const [sid, sidxStr] = k.split(":");
-      if (sid !== props.id) return;
-      interactObj[sidxStr] = v;
-    });
-    sess.savePlayState({
-      story_id: props.id,
-      story_title: store.current.title,
-      cursor: store.cursor,
-      highestUnlocked: store.highestUnlocked,
-      flow: store.flow.map((f) => ({ ...f })),
-      dynamicByScene: dynObj,
-      pendingDynamicByScene: pendingDynObj,
-      interactByScene: interactObj,
-      interactions: store.interactions.map((i) => ({ ...i })),
-      comicUrls: [...store.comicUrls],
-      chatLogByScene: { ...chatLogByScene.value },
-      updatedAt: new Date().toISOString(),
-    });
+    const state = buildCurrentPlayState();
+    if (state) sess.savePlayState(state);
   },
   { deep: true, flush: "post" },
 );
@@ -517,8 +546,10 @@ onBeforeUnmount(() => { store.setJumpHandler(null); });
 
 watch(() => props.id, async (v) => {
   if (store.current?.id !== v) {
+    activeSessionId.value = "";
+    resumeSessionId.value = "";
     await store.loadStory(v);
-    currentSessionId();
+    activeSessionId.value = sess.start(v, store.current?.title || v);
     await loadCursor(0);
   }
 });
@@ -535,9 +566,12 @@ const nextPreviewComicUrl = computed<string | undefined>(() => {
   const nextIdx = store.cursor + 1;
   if (nextIdx >= store.flow.length) return undefined;
   const nextNode = store.flow[nextIdx];
-  const cached = store.sceneCache?.get?.(nextNode.sceneIdx);
+  const storyId = store.current?.id || props.id;
+  const cached = store.sceneCache?.get?.(`${storyId}:` + nextNode.sceneIdx);
   if (cached?.comic_url) return cached.comic_url;
+  if (cached?.background_url) return cached.background_url;
   const pad = String(nextNode.sceneIdx).padStart(3, "0");
+  if (storyId && storyId !== "little_red_riding_hood") return undefined;
   return nextNode.type === "narrative"
     ? `/assets/scenes/${pad}/comic/panel.png`
     : `/assets/scenes/${pad}/background/background.png`;
@@ -563,7 +597,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
     <BaseModal :open="resumeModalOpen" title="继续上次的玩法？" :max-width="'460px'" @close="onResumeCancel">
       <p class="text-sm text-ink-soft m-0 mb-2">
         你之前玩这个故事到
-        <span class="font-semibold text-ink">第 {{ ((sess.getPlayState(props.id)?.cursor ?? 0) + 1) }} / {{ sess.getPlayState(props.id)?.flow.length ?? 0 }} 页</span>
+        <span class="font-semibold text-ink">第 {{ ((resumePlayState?.cursor ?? 0) + 1) }} / {{ resumePlayState?.flow.length ?? 0 }} 页</span>
         ，所有摆放、道具和已生成的段落都保留了。
       </p>
       <p class="text-xs text-ink-mute m-0">选「覆盖」会清空上次进度从头开始。</p>
@@ -685,6 +719,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     v-model:ops="interactiveOps"
                     :scene="scene"
                     :story-id="props.id"
+                    :session-id="currentSessionId()"
                     :next-comic-url="nextPreviewComicUrl"
                     @generate="onInteractGenerate"
                   />

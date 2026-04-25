@@ -91,7 +91,7 @@ async function runStream() {
     toast.push("Session report not found", "error");
     return;
   }
-  const sessionId = existing?.id || session.ensure(props.id, store.current?.title || props.id);
+  const sessionId = existing?.id || session.start(props.id, store.current?.title || props.id);
   activeSessionId.value = sessionId;
   const record = session.getById(sessionId);
   if (record?.report_payload) {
@@ -117,14 +117,14 @@ async function runStream() {
     const p = stream.run({
       session_id: sessionId,
       story_id: props.id,
-      interactions: store.interactions,
+      interactions: record?.interactions || session.getSessionState(sessionId)?.interactions || store.interactions,
     });
     session.setReportPromise(sessionId, p);
     const resp = await p;
     payload.value = resp;
-    session.saveReport(sessionId, resp, session.getPlayState(props.id));
+    session.saveReport(sessionId, resp, session.getSessionState(sessionId));
     void buildShare();
-    session.clearPlayState(props.id);
+    session.completeSession(sessionId, session.getSessionState(sessionId));
   } catch (e: any) {
     failed.value = true;
     session.failReport(sessionId, e?.message || String(e));

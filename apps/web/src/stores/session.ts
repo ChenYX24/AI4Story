@@ -5,11 +5,12 @@ import type { Operation, CustomProp, InteractResponse, Interaction } from "@/api
 import type { FlowNode, PendingDynamicRecord } from "@/stores/story";
 import { getAuthToken } from "@/api/client";
 import {
-  createSessionApi, updateSessionApi, fetchSessionsApi,
+  createSessionApi, updateSessionApi, fetchSessionsApi, deleteSessionApi,
 } from "@/api/endpoints";
 
 export interface SessionRecord {
   id: string;
+  backend_session_id?: string;
   story_id: string;
   story_title: string;
   started_at: string;
@@ -31,6 +32,7 @@ export type FlowItem = FlowNode;
 export interface ChatMsg { role: "user" | "assistant"; text: string; }
 
 export interface SessionPlayState {
+  session_id: string;
   story_id: string;
   story_title?: string;
   cursor: number;
@@ -61,13 +63,16 @@ function readJson<T>(key: string, fallback: T): T {
 export const useSessionStore = defineStore("session", () => {
   const scope = ref("guest");
   const list = ref<SessionRecord[]>([]);
+  // playStates 按 session_id 存；同一 story_id 可以有多个互不污染的历史会话。
   const playStates = ref<Record<string, SessionPlayState>>({});
   const generatedNotices = ref<Record<string, boolean>>({});
-  // 后端 session id 映射：story_id → backend session id
+  // 后端 session id 映射：local session_id → backend session id
   const backendIds = ref<Record<string, string>>({});
   // 防抖定时器
   const _syncTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const reportPromises = new Map<string, Promise<any>>();
+  // 待写入 list 的"占位"会话 — 用户没翻过第一页就不会真的写进历史。
+  const pendingStarts = new Map<string, { story_id: string; story_title: string; started_at: string }>();
 
   const key = (name: string) => `mindshow_${scope.value}_${name}`;
 
@@ -75,11 +80,16 @@ export const useSessionStore = defineStore("session", () => {
     for (const timer of _syncTimers.values()) clearTimeout(timer);
     _syncTimers.clear();
     reportPromises.clear();
+    pendingStarts.clear();
     backendIds.value = {};
     scope.value = userId || "guest";
     list.value = readJson<SessionRecord[]>(key("sessions"), []);
-    playStates.value = readJson<Record<string, SessionPlayState>>(key("play_states"), {});
+    const rawStates = readJson<Record<string, SessionPlayState>>(key("play_states"), {});
+    playStates.value = Object.fromEntries(
+      Object.entries(rawStates).filter(([sid, state]) => state?.session_id === sid && state?.story_id),
+    );
     generatedNotices.value = readJson<Record<string, boolean>>(key("generated_notices"), {});
+    normalizeOpenSessions();
   }
 
   function persistScope() {
@@ -92,14 +102,19 @@ export const useSessionStore = defineStore("session", () => {
   watch([list, playStates, generatedNotices], persistScope, { deep: true });
 
   function start(story_id: string, story_title: string): string {
+    pruneOpenSessionsForStory(story_id);
     const id = "s_" + Date.now().toString(36);
-    list.value.unshift({ id, story_id, story_title, started_at: new Date().toISOString() });
-    if (list.value.length > 100) list.value.length = 100;
+    pendingStarts.set(id, { story_id, story_title, started_at: new Date().toISOString() });
     return id;
   }
 
   function ensure(story_id: string, story_title: string): string {
-    const active = list.value.find((s) => s.story_id === story_id && !s.report_ready);
+    const active = list.value.find((s) => (
+      s.story_id === story_id
+      && !s.finished_at
+      && !s.report_ready
+      && !!getSessionState(s.id)
+    ));
     if (active) {
       if (story_title && active.story_title !== story_title) active.story_title = story_title;
       return active.id;
@@ -108,13 +123,23 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   function currentForStory(storyId: string): SessionRecord | undefined {
-    return list.value.find((s) => s.story_id === storyId && !s.report_ready)
+    return list.value.find((s) => s.story_id === storyId && !s.finished_at && !s.report_ready)
       || list.value.find((s) => s.story_id === storyId);
   }
 
   function getById(id?: string | null): SessionRecord | undefined {
     if (!id) return undefined;
     return list.value.find((s) => s.id === id);
+  }
+
+  function getSessionState(sessionId?: string | null): SessionPlayState | undefined {
+    if (!sessionId) return undefined;
+    return playStates.value?.[sessionId] || list.value.find((s) => s.id === sessionId)?.play_state;
+  }
+
+  function isOpenState(ps?: SessionPlayState): ps is SessionPlayState {
+    return !!ps && !!ps.story_id && Array.isArray(ps.flow) && ps.flow.length > 0
+      && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
   }
 
   function markReportReady(id: string) {
@@ -189,6 +214,58 @@ export const useSessionStore = defineStore("session", () => {
     list.value = list.value.filter((s) => s.id !== id);
   }
 
+  function pruneOpenSessionsForStory(storyId: string, keepId?: string) {
+    const toRemove = list.value.filter((s) => (
+      s.story_id === storyId
+      && s.id !== keepId
+      && !s.finished_at
+      && !s.report_ready
+      && s.report_status !== "generating"
+    ));
+    for (const s of toRemove) {
+      deleteSession(s.id, { remote: false });
+    }
+    const nextStates = { ...playStates.value };
+    let changed = false;
+    for (const [sid, ps] of Object.entries(nextStates)) {
+      if (ps.story_id !== storyId || sid === keepId) continue;
+      delete nextStates[sid];
+      changed = true;
+    }
+    if (changed) playStates.value = nextStates;
+  }
+
+  function normalizeOpenSessions() {
+    const storyIds = new Set([
+      ...list.value.map((s) => s.story_id),
+      ...Object.values(playStates.value || {}).map((ps) => ps.story_id),
+    ]);
+    for (const storyId of storyIds) {
+      const candidates = openStateCandidates(storyId);
+      pruneOpenSessionsForStory(storyId, candidates[0]?.sessionId);
+    }
+  }
+
+  function deleteSession(sessionId: string, opts: { remote?: boolean } = {}) {
+    const record = list.value.find((s) => s.id === sessionId);
+    const timer = _syncTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      _syncTimers.delete(sessionId);
+    }
+    const bid = backendIds.value[sessionId] || record?.backend_session_id;
+    if (opts.remote !== false && bid && getAuthToken()) {
+      deleteSessionApi(bid).catch(() => {});
+    }
+    const { [sessionId]: _, ...restStates } = playStates.value || {};
+    playStates.value = restStates;
+    delete backendIds.value[sessionId];
+    reportPromises.delete(sessionId);
+    pendingStarts.delete(sessionId);
+    list.value = list.value.filter((s) => s.id !== sessionId);
+    return record;
+  }
+
   function clearAllForStory(storyId: string) {
     list.value = list.value.filter((s) => s.story_id !== storyId);
   }
@@ -215,79 +292,147 @@ export const useSessionStore = defineStore("session", () => {
     //   (a) 下次重新进入这个故事时弹"继续上次的玩法？"
     //   (b) 历史会话里堆一堆 0 进度的空记录
     if (state.cursor === 0) return;
-    playStates.value = { ...playStates.value, [state.story_id]: state };
-    const active = list.value.find((s) => s.story_id === state.story_id && !s.report_ready);
-    if (active) {
-      active.story_title = state.story_title || active.story_title;
-      Object.assign(active, snapshotFromState(state));
+    let record = list.value.find((s) => s.id === state.session_id && s.story_id === state.story_id);
+    if (!record) {
+      // 用户翻过第一页 → 把先前 start() 占位的会话真正写入 list。
+      const pending = pendingStarts.get(state.session_id);
+      if (pending && pending.story_id !== state.story_id) return;
+      record = {
+        id: state.session_id,
+        story_id: state.story_id,
+        story_title: state.story_title || pending?.story_title || state.story_id,
+        started_at: pending?.started_at || state.updatedAt || new Date().toISOString(),
+      };
+      list.value.unshift(record);
+      if (list.value.length > 100) list.value.length = 100;
+      pendingStarts.delete(state.session_id);
     }
-    _debouncedSync(state.story_id, state);
+    if (record.finished_at) return;
+    playStates.value = { ...playStates.value, [state.session_id]: state };
+    record.story_title = state.story_title || record.story_title;
+    Object.assign(record, snapshotFromState(state));
+    _debouncedSync(state.session_id, state);
   }
 
-  function getPlayState(storyId: string): SessionPlayState | undefined {
-    return playStates.value?.[storyId];
+  function getPlayState(sessionId: string): SessionPlayState | undefined {
+    return playStates.value?.[sessionId];
   }
 
-  function clearPlayState(storyId: string) {
-    const timer = _syncTimers.get(storyId);
+  function clearPlayState(sessionId: string) {
+    const timer = _syncTimers.get(sessionId);
     if (timer) {
       clearTimeout(timer);
-      _syncTimers.delete(storyId);
+      _syncTimers.delete(sessionId);
     }
-    const finishedState = playStates.value?.[storyId];
-    const { [storyId]: _, ...rest } = playStates.value || {};
+    const finishedState = getSessionState(sessionId);
+    const { [sessionId]: _, ...rest } = playStates.value || {};
     playStates.value = rest;
-    // 后端也标记完成
-    const bid = backendIds.value[storyId];
+    const record = list.value.find((s) => s.id === sessionId);
+    const bid = backendIds.value[sessionId] || record?.backend_session_id;
     if (bid && getAuthToken()) {
       updateSessionApi(bid, { play_state: finishedState || {}, status: "finished" }).catch(() => {});
     }
-    delete backendIds.value[storyId];
+    delete backendIds.value[sessionId];
   }
 
   function hasInProgress(storyId: string): boolean {
-    const ps = getPlayState(storyId);
-    // 至少翻过一页（cursor > 0）且没读到最后一页才算进行中。
-    return !!ps && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
+    return !!getInProgressForStory(storyId);
+  }
+
+  function getInProgressForStory(storyId: string): { sessionId: string; state: SessionPlayState } | null {
+    const candidates = openStateCandidates(storyId);
+    const found = candidates[0];
+    if (found) pruneOpenSessionsForStory(storyId, found.sessionId);
+    else pruneOpenSessionsForStory(storyId);
+    return found ? { sessionId: found.sessionId, state: found.state } : null;
+  }
+
+  function completeSession(sessionId: string, state?: SessionPlayState) {
+    const record = list.value.find((s) => s.id === sessionId);
+    const finalState = state || getSessionState(sessionId);
+    if (record) {
+      Object.assign(record, snapshotFromState(finalState));
+      record.finished_at = record.finished_at || new Date().toISOString();
+    }
+    clearPlayState(sessionId);
   }
 
   const completedReports = computed(() => list.value.filter((s) => s.report_ready && s.report_payload));
 
+  function openStateCandidates(storyId: string): Array<{ sessionId: string; state: SessionPlayState; updatedAt: string }> {
+    const byId = new Map<string, { sessionId: string; state: SessionPlayState; updatedAt: string }>();
+    for (const [sessionId, state] of Object.entries(playStates.value || {})) {
+      if (state.story_id !== storyId || !isOpenState(state)) continue;
+      byId.set(sessionId, { sessionId, state, updatedAt: state.updatedAt || "" });
+    }
+    for (const record of list.value) {
+      if (record.story_id !== storyId || record.finished_at || record.report_ready || record.report_status === "generating") continue;
+      const state = record.play_state;
+      if (!isOpenState(state)) continue;
+      byId.set(record.id, {
+        sessionId: record.id,
+        state,
+        updatedAt: state.updatedAt || record.started_at || "",
+      });
+    }
+    return Array.from(byId.values())
+      .sort((a, b) => Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || ""));
+  }
+
   // 后端防抖同步（5s）
-  function _debouncedSync(storyId: string, state: SessionPlayState) {
+  function _debouncedSync(sessionId: string, state: SessionPlayState) {
     if (!getAuthToken()) return;
-    const existing = _syncTimers.get(storyId);
+    const existing = _syncTimers.get(sessionId);
     if (existing) clearTimeout(existing);
-    _syncTimers.set(storyId, setTimeout(() => {
-      _syncTimers.delete(storyId);
-      _syncToBackend(storyId, state);
+    _syncTimers.set(sessionId, setTimeout(() => {
+      _syncTimers.delete(sessionId);
+      _syncToBackend(sessionId, state);
     }, 5000));
   }
 
-  async function _syncToBackend(storyId: string, state: SessionPlayState) {
+  async function _syncToBackend(sessionId: string, state: SessionPlayState) {
     try {
-      const bid = backendIds.value[storyId];
+      const record = list.value.find((s) => s.id === sessionId);
+      const bid = backendIds.value[sessionId] || record?.backend_session_id;
       if (bid) {
         await updateSessionApi(bid, { play_state: state as any });
+        backendIds.value = { ...backendIds.value, [sessionId]: bid };
       } else {
-        const r = await createSessionApi({ story_id: storyId, play_state: state as any });
-        backendIds.value = { ...backendIds.value, [storyId]: r.id };
+        const r = await createSessionApi({ story_id: state.story_id, play_state: state as any });
+        backendIds.value = { ...backendIds.value, [sessionId]: r.id };
+        if (record) record.backend_session_id = r.id;
       }
     } catch { /* 后端不可用时静默失败，localStorage 仍有数据 */ }
   }
 
   // 从后端拉取未完成会话（登录后 + 进入故事时调用）
-  async function fetchRemoteSession(storyId: string): Promise<SessionPlayState | null> {
+  async function fetchRemoteSession(storyId: string): Promise<{ sessionId: string; state: SessionPlayState } | null> {
     if (!getAuthToken()) return null;
     try {
       const { sessions } = await fetchSessionsApi(storyId);
-      const playing = sessions.find((s) => s.status === "playing");
+      const playing = sessions.find((s) => s.status === "playing" && s.play_state?.story_id === storyId);
       if (!playing) return null;
-      backendIds.value = { ...backendIds.value, [storyId]: playing.id };
       const ps = playing.play_state as unknown as SessionPlayState;
-      if (ps && ps.flow?.length) {
-        playStates.value = { ...playStates.value, [storyId]: ps };
-        return ps;
+      const sessionId = ps.session_id || playing.id;
+      if (ps && ps.flow?.length && ps.cursor > 0 && ps.cursor < ps.flow.length - 1) {
+        const state = { ...ps, session_id: sessionId, story_id: storyId };
+        pruneOpenSessionsForStory(storyId, sessionId);
+        backendIds.value = { ...backendIds.value, [sessionId]: playing.id };
+        playStates.value = { ...playStates.value, [sessionId]: state };
+        if (!list.value.some((s) => s.id === sessionId)) {
+          list.value.unshift({
+            id: sessionId,
+            backend_session_id: playing.id,
+            story_id: storyId,
+            story_title: state.story_title || storyId,
+            started_at: state.updatedAt || new Date().toISOString(),
+            play_state: state,
+          });
+        } else {
+          const existing = list.value.find((s) => s.id === sessionId);
+          if (existing) existing.backend_session_id = playing.id;
+        }
+        return { sessionId, state };
       }
     } catch { /* silent */ }
     return null;
@@ -298,9 +443,9 @@ export const useSessionStore = defineStore("session", () => {
     loadScope,
     start, ensure, currentForStory, getById,
     markReportReady, markReportGenerating, saveReport, failReport, setReportPromise, getReportPromise, updateSnapshot,
-    remove, clearAllForStory, clear,
+    remove, deleteSession, pruneOpenSessionsForStory, normalizeOpenSessions, clearAllForStory, clear,
     markGeneratedNotice, clearGeneratedNotice, hasGeneratedNotice,
-    savePlayState, getPlayState, clearPlayState, hasInProgress,
+    savePlayState, getPlayState, getSessionState, clearPlayState, hasInProgress, getInProgressForStory, completeSession,
     fetchRemoteSession, completedReports,
   };
 });

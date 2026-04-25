@@ -42,7 +42,7 @@ function stopLoadingHints() {
 }
 
 // nextComicUrl: 下一幕的叙事图，loading 时做背景图（后端未来会给"本幕对应的叙事补充图"，届时替换）
-const props = defineProps<{ scene: Scene; storyId: string; nextComicUrl?: string }>();
+const props = defineProps<{ scene: Scene; storyId: string; sessionId: string; nextComicUrl?: string }>();
 const emit = defineEmits<{
   (e: "generate", request: {
     story_id: string;
@@ -100,12 +100,7 @@ const actionText = ref("");
 const freeformText = ref("");
 const newPropName = ref("");
 
-const sessionId = computed(() => {
-  // 复用 sessions.list 中最近一次（StoryPage onMount 已 push）；找不到就生成一个
-  const latest = sessions.list[0];
-  if (latest && latest.story_id === props.storyId) return latest.id;
-  return "s_" + Date.now().toString(36);
-});
+const sessionId = computed(() => props.sessionId);
 
 // 预置 placements (从后端读默认布局)；placement 不带 url，从 scene.characters / .props 里按 name 查
 function findUrlByName(name: string, kind: "character" | "object"): string | undefined {
@@ -151,7 +146,7 @@ async function loadInitialPlacements() {
 
 onMounted(() => {
   // 先尝试恢复本幕之前的摆放 / ops / customProps（翻页回看 or 重玩都不丢）
-  const saved = interactStore.get(props.storyId, props.scene.index);
+  const saved = interactStore.get(sessionId.value, props.scene.index);
   if (saved && (saved.placed.length || saved.ops.length || saved.customProps.length)) {
     placed.value = saved.placed.map((p) => ({ ...p }));
     ops.value = saved.ops.map((o) => ({ ...o }));
@@ -169,7 +164,7 @@ onBeforeUnmount(() => {
 watch(
   [placed, ops, customProps],
   () => {
-    interactStore.save(props.storyId, props.scene.index, {
+    interactStore.save(sessionId.value, props.scene.index, {
       placed: placed.value,
       ops: ops.value,
       customProps: customProps.value,
@@ -179,7 +174,7 @@ watch(
 );
 
 function persistSceneState() {
-  interactStore.save(props.storyId, props.scene.index, {
+  interactStore.save(sessionId.value, props.scene.index, {
     placed: placed.value,
     ops: ops.value,
     customProps: customProps.value,

@@ -140,22 +140,26 @@ const myStories = computed(() => store.list.filter((s) => s.is_custom));
 const shelfStories = computed(() => store.list.filter((s) => shelf.has(s.id)));
 // 历史会话按 story 分组
 // 取该 session 对应的缩略图：进行中 → 最近一张 comic；已完成 → 故事 cover（从 store.list 找）
-function sessionThumb(s: { story_id: string }): string | undefined {
-  const ps = sess.getPlayState(s.story_id);
-  if (ps?.comicUrls?.length) return ps.comicUrls[ps.comicUrls.length - 1];
-  const sc = store.list.find((x) => x.id === s.story_id);
-  return sc?.cover_url;
+function storyCover(storyId: string): string | undefined {
+  return store.list.find((x) => x.id === storyId)?.cover_url;
 }
-function sessionProgress(storyId: string): number {
-  const ps = sess.getPlayState(storyId);
+function sessionThumb(s: { id: string; story_id: string; comic_urls?: string[]; report_comics?: string[] }): string | undefined {
+  const ps = sess.getSessionState(s.id);
+  if (ps?.comicUrls?.length) return ps.comicUrls[ps.comicUrls.length - 1];
+  if (s.report_comics?.length) return s.report_comics[s.report_comics.length - 1];
+  if (s.comic_urls?.length) return s.comic_urls[s.comic_urls.length - 1];
+  return storyCover(s.story_id);
+}
+function sessionProgress(sessionId: string): number {
+  const ps = sess.getSessionState(sessionId);
   if (!ps || ps.flow.length === 0) return 0;
   const baseFlow = ps.flow.filter((f) => f.type !== "dynamic");
   const baseTotal = baseFlow.length || ps.flow.length;
   const currentBase = ps.flow.slice(0, ps.cursor + 1).filter((f) => f.type !== "dynamic").length || 1;
   return Math.round((currentBase / baseTotal) * 100);
 }
-function sessionProgressText(storyId: string): string {
-  const ps = sess.getPlayState(storyId);
+function sessionProgressText(sessionId: string): string {
+  const ps = sess.getSessionState(sessionId);
   if (!ps || ps.flow.length === 0) return "? / ?";
   const baseFlow = ps.flow.filter((f) => f.type !== "dynamic");
   const baseTotal = baseFlow.length || ps.flow.length;
@@ -164,15 +168,15 @@ function sessionProgressText(storyId: string): string {
 }
 const profileSessions = computed(() => {
   const merged = [...sess.list];
-  const known = new Set(merged.map((s) => s.story_id));
-  for (const [storyId, ps] of Object.entries(sess.playStates || {})) {
-    if (known.has(storyId)) continue;
+  const known = new Set(merged.map((s) => s.id));
+  for (const [sessionId, ps] of Object.entries(sess.playStates || {})) {
+    if (known.has(sessionId)) continue;
     if (ps.cursor >= ps.flow.length - 1) continue;
-    const story = store.list.find((s) => s.id === storyId);
+    const story = store.list.find((s) => s.id === ps.story_id);
     merged.push({
-      id: `ps_${storyId}`,
-      story_id: storyId,
-      story_title: ps.story_title || story?.title || storyId,
+      id: sessionId,
+      story_id: ps.story_id,
+      story_title: ps.story_title || story?.title || ps.story_id,
       started_at: ps.updatedAt,
       report_ready: false,
     });
@@ -355,7 +359,7 @@ function onRemoveFromShelf(id: string, e: MouseEvent) {
 function onRemoveSession(id: string, e: MouseEvent) {
   e.stopPropagation();
   if (!confirm("删除这次会话记录？")) return;
-  sess.remove(id);
+  sess.deleteSession(id);
   toast.push("已删除", "success");
 }
 
@@ -365,7 +369,9 @@ onMounted(() => {
 });
 
 function backHome() { router.push("/"); }
-function openStory(id: string) { router.push({ name: "story", params: { id } }); }
+function openStory(id: string, sid?: string) {
+  router.push({ name: "story", params: { id }, query: sid ? { sid } : {} });
+}
 function openReport(storyId: string, sid?: string) { router.push({ name: "report", params: { id: storyId }, query: sid ? { sid } : {} }); }
 </script>
 
@@ -506,7 +512,7 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
                 :key="s.id"
                 hover
                 class="p-0 relative group cursor-pointer overflow-hidden"
-                @click="s.report_ready || s.report_status === 'generating' ? openReport(s.story_id, s.id) : openStory(s.story_id)"
+                @click="s.report_ready || s.report_status === 'generating' ? openReport(s.story_id, s.id) : openStory(s.story_id, s.id)"
               >
                 <span
                   v-if="sess.hasGeneratedNotice(s.story_id)"
@@ -532,7 +538,7 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
                     class="absolute top-1.5 right-4 px-2 py-0.5 text-[10px] rounded-full bg-gold/90 text-ink"
                   >生成中</span>
                   <span
-                    v-else-if="sess.hasInProgress(s.story_id)"
+                    v-else-if="!!sess.getSessionState(s.id)"
                     class="absolute top-1.5 right-4 px-2 py-0.5 text-[10px] rounded-full bg-accent/90 text-white"
                   >进行中</span>
                 </div>
@@ -542,15 +548,15 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
                     {{ new Date(s.started_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) }}
                   </div>
                   <!-- 进度条：in-progress -->
-                  <div v-if="!s.report_ready && sess.hasInProgress(s.story_id)" class="mt-1">
+                  <div v-if="!s.report_ready && !!sess.getSessionState(s.id)" class="mt-1">
                     <div class="h-1.5 bg-paper-deep rounded-full overflow-hidden">
                       <div
                         class="h-full bg-gradient-to-r from-accent-soft to-accent-deep transition-all"
-                        :style="{ width: sessionProgress(s.story_id) + '%' }"
+                        :style="{ width: sessionProgress(s.id) + '%' }"
                       ></div>
                     </div>
                     <div class="text-[11px] text-ink-mute mt-1">
-                      第 {{ sessionProgressText(s.story_id) }} 页
+                      第 {{ sessionProgressText(s.id) }} 页
                     </div>
                   </div>
                   <div v-else-if="s.report_status === 'generating'" class="text-xs text-accent-deep">点击查看生成进度</div>
@@ -562,6 +568,12 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
                   title="删除会话"
                   @click="(e) => onRemoveSession(s.id, e)"
                 >✕</button>
+                <div
+                  class="absolute right-2 bottom-2 max-w-[70%] truncate rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-mono text-ink-mute border border-paper-edge"
+                  :title="`会话 ID：${s.id}`"
+                >
+                  {{ s.id }}
+                </div>
               </BaseCard>
             </div>
           </div>
