@@ -91,6 +91,14 @@ const assetSubs = [
   { key: "official",  label: "官方资产库" },
 ];
 const assetSub = ref<"mine" | "favorites" | "official">("mine");
+// 资产 tab 的全局搜索关键字 —— 三个子页（我的创作 / 收藏 / 官方）共用同一个输入框
+const assetSearch = ref("");
+function _matchAssetSearch(name: string | undefined | null, ...extras: (string | undefined | null)[]) {
+  const q = assetSearch.value.trim().toLowerCase();
+  if (!q) return true;
+  if (name && name.toLowerCase().includes(q)) return true;
+  return extras.some((s) => !!s && s.toLowerCase().includes(q));
+}
 
 // 真资产数据 — 从 /api/public/assets 拿
 const publicAssets = ref<PublicAsset[]>([]);
@@ -129,6 +137,23 @@ const favAssets = computed(() =>
 const favBundles = computed(() =>
   assetShelf.bundleIds.filter((id) => bundleById.value.has(id))
     .map((id) => bundleById.value.get(id)!),
+);
+
+// 三组带搜索过滤的派生列表 —— 搜索框为空时等价于原列表。
+const filteredMyAssets = computed(() =>
+  assetShelf.myAssets.filter((a) => _matchAssetSearch(a.name)),
+);
+const filteredFavAssets = computed(() =>
+  favAssets.value.filter((a) => _matchAssetSearch(a.name)),
+);
+const filteredFavBundles = computed(() =>
+  favBundles.value.filter((b) => _matchAssetSearch(b.name, b.description)),
+);
+const filteredPublicAssets = computed(() =>
+  publicAssets.value.filter((a) => _matchAssetSearch(a.name)),
+);
+const filteredPublicBundles = computed(() =>
+  publicBundles.value.filter((b) => _matchAssetSearch(b.name, b.description)),
 );
 
 function onRemoveAssetFav(id: string, e: MouseEvent) {
@@ -603,6 +628,21 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
             共 <span class="font-semibold text-ink">{{ assetShelf.total }}</span> 件
           </div>
         </div>
+        <!-- 资产搜索：三个子 tab 共用，按名称过滤；空内容显示全部 -->
+        <div class="mb-4 relative max-w-md">
+          <input
+            v-model="assetSearch"
+            type="text"
+            placeholder="🔍 搜索道具 / 人物名称…"
+            class="w-full text-sm px-3 py-2 pr-7 rounded-full bg-white border border-paper-edge focus:border-accent/60 focus:outline-none transition"
+          />
+          <button
+            v-if="assetSearch"
+            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-mute hover:text-ink text-base leading-none"
+            title="清空"
+            @click="assetSearch = ''"
+          >×</button>
+        </div>
 
         <!-- Loading skeleton -->
         <div v-if="assetsLoading && publicAssets.length === 0" class="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
@@ -652,14 +692,17 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
             <div class="font-bold text-ink">还没有自创道具</div>
             <div class="text-sm text-ink-soft mt-1">在互动页"造个新道具"里，AI 画好的 / 上传的道具都会出现在这里</div>
           </div>
+          <div v-else-if="filteredMyAssets.length === 0" class="text-center py-12 text-ink-mute text-sm">
+            没找到名字含「{{ assetSearch }}」的道具
+          </div>
           <div v-else>
             <div class="text-sm font-semibold text-ink-soft mb-2">
-              ✨ 我画的道具 · {{ assetShelf.myAssets.length }}
+              ✨ 我画的道具 · {{ filteredMyAssets.length }}<span v-if="assetSearch" class="font-normal text-ink-mute">/{{ assetShelf.myAssets.length }}</span>
               <span v-if="mineSelected.size" class="text-accent-deep font-normal ml-2">已选 {{ mineSelected.size }}</span>
             </div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <BaseCard
-                v-for="a in assetShelf.myAssets"
+                v-for="a in filteredMyAssets"
                 :key="a.id"
                 hover
                 class="overflow-hidden cursor-pointer relative group border-2"
@@ -692,11 +735,11 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
         <!-- 我的收藏 -->
         <template v-else-if="assetSub === 'favorites'">
           <!-- 收藏的 bundle -->
-          <div v-if="favBundles.length" class="mb-6">
-            <div class="text-sm font-semibold text-ink-soft mb-2">📦 收藏的资产包 · {{ favBundles.length }}</div>
+          <div v-if="filteredFavBundles.length" class="mb-6">
+            <div class="text-sm font-semibold text-ink-soft mb-2">📦 收藏的资产包 · {{ filteredFavBundles.length }}<span v-if="assetSearch" class="font-normal text-ink-mute">/{{ favBundles.length }}</span></div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
               <BaseCard
-                v-for="b in favBundles"
+                v-for="b in filteredFavBundles"
                 :key="b.id"
                 hover
                 class="overflow-hidden relative group cursor-pointer"
@@ -722,11 +765,11 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
           </div>
 
           <!-- 收藏的单件 -->
-          <div v-if="favAssets.length">
-            <div class="text-sm font-semibold text-ink-soft mb-2">🎭 收藏的单件 · {{ favAssets.length }}</div>
+          <div v-if="filteredFavAssets.length">
+            <div class="text-sm font-semibold text-ink-soft mb-2">🎭 收藏的单件 · {{ filteredFavAssets.length }}<span v-if="assetSearch" class="font-normal text-ink-mute">/{{ favAssets.length }}</span></div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <BaseCard
-                v-for="a in favAssets"
+                v-for="a in filteredFavAssets"
                 :key="a.id"
                 hover
                 class="overflow-hidden relative group cursor-pointer"
@@ -757,16 +800,22 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
             <div class="text-sm text-ink-soft mt-1">去首页"公共平台 · 精选资产"里 ☆ 收藏喜欢的角色/道具/资产包</div>
             <div class="mt-4"><BaseButton pill @click="router.push('/')">去公共平台 →</BaseButton></div>
           </div>
+          <div
+            v-else-if="filteredFavBundles.length === 0 && filteredFavAssets.length === 0 && assetSearch"
+            class="text-center py-12 text-ink-mute text-sm"
+          >
+            没找到名字含「{{ assetSearch }}」的收藏
+          </div>
         </template>
 
         <!-- 官方资产库 -->
         <template v-else>
           <!-- 官方 bundles -->
-          <div v-if="favBundles.length" class="mb-6">
-            <div class="text-sm font-semibold text-ink-soft mb-2">📦 官方资产包</div>
+          <div v-if="filteredFavBundles.length" class="mb-6">
+            <div class="text-sm font-semibold text-ink-soft mb-2">📦 官方资产包<span v-if="assetSearch" class="font-normal text-ink-mute">·{{ filteredFavBundles.length }}/{{ favBundles.length }}</span></div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
               <BaseCard
-                v-for="b in favBundles"
+                v-for="b in filteredFavBundles"
                 :key="b.id"
                 hover
                 :glow="true"
@@ -797,10 +846,13 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
 
           <!-- 官方单件 -->
           <div>
-            <div class="text-sm font-semibold text-ink-soft mb-2">🎭 官方单件</div>
+            <div class="text-sm font-semibold text-ink-soft mb-2">🎭 官方单件<span v-if="assetSearch" class="font-normal text-ink-mute">·{{ filteredFavAssets.length }}/{{ favAssets.length }}</span></div>
+            <div v-if="assetSearch && filteredFavAssets.length === 0 && filteredFavBundles.length === 0" class="text-center py-12 text-ink-mute text-sm">
+              没找到名字含「{{ assetSearch }}」的官方资产
+            </div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
               <BaseCard
-                v-for="a in favAssets"
+                v-for="a in filteredFavAssets"
                 :key="a.id"
                 hover
                 class="overflow-hidden relative cursor-pointer"

@@ -46,7 +46,14 @@ const pendingDynamicError = ref<string | null>(null);
 async function loadCursor(idx: number) {
   if (idx < 0 || idx >= store.flow.length) return;
   loading.value = true;
-  comicView.value = 'custom';
+  // 进入 dynamic 节点时按"是否已生成"决定默认视图：未就绪 → 原故事；已就绪 → 新段落
+  const targetNode = store.flow[idx];
+  if (targetNode?.type === 'dynamic') {
+    const ready = !!store.dynamicByScene?.get?.(targetNode.sceneIdx);
+    comicView.value = ready ? 'custom' : 'original';
+  } else {
+    comicView.value = 'custom';
+  }
   try {
     const node = store.flow[idx];
     store.cursor = idx;
@@ -761,8 +768,9 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                 </template>
               </div>
 
-              <!-- 底部操作条 —— 永远渲染，保证"完成"按钮在视口底部不被 overflow 截 -->
-              <div class="mt-3 flex flex-wrap gap-2 items-center pt-3 border-t border-dashed border-paper-edge">
+              <!-- 底部操作条 —— relative + absolute 居中切换按钮，让它永远贴在 bar 中央
+                   (而不是被左右两组按钮的宽度挤动)。flex-wrap 仍允许小屏自然换行。 -->
+              <div class="mt-3 relative flex flex-wrap gap-2 items-center pt-3 border-t border-dashed border-paper-edge">
                 <div class="flex gap-2 flex-wrap">
                   <BaseButton variant="soft" size="sm" pill :disabled="store.cursor === 0" @click="retreatNode">⬅ 上一页</BaseButton>
                   <BaseButton
@@ -781,22 +789,28 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     @click="advanceLine"
                   >🔊 下一句</BaseButton>
                 </div>
-                <!-- 中间：原故事 / 自定义 四格漫画切换 —— 仅在 dynamic 段落 ready 后出现 -->
-                <div class="flex-1 flex justify-center">
+                <!-- 中间：原故事 / 自定义 切换 —— dynamic 节点（含 pending）都展示。
+                     按钮文案 = 当前展示的视图；pending 时只能看原故事，所以禁用。-->
+                <div
+                  v-if="node?.type === 'dynamic'"
+                  class="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 pointer-events-none"
+                >
                   <BaseButton
-                    v-if="dynamicNode"
                     variant="soft"
                     size="sm"
                     pill
+                    :disabled="isPendingDynamic"
+                    class="pointer-events-auto"
                     @click="toggleComicView"
                   >
-                    {{ comicView === 'custom' ? '📖 看原故事四格' : '✨ 看新段落四格' }}
+                    {{ comicView === 'custom' ? '✨ 新故事' : '📖 原故事' }}
                   </BaseButton>
                 </div>
                 <template v-if="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic">
                   <BaseButton
                     size="sm"
                     pill
+                    class="ml-auto"
                     :disabled="interactiveOps.length === 0 || interactiveGenerating"
                     @click="callInteractiveComplete"
                   >
@@ -804,7 +818,7 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                   </BaseButton>
                 </template>
                 <template v-else>
-                  <BaseButton size="sm" pill @click="advanceNode">
+                  <BaseButton size="sm" pill class="ml-auto" @click="advanceNode">
                     {{ isLast ? "📊 查看报告" : "继续 ⏭" }}
                   </BaseButton>
                 </template>

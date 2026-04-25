@@ -420,7 +420,13 @@ function addFreeformOp() {
 }
 
 function removePlaced(id: string) {
+  // 移出舞台时如果该道具是自造道具，连同"✨ 我造的道具"列表一起删掉，
+  // 这样下次想再用，就要重新通过"添加我的资产"对话框选/造一次。
+  const item = placed.value.find((p) => p.id === id);
   placed.value = placed.value.filter((p) => p.id !== id);
+  if (item?.custom_url) {
+    customProps.value = customProps.value.filter((c) => c.url !== item.custom_url);
+  }
   if (selA.value?.id === id) selA.value = null;
   if (selB.value?.id === id) selB.value = null;
 }

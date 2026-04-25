@@ -47,6 +47,7 @@ const publicBundles = ref<PublicAssetBundle[]>([]);
 const myPacks = ref<PackOut[]>([]);
 const loading = ref(false);
 const tab = ref<"all" | "character" | "object">("all");
+const search = ref("");
 
 async function load() {
   loading.value = true;
@@ -64,7 +65,13 @@ async function load() {
   }
 }
 onMounted(load);
-watch(() => props.open, (o) => { if (o) load(); });
+watch(() => props.open, (o) => {
+  if (o) {
+    // 每次打开都重新拉资产，并把搜索框重置为空（用户每次开起来都看到完整列表）
+    load();
+    search.value = "";
+  }
+});
 
 function guessKind(raw: any): "character" | "object" {
   const k = String(raw?.kind || "").toLowerCase();
@@ -151,8 +158,17 @@ const allAssets = computed<UnifiedAsset[]>(() => {
 });
 
 const filtered = computed(() => {
-  if (tab.value === "all") return allAssets.value;
-  return allAssets.value.filter((a) => a.kind === tab.value);
+  const q = search.value.trim().toLowerCase();
+  let list = allAssets.value;
+  if (tab.value !== "all") list = list.filter((a) => a.kind === tab.value);
+  if (q) {
+    list = list.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        (a.pack_name || "").toLowerCase().includes(q),
+    );
+  }
+  return list;
 });
 
 const originLabel: Record<UnifiedAsset["origin"], string> = {
@@ -173,7 +189,7 @@ function onPick(a: UnifiedAsset) {
 <template>
   <BaseModal :open="open" title="📦 我的资产" max-width="640px" @close="emit('close')">
     <div class="space-y-3">
-      <div class="flex gap-2 text-xs">
+      <div class="flex gap-2 text-xs items-center">
         <button
           v-for="t in [{ k: 'all', label: '全部' }, { k: 'character', label: '人物' }, { k: 'object', label: '道具' }] as const"
           :key="t.k"
@@ -181,8 +197,22 @@ function onPick(a: UnifiedAsset) {
           :class="tab === t.k ? 'bg-accent text-white border-accent' : 'bg-paper hover:bg-paper-deep text-ink-soft'"
           @click="tab = t.k"
         >{{ t.label }}</button>
-        <div class="ml-auto text-ink-mute text-xs self-center" v-if="!loading">共 {{ filtered.length }} 个</div>
-        <div class="ml-auto text-ink-mute text-xs self-center animate-pulse" v-else>加载中…</div>
+        <div class="ml-auto text-ink-mute text-xs" v-if="!loading">共 {{ filtered.length }} 个</div>
+        <div class="ml-auto text-ink-mute text-xs animate-pulse" v-else>加载中…</div>
+      </div>
+      <div class="relative">
+        <input
+          v-model="search"
+          type="text"
+          placeholder="🔍 搜索道具 / 人物名称…"
+          class="w-full text-sm px-3 py-1.5 pr-7 rounded-full bg-paper border border-paper-edge focus:border-accent/60 focus:outline-none transition"
+        />
+        <button
+          v-if="search"
+          class="absolute right-2 top-1/2 -translate-y-1/2 text-ink-mute hover:text-ink text-sm leading-none"
+          title="清空"
+          @click="search = ''"
+        >×</button>
       </div>
 
       <div
@@ -190,7 +220,8 @@ function onPick(a: UnifiedAsset) {
         style="max-height: 480px;"
       >
         <div v-if="!filtered.length && !loading" class="col-span-full text-center text-ink-mute text-sm py-12">
-          还没有资产～先去收藏几件或自己画一个吧
+          <template v-if="search">没找到名字含「{{ search }}」的资产</template>
+          <template v-else>还没有资产～先去收藏几件或自己画一个吧</template>
         </div>
         <button
           v-for="a in filtered"
