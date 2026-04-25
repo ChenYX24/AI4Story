@@ -1,0 +1,89 @@
+# push 到 main 自动跑服务器上的 deploy_server.sh：
+#   git fetch + reset --hard + pip install + pnpm build + rsync + systemctl restart
+#
+# 需要在 repo Settings → Secrets and variables → Actions 配置：
+#   SSH_HOST         115.190.116.57
+#   SSH_USER         root
+#   SSH_PORT         22                 # 可选，缺省 22
+#   SSH_PRIVATE_KEY  机器的私钥（OpenSSH 格式，带 -----BEGIN/END----- 头尾）
+#   SSH_KNOWN_HOSTS  ssh-keyscan -p <PORT> <HOST> 的输出（可选，跳过会自动 keyscan）
+#
+# 也提供 workflow_dispatch 手动触发：Actions tab → Deploy to server → Run workflow。
+name: Deploy to server
+
+on:
+  push:
+    branches: [main]
+    # 只跑那些会影响线上 build/run 的目录改动；纯文档修改不触发。
+    paths:
+      - "apps/**"
+      - "scripts/**"
+      - "contracts/**"
+      - "packages/**"
+      - "deploy/**"
+      - "requirements.txt"
+      - "environment.yml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Set up SSH key + known_hosts
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SSH_PRIVATE_KEY:-}" || -z "${SSH_HOST:-}" ]]; then
+            echo "::error::SSH_PRIVATE_KEY 或 SSH_HOST 未配置，跳过部署"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          PORT="${SSH_PORT:-22}"
+          if [[ -n "${SSH_KNOWN_HOSTS:-}" ]]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$PORT" -H "$SSH_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run deploy_server.sh on remote
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -euo pipefail
+          USER="${SSH_USER:-root}"
+          PORT="${SSH_PORT:-22}"
+          # -T 避免分配 TTY；ServerAliveInterval 防长任务被运营商空闲断开。
+          ssh -i ~/.ssh/deploy_key \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              -p "$PORT" -T "$USER@$SSH_HOST" \
+              'bash /root/hackthron/AI4Story/deploy/deploy_server.sh'
+
+      - name: Smoke check public endpoints
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          # 给 systemd 一点点起 worker 的时间
+          sleep 6
+          # 用公网入口探测，确认 nginx :8818 + 反代 /api 都通
+          curl -fsS --max-time 15 "http://$SSH_HOST:8818/" -o /dev/null
+          curl -fsS --max-time 15 "http://$SSH_HOST:8818/api/public/stories" -o /dev/null
+          echo "✓ frontend + /api/public/stories OK"

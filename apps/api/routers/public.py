@@ -105,8 +105,10 @@ def public_stories(authorization: Optional[str] = Header(default=None)) -> Publi
     user_id = user["id"] if user else None
     bookmarked_ids = db.list_story_bookmark_ids(user_id) if user_id else set()
 
-    # 1) DB 里所有公开故事（官方 + 用户主动 share 的）；登录用户排除自己发布的（他们能在"我的原创"里看）。
-    rows = db.list_public_stories_with_owner(exclude_user_id=user_id)
+    # 列出所有公开故事（官方 + 用户主动 share 的）。**不再排除作者本人**——
+    # 否则作者发布完故事会发现自己在主页看不到，无法验证 share 是否生效。
+    # 前端通过 owner_user_id === 当前 user.id 来隐藏"添加到我的故事"按钮即可。
+    rows = db.list_public_stories_with_owner()
     for r in rows:
         cards.append(_row_to_card(r, bookmarked=r["id"] in bookmarked_ids))
 

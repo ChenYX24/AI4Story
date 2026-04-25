@@ -484,8 +484,14 @@ async function submitSketch() {
               <span class="text-[11px] text-ink-mute">{{ s.scene_count }} 幕</span>
               <div class="flex items-center gap-1.5">
                 <span v-if="s.official" class="px-2 py-0.5 rounded-full text-[11px] bg-gradient-to-r from-gold to-accent text-white">官方</span>
+                <!-- 自己发布的故事不展示"添加到我的故事"——已经在「我的原创」里了 -->
+                <span
+                  v-else-if="userStore.user && s.owner_user_id === userStore.user.id"
+                  class="px-2 py-0.5 text-[11px] rounded-full bg-accent-soft/30 text-accent-deep"
+                  title="这是你发布的故事"
+                >📤 我发布的</span>
                 <button
-                  v-if="!s.official"
+                  v-else
                   class="px-2 py-0.5 text-[11px] rounded-full transition"
                   :class="s.bookmarked
                     ? 'bg-good/20 text-good hover:bg-warn/20 hover:text-warn'
