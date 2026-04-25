@@ -9,8 +9,11 @@ import BaseModal from "@/components/BaseModal.vue";
 import { useToastStore } from "@/stores/toast";
 import { useShelfStore } from "@/stores/shelf";
 import { useAssetShelfStore } from "@/stores/assetShelf";
+import { useUserStore } from "@/stores/user";
+import { useRoute } from "vue-router";
 import {
   createCustomStory,
+  createStoryFromVideo,
   fetchPublicStories,
   fetchPublicAssets,
   uploadImage,
@@ -18,25 +21,39 @@ import {
 import type { PublicStoryCard, PublicAsset, PublicAssetBundle } from "@/api/types";
 
 const router = useRouter();
+const route = useRoute();
 const toast = useToastStore();
 const shelf = useShelfStore();
 const assetShelf = useAssetShelfStore();
+const userStore = useUserStore();
 
-// 就绪的 tab 放前面（文字、手绘已可用；语音、视频开发中 🔒）—— P-L1
+// 未登录时统一弹登录窗 —— 登录成功后回到当前页（用 ?login=1 触发 App.vue 里的 LoginModal）
+function requireLogin(action: string): boolean {
+  if (userStore.isAuthed) return true;
+  toast.push(`${action}前请先登录`, "warn");
+  router.push({ query: { ...route.query, login: "1", redirect: route.fullPath } });
+  return false;
+}
+
+// 就绪的 tab 放前面（文字、手绘、视频已可用；语音开发中 🔒）—— P-L1
 const landingTabs = [
   { key: "text",   label: "文字描述", icon: "✍️" },
   { key: "sketch", label: "手绘上传", icon: "🎨" },
   { key: "voice",  label: "语音讲述 🔒", icon: "🎙️" },
-  { key: "video",  label: "视频导入 🔒", icon: "🎬" },
+  { key: "video",  label: "视频导入", icon: "🎬" },
 ];
 const activeTab = ref("text");
 const title = ref("");
 const textInput = ref("");
 const submitting = ref(false);
+const videoTitle = ref("");
+const videoUrl = ref("");
+const videoSubmitting = ref(false);
 
 async function submitText() {
   const text = textInput.value.trim();
   if (!text) { toast.push("先输入一点故事内容吧", "warn"); return; }
+  if (!requireLogin("创建故事")) return;
   submitting.value = true;
   try {
     await createCustomStory({ text, title: title.value.trim() || undefined });
@@ -44,9 +61,37 @@ async function submitText() {
     textInput.value = ""; title.value = "";
     router.push("/library");
   } catch (e: any) {
-    toast.push(`创建失败：${e.message}`, "error");
+    if (e?.status === 401) {
+      router.push({ query: { ...route.query, login: "1", redirect: route.fullPath } });
+      toast.push("登录已过期，请重新登录", "warn");
+    } else {
+      toast.push(`创建失败：${e.message}`, "error");
+    }
   } finally {
     submitting.value = false;
+  }
+}
+
+async function submitVideo() {
+  const url = videoUrl.value.trim();
+  if (!url) { toast.push("先粘贴一个公开 B 站视频链接", "warn"); return; }
+  if (!requireLogin("导入视频故事")) return;
+  videoSubmitting.value = true;
+  try {
+    await createStoryFromVideo({ url, title: videoTitle.value.trim() || undefined });
+    toast.push("视频故事已进入后台生成，去书架看进度", "success");
+    videoTitle.value = "";
+    videoUrl.value = "";
+    router.push("/library");
+  } catch (e: any) {
+    if (e?.status === 401) {
+      router.push({ query: { ...route.query, login: "1", redirect: route.fullPath } });
+      toast.push("登录已过期，请重新登录", "warn");
+    } else {
+      toast.push(`视频导入失败：${e.message}`, "error");
+    }
+  } finally {
+    videoSubmitting.value = false;
   }
 }
 
@@ -167,6 +212,7 @@ async function submitSketch() {
   if (!sketchImages.value.length) { toast.push("先上传至少一张图", "warn"); return; }
   const desc = sketchDesc.value.trim();
   if (!desc) { toast.push("用几句话描述你画了什么，AI 才能接着往下编 ✏️", "warn"); return; }
+  if (!requireLogin("生成手绘故事")) return;
   sketchUploading.value = true;
   try {
     // 所有图并行上传
@@ -288,26 +334,37 @@ async function submitSketch() {
           </div>
         </div>
 
-        <!-- 视频导入 —— 精致占位 -->
-        <div v-else-if="activeTab === 'video'" class="py-8 px-4">
-          <div class="bg-paper rounded-xl p-6 border-2 border-dashed border-paper-edge">
+        <!-- 视频导入 —— B 站公开链接 -->
+        <div v-else-if="activeTab === 'video'">
+          <input
+            v-model="videoTitle"
+            type="text"
+            placeholder="给视频故事取个名字（选填）"
+            maxlength="32"
+            class="w-full px-4 py-3 mb-3 rounded-xl border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+          />
+          <div class="bg-paper rounded-xl p-5 border border-paper-edge">
             <div class="flex items-start gap-4 flex-wrap">
               <div class="text-5xl animate-floaty">🎬</div>
               <div class="flex-1 min-w-[220px]">
-                <div class="font-semibold text-ink mb-1">视频导入</div>
+                <div class="font-semibold text-ink mb-1">公开视频链接</div>
                 <div class="text-sm text-ink-soft mb-3">
-                  粘贴 B 站 / 抖音 / YouTube 链接或上传 .mp4 → AI 抽关键帧 + 字幕 → 拆成绘本。
+                  当前支持 B 站公开视频：优先读取字幕，没有字幕时会下载音频并转写，再改编成绘本故事。
                 </div>
-                <div class="flex gap-2">
+                <div class="flex flex-col sm:flex-row gap-2">
                   <input
+                    v-model="videoUrl"
                     type="url"
                     placeholder="https://www.bilibili.com/video/..."
-                    disabled
-                    class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white/60 text-ink-mute"
+                    class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+                    @keydown.meta.enter="submitVideo"
+                    @keydown.ctrl.enter="submitVideo"
                   />
-                  <BaseButton variant="soft" size="sm" pill disabled>开发中</BaseButton>
+                  <BaseButton :disabled="videoSubmitting" size="sm" pill @click="submitVideo">
+                    {{ videoSubmitting ? "导入中…" : "开始导入" }}
+                  </BaseButton>
                 </div>
-                <div class="text-xs text-ink-mute mt-3">预计阶段 3 开放；骨架在 <code class="px-1 bg-paper-deep rounded">agent-docs/plan/</code></div>
+                <div class="text-xs text-ink-mute mt-3">限制 10 分钟以内；会员、番剧、登录可见或合集视频暂不保证可用。</div>
               </div>
             </div>
           </div>

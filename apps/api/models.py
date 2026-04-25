@@ -180,6 +180,11 @@ class CustomStoryCreateRequest(BaseModel):
     title: str = ""
 
 
+class VideoStoryCreateRequest(BaseModel):
+    url: str
+    title: str = ""
+
+
 class ReportInteraction(BaseModel):
     scene_idx: int
     interaction_goal: str = ""

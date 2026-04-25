@@ -11,15 +11,22 @@ import type {
 
 export const fetchStories   = () => apiGet<StoriesResponse>("/api/stories");
 export const fetchStory     = (id: string) => apiGet<StoryDetail>(`/api/story?story_id=${encodeURIComponent(id)}`);
-export const fetchScene     = (idx: number) => apiGet<Scene>(`/api/scene/${idx}`);
+export const fetchScene     = (idx: number, storyId?: string) => {
+  const qs = storyId ? `?story_id=${encodeURIComponent(storyId)}` : "";
+  return apiGet<Scene>(`/api/scene/${idx}${qs}`);
+};
 export const postReport     = (req: ReportRequest) => apiPost<ReportResponse>("/api/report", req);
 export const postShare      = (body: ShareInit) => apiPost<ShareResponse>("/api/share", body);
 export const createCustomStory = (body: { text: string; title?: string }) =>
   apiPost<import("./types").StoryCard>("/api/stories/custom", body);
+export const createStoryFromVideo = (body: { url: string; title?: string }) =>
+  apiPost<import("./types").StoryCard>("/api/stories/from-video", body);
+export const fetchCustomStory = (id: string) =>
+  apiGet<import("./types").StoryCard>(`/api/stories/custom/${encodeURIComponent(id)}`);
 export const deleteCustomStory = (id: string) =>
-  apiDelete<{ ok: boolean }>(`/api/stories/${encodeURIComponent(id)}`);
+  apiDelete<{ ok: boolean }>(`/api/stories/custom/${encodeURIComponent(id)}`);
 export const patchCustomStory = (id: string, body: { title?: string }) =>
-  apiPatch<{ ok: boolean }>(`/api/stories/${encodeURIComponent(id)}`, body);
+  apiPatch<{ ok: boolean }>(`/api/stories/custom/${encodeURIComponent(id)}`, body);
 
 
 // 拉服务器信息（LAN IP 之类）

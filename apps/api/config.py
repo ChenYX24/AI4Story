@@ -18,6 +18,7 @@ CUSTOM_STORIES_ROOT.mkdir(parents=True, exist_ok=True)
 
 ARK_API_KEY = os.getenv("ARK_API_KEY", "")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+QWEN_ASR_MODEL = os.getenv("QWEN_ASR_MODEL", "qwen3-asr-flash-2026-02-10")
 
 SEEDREAM_MODEL = os.getenv("SEEDREAM_MODEL", "doubao-seedream-5-0-lite-260128")
 SEEDREAM_PROVIDER = os.getenv("SEEDREAM_PROVIDER", "ark")

@@ -431,7 +431,8 @@ onMounted(async () => {
     let inProgress = sess.hasInProgress(props.id);
     if (!inProgress) {
       const remote = await sess.fetchRemoteSession(props.id);
-      if (remote && remote.cursor < remote.flow.length - 1) inProgress = true;
+      // 远程也要求"翻过至少一页"才算进行中
+      if (remote && remote.cursor > 0 && remote.cursor < remote.flow.length - 1) inProgress = true;
     }
     if (inProgress) {
       if (!store.current || store.current.id !== props.id) {

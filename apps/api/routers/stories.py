@@ -1,6 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Header, HTTPException
 
 from ..asset_resolver import url_for
+from ..db import user_by_token
 from ..models import CustomStoryCreateRequest, StoriesResponse, StoryCard
 from ..scene_loader import load_story
 from ..services.custom_story_service import submit_custom_story
@@ -10,18 +13,18 @@ router = APIRouter()
 
 
 @router.get("/stories", response_model=StoriesResponse)
-def stories() -> StoriesResponse:
-    custom_cards = _build_custom_story_cards()
-    if custom_cards:
-        return StoriesResponse(stories=custom_cards)
+def stories(authorization: Optional[str] = Header(default=None)) -> StoriesResponse:
     default_story = load_story()
-    return StoriesResponse(stories=[_build_default_story_card(default_story)])
+    user = _user_from_auth(authorization)
+    custom_cards = _build_custom_story_cards(user["id"] if user else None)
+    return StoriesResponse(stories=[_build_default_story_card(default_story), *custom_cards])
 
 
 @router.post("/stories/custom", response_model=StoryCard)
-def create_custom_story(req: CustomStoryCreateRequest) -> StoryCard:
+def create_custom_story(req: CustomStoryCreateRequest, authorization: Optional[str] = Header(default=None)) -> StoryCard:
+    user = _require_user(authorization)
     try:
-        record = submit_custom_story(req.text, title=req.title)
+        record = submit_custom_story(req.text, title=req.title, owner_user_id=user["id"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
@@ -29,14 +32,47 @@ def create_custom_story(req: CustomStoryCreateRequest) -> StoryCard:
     return _custom_record_to_card(record)
 
 
+@router.get("/stories/custom/{story_id}", response_model=StoryCard)
+def get_custom_story(story_id: str, authorization: Optional[str] = Header(default=None)) -> StoryCard:
+    """Single-record polling endpoint for the custom-story progress UI.
+
+    Public read: returns the StoryCard for the given id. The custom-story
+    pipeline writes status / progress / error_message into the registry, so
+    the frontend can poll this URL to get fresh state without needing the
+    full /api/stories list (which is filtered by owner).
+    """
+    record = next((r for r in list_custom_story_records() if r.get("id") == story_id), None)
+    if not record:
+        raise HTTPException(status_code=404, detail="故事不存在。")
+    user = _user_from_auth(authorization)
+    owner = record.get("owner_user_id")
+    # Private records — only the owner can see status. Public records (no owner)
+    # are visible to anyone.
+    if owner and (not user or user.get("id") != owner):
+        raise HTTPException(status_code=404, detail="故事不存在。")
+    return _custom_record_to_card(record)
+
+
 @router.delete("/stories/custom/{story_id}", status_code=204)
-def delete_custom_story(story_id: str) -> None:
+def delete_custom_story(story_id: str, authorization: Optional[str] = Header(default=None)) -> None:
+    user = _require_user(authorization)
+    record = next((r for r in list_custom_story_records() if r.get("id") == story_id), None)
+    if not record:
+        raise HTTPException(status_code=404, detail="故事不存在。")
+    if record.get("owner_user_id") and record.get("owner_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="只能删除自己的故事。")
     if not delete_custom_story_record(story_id):
         raise HTTPException(status_code=404, detail="故事不存在。")
 
 
 @router.patch("/stories/custom/{story_id}", response_model=StoryCard)
-def patch_custom_story(story_id: str, body: dict) -> StoryCard:
+def patch_custom_story(story_id: str, body: dict, authorization: Optional[str] = Header(default=None)) -> StoryCard:
+    user = _require_user(authorization)
+    existing = next((r for r in list_custom_story_records() if r.get("id") == story_id), None)
+    if not existing:
+        raise HTTPException(status_code=404, detail="故事不存在。")
+    if existing.get("owner_user_id") and existing.get("owner_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="只能编辑自己的故事。")
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="标题不能为空。")
@@ -65,8 +101,14 @@ def _build_default_story_card(story: dict) -> StoryCard:
     )
 
 
-def _build_custom_story_cards() -> list[StoryCard]:
-    return [_custom_record_to_card(record) for record in list_custom_story_records()]
+def _build_custom_story_cards(user_id: str | None) -> list[StoryCard]:
+    if not user_id:
+        return []
+    return [
+        _custom_record_to_card(record)
+        for record in list_custom_story_records()
+        if record.get("owner_user_id") == user_id
+    ]
 
 
 def _custom_record_to_card(record: dict) -> StoryCard:
@@ -85,5 +127,25 @@ def _custom_record_to_card(record: dict) -> StoryCard:
         progress=int(record.get("progress") or 0),
         progress_label=record.get("progress_label") or "",
     )
+
+
+def _extract_token(authorization: Optional[str]) -> str:
+    if not authorization:
+        return ""
+    parts = authorization.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip()
+    return authorization.strip()
+
+
+def _user_from_auth(authorization: Optional[str]) -> dict | None:
+    return user_by_token(_extract_token(authorization))
+
+
+def _require_user(authorization: Optional[str]) -> dict:
+    user = _user_from_auth(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="请先登录后再创建或管理故事。")
+    return user
 
 

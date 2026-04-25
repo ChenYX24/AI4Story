@@ -20,6 +20,7 @@ from .routers import (
     tts,
     upload,
     user_assets,
+    video_import,
 )
 
 
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(user_assets.router, prefix="/api")
     app.include_router(asset_packs.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
+    app.include_router(video_import.router, prefix="/api")
 
     @app.get("/view/{share_id}")
     def share_view_page(share_id: str) -> HTMLResponse:

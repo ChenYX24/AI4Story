@@ -28,5 +28,10 @@
       "appearance_description": "一个编织精美的藤编篮子，里面装着面包和果酱瓶"
     }
   ],
-  "background_visual_description": "阳光明媚的林间小路，两旁是茂密的绿树，阳光透过树叶洒下斑驳的光影"
+  "background_visual_description": "阳光明媚的林间小路，两旁是茂密的绿树，阳光透过树叶洒下斑驳的光影",
+  "suggested_questions": [
+    "小红帽为什么这么开心出门呀？",
+    "你猜外婆看到她会多高兴呢？",
+    "假如走慢些，路上会先看到什么？"
+  ]
 }

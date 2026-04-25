@@ -1,7 +1,7 @@
 """
 公共平台 API — 阶段 2 接入账号 + 分享后会替换为真"他人分享"的数据，
 当前 MVP 返回：
-- stories：本机已有的所有故事（默认小红帽 + 用户做的自定义 + 未来的 v2/火焰山...）
+- stories：官方公开故事。用户自定义故事默认只出现在本人书架，后续通过分享码机制进入公共池。
 - assets：scenes/global/{characters,objects} 里预置的资产
 """
 from pathlib import Path
@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 from ..config import SCENES_DIR
 from ..scene_loader import load_story
-from ..story_registry import list_custom_story_records
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -76,21 +75,6 @@ def _default_card() -> PublicStoryCard:
     )
 
 
-def _custom_to_card(rec: dict) -> PublicStoryCard:
-    sid = rec.get("id", "")
-    return PublicStoryCard(
-        id=sid,
-        title=rec.get("title") or "未命名故事",
-        summary=rec.get("summary") or "",
-        cover_url=rec.get("cover_url") or None,
-        scene_count=int(rec.get("scene_count") or 0),
-        author="社区作者",
-        likes=max(12, abs(hash(sid)) % 400),
-        official=False,
-        category="hot",
-    )
-
-
 @router.get("/stories", response_model=PublicStoriesResponse)
 def public_stories() -> PublicStoriesResponse:
     cards: list[PublicStoryCard] = []
@@ -99,12 +83,6 @@ def public_stories() -> PublicStoriesResponse:
         cards.append(_default_card())
     except Exception:
         pass
-    # 用户自定义故事（所有人目前共享一份）— MVP 都视为"大家分享的"
-    for rec in list_custom_story_records():
-        try:
-            cards.append(_custom_to_card(rec))
-        except Exception:
-            continue
     return PublicStoriesResponse(stories=cards)
 
 

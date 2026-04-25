@@ -219,7 +219,7 @@ async function onDelete(id: string, e: MouseEvent) {
               class="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/90 text-ink-soft opacity-0 group-hover:opacity-100 transition grid place-items-center hover:bg-gold-mute"
               title="修改标题"
               @click="(e) => openEdit(story, e)"
-            >✎</button>
+            >✏️</button>
 
             <!-- 新故事红点 -->
             <div

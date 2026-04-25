@@ -156,8 +156,11 @@ export const useStoryStore = defineStore("story", () => {
   }
 
   async function ensureScene(idx: number): Promise<Scene> {
+    // 把 story_id 带上 —— 否则后端会回退到默认故事（小红帽），
+    // 当用户打开一个自定义故事时仍然加载到的是小红帽的 scene.json。
+    const storyId = current.value?.id;
     if (sceneCache.value.has(idx)) return sceneCache.value.get(idx)!;
-    const sc = await fetchScene(idx);
+    const sc = await fetchScene(idx, storyId);
     sceneCache.value.set(idx, sc);
     return sc;
   }

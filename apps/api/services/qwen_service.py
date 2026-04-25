@@ -4,7 +4,7 @@ from typing import Any
 
 import requests
 
-from ..config import DASHSCOPE_API_KEY
+from ..config import DASHSCOPE_API_KEY, QWEN_ASR_MODEL
 
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen3.6-flash-2026-04-16"
@@ -138,3 +138,58 @@ def call_chat(
         raise QwenError(f"HTTP {resp.status_code}: {resp.text[:400]}")
     data = resp.json()
     return data["choices"][0]["message"]["content"].strip()
+
+
+def call_asr_audio(
+    audio_data_url: str,
+    *,
+    model: str = QWEN_ASR_MODEL,
+    timeout: int = 180,
+) -> str:
+    """Transcribe an audio data URL with DashScope's OpenAI-compatible ASR model."""
+    if not DASHSCOPE_API_KEY:
+        raise QwenError("DASHSCOPE_API_KEY not set")
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": audio_data_url,
+                        },
+                    }
+                ],
+            }
+        ],
+        "stream": False,
+        "asr_options": {
+            "enable_lid": True,
+            "enable_itn": True,
+        },
+    }
+    headers = {
+        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(
+        f"{BASE_URL}/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=timeout,
+    )
+    if resp.status_code >= 400:
+        raise QwenError(f"HTTP {resp.status_code}: {resp.text[:400]}")
+    data = resp.json()
+    content = data["choices"][0]["message"]["content"]
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item))
+        return "\n".join(p.strip() for p in parts if p.strip())
+    return str(content or "").strip()

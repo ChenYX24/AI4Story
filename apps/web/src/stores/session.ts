@@ -210,6 +210,11 @@ export const useSessionStore = defineStore("session", () => {
 
   // ---- playState API (localStorage 立即写 + 后端防抖同步) ----
   function savePlayState(state: SessionPlayState) {
+    // 第一页（cursor === 0）= 仅打开了故事但还没真的开始玩，不算"进行中"。
+    // 跳过持久化 + 不进历史会话列表，避免：
+    //   (a) 下次重新进入这个故事时弹"继续上次的玩法？"
+    //   (b) 历史会话里堆一堆 0 进度的空记录
+    if (state.cursor === 0) return;
     playStates.value = { ...playStates.value, [state.story_id]: state };
     const active = list.value.find((s) => s.story_id === state.story_id && !s.report_ready);
     if (active) {
@@ -242,7 +247,8 @@ export const useSessionStore = defineStore("session", () => {
 
   function hasInProgress(storyId: string): boolean {
     const ps = getPlayState(storyId);
-    return !!ps && ps.cursor < ps.flow.length - 1;
+    // 至少翻过一页（cursor > 0）且没读到最后一页才算进行中。
+    return !!ps && ps.cursor > 0 && ps.cursor < ps.flow.length - 1;
   }
 
   const completedReports = computed(() => list.value.filter((s) => s.report_ready && s.report_payload));

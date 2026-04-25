@@ -51,6 +51,7 @@ paths:
   # POST /api/interact
   # POST /api/chat
   # POST /api/stories/custom
+  # POST /api/stories/from-video          (Bilibili URL -> subtitles/ASR -> custom story)
   # POST /api/share
   # GET  /api/share/{code}
   # GET  /api/report/{session_id}           (existing non-streaming)

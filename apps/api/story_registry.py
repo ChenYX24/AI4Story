@@ -64,7 +64,7 @@ def get_custom_story_record(story_id: str) -> dict[str, Any] | None:
     return load_registry().get(story_id)
 
 
-def create_custom_story_record(text: str, title: str = "") -> dict[str, Any]:
+def create_custom_story_record(text: str, title: str = "", owner_user_id: str | None = None) -> dict[str, Any]:
     clean = " ".join((text or "").split())
     story_id = f"custom-{uuid.uuid4().hex[:10]}"
     now = _utc_now()
@@ -77,6 +77,8 @@ def create_custom_story_record(text: str, title: str = "") -> dict[str, Any]:
         "cover_url": "",
         "status": "generating",
         "error_message": None,
+        "owner_user_id": owner_user_id,
+        "public": False,
         "progress": 0,
         "progress_label": "准备中",
         "created_at": now,

@@ -35,7 +35,7 @@ _FUTURES: dict[str, Future] = {}
 _FUTURES_LOCK = Lock()
 
 
-def submit_custom_story(text: str, title: str = "") -> dict:
+def submit_custom_story(text: str, title: str = "", owner_user_id: str | None = None) -> dict:
     clean = (text or "").strip()
     if not clean:
         raise ValueError("请先输入故事内容。")
@@ -44,12 +44,19 @@ def submit_custom_story(text: str, title: str = "") -> dict:
     if not DASHSCOPE_API_KEY:
         raise RuntimeError("服务器未配置 DASHSCOPE_API_KEY，暂时不能生成自定义故事。")
 
-    record = create_custom_story_record(clean, title=title)
-    future = _EXECUTOR.submit(_build_story_assets, record["id"], clean)
-    with _FUTURES_LOCK:
-        _FUTURES[record["id"]] = future
-    future.add_done_callback(lambda _: _forget_future(record["id"]))
+    record = create_custom_story_record(clean, title=title, owner_user_id=owner_user_id)
+    schedule_custom_story_build(record["id"], clean)
     return record
+
+
+def schedule_custom_story_build(story_id: str, text: str) -> None:
+    clean = (text or "").strip()
+    if not clean:
+        raise ValueError("请先输入故事内容。")
+    future = _EXECUTOR.submit(_build_story_assets, story_id, clean)
+    with _FUTURES_LOCK:
+        _FUTURES[story_id] = future
+    future.add_done_callback(lambda _: _forget_future(story_id))
 
 
 def _set_progress(story_id: str, progress: int, label: str) -> None:
