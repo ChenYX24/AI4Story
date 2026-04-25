@@ -364,7 +364,7 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
     panel_path.write_bytes(img_bytes)
     thumb_path = out_dir / "thumb.jpg"
     _write_thumb(panel_path, thumb_path)
-    # 然后通过 storage backend 拿到对外可访问的 URL（OSS 模式会另写一份到云端）
+    # 然后通过 storage backend 拿到对外可访问的 URL（MinIO 模式会另写一份到对象存储）
     storage = get_storage()
     panel_key = f"{req.session_id}/dynamic/{node_id}/panel.png"
     thumb_key = f"{req.session_id}/dynamic/{node_id}/thumb.jpg"

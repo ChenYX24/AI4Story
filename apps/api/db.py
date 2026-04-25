@@ -127,7 +127,7 @@ def init_db() -> None:
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_stories_owner ON stories(owner_user_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_stories_official_public ON stories(is_official, public)")
-        # 每个故事的场景 — comic_url / background_url 直接保存 OSS URL，避免运行时拼路径。
+        # 每个故事的场景 — comic_url / background_url 直接保存对象存储 URL，避免运行时拼路径。
         c.execute("""
             CREATE TABLE IF NOT EXISTS scenes (
                 id                TEXT PRIMARY KEY,

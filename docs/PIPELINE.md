@@ -59,7 +59,7 @@
                                │
                     ┌──────────▼──────────┐
                     │    存储层 (Storage)   │
-                    │  Local / S3 / OSS    │
+                    │  Local / S3 / MinIO  │
                     │  + SQLite (用户数据)  │
                     └─────────────────────┘
 ```
@@ -690,7 +690,7 @@ outputs/webdemo/stories/{story_id}/
 - `apps/api/storage/base.py` — 抽象接口
 - `apps/api/storage/local.py` — 本地文件系统
 - `apps/api/storage/s3.py` — AWS S3 / R2 / MinIO
-- `apps/api/storage/oss.py` — 阿里云 OSS
+- `apps/api/storage/minio.py` — MinIO / RustFS / S3 兼容
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -708,12 +708,12 @@ outputs/webdemo/stories/{story_id}/
               ┌──────────────┼──────────────┐
               │              │              │
      ┌────────▼───────┐ ┌───▼────────┐ ┌──▼──────────┐
-     │  LocalStorage   │ │  S3Storage  │ │  OSSStorage  │
-     │  (默认)         │ │  boto3      │ │  oss2        │
+    │  LocalStorage   │ │  S3Storage  │ │ MinIOStorage │
+    │  (默认)         │ │  boto3      │ │  minio       │
      │  文件系统读写    │ │  lazy import│ │  lazy import │
      └────────────────┘ └────────────┘ └─────────────┘
 
-  切换方式: 环境变量 MINDSHOW_STORAGE = local | s3 | oss
+  切换方式: 环境变量 MINDSHOW_STORAGE = local | s3 | minio
 ```
 
 ---
@@ -892,12 +892,12 @@ outputs/webdemo/stories/{story_id}/
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `MINDSHOW_STORAGE` | `local` | 存储后端: local / s3 / oss |
+| `MINDSHOW_STORAGE` | `local` | 存储后端: local / s3 / minio |
 | `MINDSHOW_S3_BUCKET` | — | S3 桶名 |
 | `MINDSHOW_S3_REGION` | — | S3 区域 |
 | `MINDSHOW_S3_ENDPOINT` | — | S3 端点 (MinIO/R2) |
-| `MINDSHOW_OSS_BUCKET` | — | OSS 桶名 |
-| `MINDSHOW_OSS_ENDPOINT` | — | OSS 端点 |
+| `MINDSHOW_MINIO_BUCKET` | — | MinIO 桶名 |
+| `MINDSHOW_MINIO_ENDPOINT` | — | MinIO 端点 |
 
 **服务配置：**
 
@@ -919,5 +919,5 @@ outputs/webdemo/stories/{story_id}/
 | 图像生成 | Seedream (Volcengine Ark API) |
 | 语音合成 | Xiaomi MiMo v2 |
 | 图像处理 | rembg (背景移除) |
-| 存储 | Local / S3 / OSS (可插拔) |
+| 存储 | Local / S3 / MinIO (可插拔) |
 

@@ -1,21 +1,22 @@
 """
-把 scenes/ 里的官方故事（小红帽）录入新表 + 把所有图片上传 OSS。
+把 scenes/ 里的官方故事（小红帽）录入新表 + 把所有图片上传 MinIO / RustFS。
 
-依赖：oss2，需要 env：
-  MINDSHOW_OSS_BUCKET   = mindshow-pku
-  MINDSHOW_OSS_ENDPOINT = https://oss-cn-shenzhen.aliyuncs.com
-  MINDSHOW_OSS_PREFIX   = mindshow/   (默认)
-  MINDSHOW_OSS_AK_ID
-  MINDSHOW_OSS_AK_SECRET
-  MINDSHOW_STORAGE      = oss
+依赖：minio，需要 env：
+    MINDSHOW_MINIO_BUCKET        = mindshow
+    MINDSHOW_MINIO_ENDPOINT      = 110.40.183.254:9000
+    MINDSHOW_MINIO_ACCESS_KEY    = rustfsadmin
+    MINDSHOW_MINIO_SECRET_KEY    = rustfsadmin
+    MINDSHOW_MINIO_PREFIX       = mindshow/   (默认)
+    MINDSHOW_MINIO_SECURE       = false
+    MINDSHOW_STORAGE            = minio
 
-执行幂等 — 重复跑会覆盖（OSS put_object + 表 ON CONFLICT UPDATE）。
-完成后所有 cover_url / comic_url / background_url / asset.url 全是 OSS https URL，
+执行幂等 — 重复跑会覆盖（MinIO put_object + 表 ON CONFLICT UPDATE）。
+完成后所有 cover_url / comic_url / background_url / asset.url 全是 MinIO/RustFS URL，
 读路径不再依赖 scenes/ 文件夹。
 
 用法：
-    python -m scripts.seed_official                # 录入默认故事 little_red_riding_hood
-    python -m scripts.seed_official --dry-run      # 只扫描不上传不写库
+        python -m scripts.seed_official                # 录入默认故事 little_red_riding_hood
+        python -m scripts.seed_official --dry-run      # 只扫描不上传不写库
 """
 from __future__ import annotations
 
@@ -259,22 +260,28 @@ def seed_story(storage, story_id: str, title: str, *, dry: bool) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
-                        help="只扫描，不上传 OSS、不写库")
+                        help="只扫描，不上传 MinIO、不写库")
     parser.add_argument("--story-id", default=DEFAULT_STORY_ID)
     parser.add_argument("--title", default=DEFAULT_TITLE)
     args = parser.parse_args()
 
     if not args.dry_run:
-        os.environ.setdefault("MINDSHOW_STORAGE", "oss")
+        os.environ.setdefault("MINDSHOW_STORAGE", "minio")
         kind = os.environ.get("MINDSHOW_STORAGE", "local")
-        if kind != "oss":
-            print(f"[!] MINDSHOW_STORAGE={kind!r}，期望 'oss'。先 export MINDSHOW_STORAGE=oss")
+        if kind not in {"minio", "oss"}:
+            print(f"[!] MINDSHOW_STORAGE={kind!r}，期望 'minio'。先 export MINDSHOW_STORAGE=minio")
             return 1
-        for k in ("MINDSHOW_OSS_BUCKET", "MINDSHOW_OSS_ENDPOINT",
-                  "MINDSHOW_OSS_AK_ID", "MINDSHOW_OSS_AK_SECRET"):
-            if not os.environ.get(k):
-                print(f"[!] env {k} 未设置")
-                return 1
+        required_env_pairs = (
+            ("MINDSHOW_MINIO_BUCKET", "MINDSHOW_OSS_BUCKET"),
+            ("MINDSHOW_MINIO_ENDPOINT", "MINDSHOW_OSS_ENDPOINT"),
+            ("MINDSHOW_MINIO_ACCESS_KEY", "MINDSHOW_OSS_AK_ID"),
+            ("MINDSHOW_MINIO_SECRET_KEY", "MINDSHOW_OSS_AK_SECRET"),
+        )
+        for primary, legacy in required_env_pairs:
+            if os.environ.get(primary) or os.environ.get(legacy):
+                continue
+            print(f"[!] env {primary} / {legacy} 未设置")
+            return 1
 
     storage = get_storage() if not args.dry_run else None
     seed_story(storage, args.story_id, args.title, dry=args.dry_run)

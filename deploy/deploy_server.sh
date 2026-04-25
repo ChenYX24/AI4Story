@@ -17,7 +17,7 @@
 #   1. git pull 最新代码
 #   2. 杀掉现有 ai4story uvicorn 进程
 #   3. 安装/更新 conda env + pip 依赖
-#   4. 跑 seed_official 把官方 scenes 录入 OSS + DB（首次）
+#   4. 跑 seed_official 把官方 scenes 录入 MinIO/RustFS + DB（首次）
 #   5. pnpm install + pnpm build 前端
 #   6. 同步 dist → /var/www/ai4story
 #   7. 写 systemd unit + nginx 配置（首次）
@@ -55,7 +55,6 @@ fi
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip wheel >/dev/null
 pip install -r requirements.txt
-pip install oss2  # 兜底：requirements 应该已经带了
 
 echo "==> Step 4: load .env into shell"
 set -a

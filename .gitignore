@@ -27,6 +27,7 @@ dist/
 venv/
 start_webdemo.keys.cmd
 start_webdemo.keys.sh
+.bilibili-cookies.txt
 
 # Claude Code / agent-docs (local work notes, never push)
 .claude/

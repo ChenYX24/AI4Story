@@ -158,7 +158,7 @@ def create_custom_prop(
         out_path = session_dir / f"{slug}_{i}.png"
         i += 1
     out_path.write_bytes(out_bytes)
-    # 也走 storage backend：OSS 模式下会同步到云端，本地模式只是再写一遍 outputs。
+    # 也走 storage backend：MinIO 模式下会同步到对象存储，本地模式只是再写一遍 outputs。
     storage = get_storage()
     key = f"{session_id}/custom_props/{out_path.name}"
     url = storage.save_bytes(key, out_bytes, content_type="image/png")

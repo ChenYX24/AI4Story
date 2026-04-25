@@ -5,7 +5,7 @@
   1. 数据库（stories / scenes / assets 三张表 — 由 scripts/seed_official.py 录入官方故事，
      或者由用户 stories CRUD 写入）
   2. 文件系统回落（scenes/ 目录、custom story 工作区） — 仅本地未录入数据库时使用，
-     便于本地开发不依赖 OSS。
+    便于本地开发不依赖对象存储。
 
 返回 payload shape 在两种数据源下保持一致，前端无感。
 """

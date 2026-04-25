@@ -1,9 +1,9 @@
 """
 通用图片上传 — 手绘 tab 上传 / 摄像头拍照 / 画板导出都走这里。
 后端存储通过 `apps.api.storage.get_storage()` 抽象：
-  - MINDSHOW_STORAGE=local  → 写本机 outputs/uploads/，URL 形如 /outputs/uploads/...
-  - MINDSHOW_STORAGE=s3     → 上 AWS/S3 兼容桶
-  - MINDSHOW_STORAGE=oss    → 上阿里云 OSS
+    - MINDSHOW_STORAGE=local  → 写本机 outputs/uploads/，URL 形如 /outputs/uploads/...
+    - MINDSHOW_STORAGE=s3     → 上 AWS/S3 兼容桶
+    - MINDSHOW_STORAGE=minio  → 上 MinIO / RustFS / S3 兼容桶
 详见 apps/api/storage/__init__.py
 """
 import base64

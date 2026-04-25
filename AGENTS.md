@@ -18,7 +18,7 @@
 | 后端 | FastAPI + uvicorn（Python 3.13）; 内置 `sqlite3` 作账号库; 无 SQLAlchemy |
 | 前端 | Vite 8 + Vue 3.5 + TypeScript + Pinia 3 + Vue Router 5 + Tailwind v4（`@theme` tokens） |
 | AI | Volcengine **Seedream**（Ark API）出图；阿里云 **DashScope / Qwen** 讲故事 / 报告；小米 **MiMo v2 TTS** 语音合成；浏览器 **webkitSpeechRecognition** ASR |
-| 存储 | 抽象可插拔（`apps/api/storage/`）：local（默认）/ s3 / oss，env `MINDSHOW_STORAGE` 切 |
+| 存储 | 抽象可插拔（`apps/api/storage/`）：local（默认）/ s3 / minio，env `MINDSHOW_STORAGE` 切 |
 | 账号 | SQLite（`outputs/mindshow.db`）+ hashlib sha256 + secrets token；Authorization Bearer 头部 |
 
 ## 3. 快速开始
@@ -75,7 +75,7 @@ apps/
 │   │   ├── base.py               #   接口
 │   │   ├── local.py              #   本机 outputs/...
 │   │   ├── s3.py                 #   AWS S3 / R2 / MinIO (lazy import boto3)
-│   │   └── oss.py                #   阿里云 OSS (lazy import oss2)
+│   │   └── minio.py              #   MinIO / RustFS / S3 兼容 (lazy import minio)
 │   ├── routers/
 │   │   ├── auth.py               # register / login / me / logout
 │   │   ├── public.py             # /public/stories /public/assets
@@ -153,7 +153,7 @@ agent-docs/                      # 本地开发文档（plan / adr / check_repor
 - 热门故事 tab 含小红帽（按 likes 排序）
 - **Profile CRUD**：书架 ☆/★ 切换、stories 拆"收藏/原创"、会话删除
 - **图生图模态**：上传/拍/画的原图 → `CustomPropCreateModal` → 填名称+描述 → 选"AI 再画"或"直接用原图"
-- **Storage backend 可插拔**：local / s3 / oss（当前 upload.py 已用，其余待迁）
+- **Storage backend 可插拔**：local / s3 / minio（当前 upload.py 已用，其余待迁）
 
 ## 6. 未完成的 TODO（按优先级 + 预估）
 
@@ -238,7 +238,7 @@ cd apps/web && pnpm build    # 必须通过 vue-tsc + vite build
 | `ARK_API_KEY` | — | Seedream 出图（必须） |
 | `DASHSCOPE_API_KEY` | — | Qwen 文本（必须） |
 | `XIAOMI_TTS_API_KEY` | — | 小米 MiMo v2 TTS（必须） |
-| `MINDSHOW_STORAGE` | `local` | `local` / `s3` / `oss` |
+| `MINDSHOW_STORAGE` | `local` | `local` / `s3` / `minio` |
 | `MINDSHOW_AUTH_SALT` | `mindshow-dev-salt-2026-04` | 密码 hash salt（生产必须改） |
 | `MINDSHOW_S3_BUCKET` | — | S3 桶名（MINDSHOW_STORAGE=s3 时） |
 | `MINDSHOW_S3_REGION` | `us-east-1` | |
@@ -246,11 +246,11 @@ cd apps/web && pnpm build    # 必须通过 vue-tsc + vite build
 | `MINDSHOW_S3_PREFIX` | `mindshow/` | |
 | `MINDSHOW_S3_PUBLIC_BASE` | — | CDN/自定义域 |
 | `MINDSHOW_S3_ACL` | `public-read` | |
-| `MINDSHOW_OSS_BUCKET` | — | OSS bucket |
-| `MINDSHOW_OSS_ENDPOINT` | — | OSS endpoint |
-| `MINDSHOW_OSS_AK_ID` / `_AK_SECRET` | — | 凭证 |
-| `MINDSHOW_OSS_PREFIX` | `mindshow/` | |
-| `MINDSHOW_OSS_PUBLIC_BASE` | — | CDN |
+| `MINDSHOW_MINIO_BUCKET` | — | MinIO bucket |
+| `MINDSHOW_MINIO_ENDPOINT` | — | MinIO / RustFS endpoint |
+| `MINDSHOW_MINIO_ACCESS_KEY` / `_SECRET_KEY` | — | 凭证 |
+| `MINDSHOW_MINIO_PREFIX` | `mindshow/` | |
+| `MINDSHOW_MINIO_PUBLIC_BASE` | — | CDN |
 | `AI4STORY_PYTHON` | — | start_webdemo.sh 选 python 可执行 |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | uvicorn |
 

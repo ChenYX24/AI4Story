@@ -480,10 +480,10 @@ function onResumeContinue() {
   }
   activeSessionId.value = sid;
   // 恢复 flow / dynamicByScene / interactStore.states
-  store.flow = ps.flow.map((f) => ({ ...f }));
+  store.flow = ps.flow.map((f: any) => ({ ...f }));
   store.cursor = ps.cursor;
   store.highestUnlocked = ps.highestUnlocked;
-  store.interactions = ps.interactions.map((i) => ({ ...i, ops: i.ops.map((o) => ({ ...o })), custom_props: i.custom_props.map((c) => ({ ...c })) }));
+  store.interactions = ps.interactions.map((i: any) => ({ ...i, ops: i.ops.map((o: any) => ({ ...o })), custom_props: i.custom_props.map((c: any) => ({ ...c })) }));
   store.comicUrls = [...ps.comicUrls];
   // dynamicByScene
   const dynMap = new Map();

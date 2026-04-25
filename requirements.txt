@@ -12,4 +12,4 @@ dashscope>=1.17
 segno>=1.6
 yt-dlp>=2024.8.6
 imageio-ffmpeg>=0.5.1
-oss2>=2.18.0
+minio>=7.2.15

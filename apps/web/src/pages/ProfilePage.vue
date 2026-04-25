@@ -149,12 +149,6 @@ const filteredFavAssets = computed(() =>
 const filteredFavBundles = computed(() =>
   favBundles.value.filter((b) => _matchAssetSearch(b.name, b.description)),
 );
-const filteredPublicAssets = computed(() =>
-  publicAssets.value.filter((a) => _matchAssetSearch(a.name)),
-);
-const filteredPublicBundles = computed(() =>
-  publicBundles.value.filter((b) => _matchAssetSearch(b.name, b.description)),
-);
 
 function onRemoveAssetFav(id: string, e: MouseEvent) {
   e.stopPropagation();

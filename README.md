@@ -113,7 +113,7 @@ AGENTS.md             对外协作指南 (给 AI / 开发者接手)
 | 后端 | FastAPI + uvicorn + 内置 sqlite3 |
 | 前端 | Vite 8 + Vue 3.5 + TypeScript + Pinia + Vue Router + Tailwind v4 |
 | AI | Seedream (图) / Qwen (文) / MiMo TTS (音) / webkitSpeechRecognition (ASR) |
-| 存储 | 可插拔（local / s3 / oss）—— env `MINDSHOW_STORAGE` |
+| 存储 | 可插拔（local / s3 / minio）—— env `MINDSHOW_STORAGE` |
 
 ## 环境变量
 
@@ -122,10 +122,10 @@ AGENTS.md             对外协作指南 (给 AI / 开发者接手)
 | `ARK_API_KEY` | — | Seedream（必须） |
 | `DASHSCOPE_API_KEY` | — | Qwen（必须） |
 | `XIAOMI_TTS_API_KEY` | — | MiMo TTS（必须） |
-| `MINDSHOW_STORAGE` | `local` | `local` / `s3` / `oss` |
+| `MINDSHOW_STORAGE` | `local` | `local` / `s3` / `minio` |
 | `MINDSHOW_AUTH_SALT` | dev-salt | 密码 hash salt（生产必改） |
 | `MINDSHOW_S3_BUCKET` 等 | — | S3 相关，见 AGENTS.md §8 |
-| `MINDSHOW_OSS_BUCKET` 等 | — | OSS 相关，见 AGENTS.md §8 |
+| `MINDSHOW_MINIO_BUCKET` 等 | — | MinIO / RustFS 相关，见 AGENTS.md §8 |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | |
 
 ## 主要功能（已交付）

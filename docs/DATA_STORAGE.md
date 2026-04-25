@@ -6,8 +6,8 @@
 
 - GitHub 只保存源码、脚本、契约、轻量配置和官方故事的结构化文本元数据。
 - 用户账号、用户会话、运行时数据库、上传文件、生成图片、生成音频、下载视频、API key 都不进入 Git。
-- 本地开发默认使用 SQLite + `outputs/`。生产环境建议使用服务器数据库（SQLite/Postgres）+ OSS/S3/R2 等对象存储。
-- 可共享的大图片资产通过 GitHub Release tar 包、服务器对象存储或 OSS 分发，不直接 push 到仓库。
+- 本地开发默认使用 SQLite + `outputs/`。生产环境建议使用服务器数据库（SQLite/Postgres）+ MinIO/S3/R2 等对象存储。
+- 可共享的大图片资产通过 GitHub Release tar 包、服务器对象存储或 MinIO 分发，不直接 push 到仓库。
 
 ## GitHub 仓库保存的内容
 
@@ -114,7 +114,7 @@ registry 字段包含：
 生产建议：
 
 - registry 应迁移到数据库表，例如 `stories` / `story_scenes`。
-- 故事图片、封面、生成结果放 OSS/S3，对数据库只保存 URL 和元数据。
+- 故事图片、封面、生成结果放 MinIO/S3，对数据库只保存 URL 和元数据。
 
 ## 用户会话
 
@@ -172,11 +172,11 @@ registry 字段包含：
 
 - `MINDSHOW_STORAGE=local`
 - `MINDSHOW_STORAGE=s3`
-- `MINDSHOW_STORAGE=oss`
+- `MINDSHOW_STORAGE=minio`
 
 生产建议：
 
-- 上传图片、AI 生成图、TTS 音频、视频下载缓存都放 OSS/S3/R2。
+- 上传图片、AI 生成图、TTS 音频、视频下载缓存都放 MinIO/S3/R2。
 - 数据库保存 URL、owner、来源故事/会话、创建时间等元数据。
 - GitHub 不保存这些资产。
 
@@ -202,7 +202,7 @@ registry 字段包含：
 后续建议：
 
 - 用户故事分享不要直接进入公共热门池，使用显式分享码或审核后的公共池。
-- 分享数据应由服务器数据库 + OSS 维护。
+- 分享数据应由服务器数据库 + MinIO 维护。
 - GitHub Release 只适合分发官方预置资产包，不适合分发真实用户数据。
 
 ## 本地开发清理建议

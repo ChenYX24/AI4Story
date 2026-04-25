@@ -18,7 +18,7 @@ mkdir -p /root/hackthron && cd /root/hackthron
 git clone https://github.com/ChenYX24/AI4Story.git
 cd AI4Story
 
-# 复制 .env 模板，填真实 secret（OSS Key、ARK_API_KEY、DASHSCOPE_API_KEY、TTS Key、AUTH_SALT）
+# 复制 .env 模板，填真实 secret（MinIO Key、ARK_API_KEY、DASHSCOPE_API_KEY、TTS Key、AUTH_SALT）
 cp deploy/.env.example .env
 nano .env
 
@@ -58,10 +58,10 @@ python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
 # 前端没更新 → 检查 dist 是否同步
 ls -la /var/www/ai4story/
 
-# OSS 连通性
+# MinIO / RustFS 连通性
 python -c "
-import os, oss2
-os.environ.setdefault('MINDSHOW_STORAGE','oss')
+import os
+os.environ.setdefault('MINDSHOW_STORAGE','minio')
 from apps.api.storage import get_storage
 s = get_storage()
 url = s.save_bytes('debug/ping.txt', b'ok', content_type='text/plain')
@@ -76,11 +76,11 @@ nginx -t && systemctl reload nginx
 
 后端通过 `MINDSHOW_STORAGE` env 控制：
 - `MINDSHOW_STORAGE=local`（默认）— 图片落 `outputs/webdemo/...`，URL 形如 `/outputs/...`
-- `MINDSHOW_STORAGE=oss` — 图片落 OSS，URL 形如 `https://mindshow-pku.oss-cn-shenzhen.aliyuncs.com/...`
+- `MINDSHOW_STORAGE=minio` — 图片落 MinIO / RustFS，URL 形如 `http://110.40.183.254:9000/mindshow/...`
 
 前端通过 `VITE_API_BASE` env 控制（构建时 baked）：
 - 空 / 不设 — 走相对路径，由 nginx 同源代理
 - `https://api.your-domain.com` — 跨域直连
 
-本地开发：`pnpm dev` 走 vite proxy，没 OSS 也能跑（后端用 `MINDSHOW_STORAGE=local`）。
-服务器：用 OSS + 同源 nginx。
+本地开发：`pnpm dev` 走 vite proxy，没 MinIO 也能跑（后端用 `MINDSHOW_STORAGE=local`）。
+服务器：用 MinIO / RustFS + 同源 nginx。
