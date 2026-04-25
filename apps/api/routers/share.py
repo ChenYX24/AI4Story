@@ -147,16 +147,13 @@ body{display:flex;flex-direction:column;min-height:100%}
 .counter{text-align:center;padding:6px 0;font-size:13px;color:#8a7664;font-weight:600;flex-shrink:0}
 .bubbles{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:6px 2px 8px}
 .bubble{background:#fff;border-radius:14px;padding:9px 12px;box-shadow:0 3px 10px rgba(61,43,31,.10);
-  font-size:14px;line-height:1.55;cursor:pointer;border:2px solid transparent;transition:all .2s;position:relative;
+  font-size:14px;line-height:1.55;border:2px solid transparent;
   display:flex;flex-direction:column;gap:2px}
 .bubble.narration{background:#fff7e6;border-color:#ffd99a55}
 .bubble.dialogue{background:#fff}
-.bubble.playing{border-color:#ff8a5b;box-shadow:0 0 14px rgba(255,138,91,.35);background:#fff3e6}
 .bubble .speaker{font-size:11px;font-weight:700;color:#a47148}
 .bubble .speaker .tone{color:#baa994;font-weight:500;margin-left:6px}
 .bubble .text{color:#3d2b1f}
-.bubble .play-icon{position:absolute;right:8px;top:8px;font-size:13px;opacity:.55}
-.bubble.playing .play-icon{opacity:1}
 .props{display:flex;gap:10px;overflow-x:auto;padding:8px 14px 8px;flex-shrink:0}
 .prop{flex:0 0 78px;background:#fff;border-radius:12px;padding:8px;text-align:center;
   box-shadow:0 3px 12px rgba(61,43,31,.12)}
@@ -179,15 +176,12 @@ body{display:flex;flex-direction:column;min-height:100%}
   <div class="bubbles" id="bubbles"></div>
 </div>
 <div class="props" id="props"></div>
-<div class="hint">← 左右滑动翻页 · 点气泡重播 →</div>
+<div class="hint">← 左右滑动翻页 →</div>
 <script>
 const shareId = location.pathname.split("/").pop();
-let pages = [], props = [], storyId = "", current = 0;
-// 当前页正在 / 即将播放的 audio + bubble 索引
-let audioCtl = { audio: null, bubbleEl: null, abort: false, page: -1 };
+let pages = [], props = [], current = 0;
 
 fetch("/api/share/" + shareId).then(r => r.json()).then(data => {
-  storyId = String(data.story_id || "");
   // 后端会保证 pages 存在；老版分享只有 comics，已在 backend 自动包装。
   pages = (data.pages && data.pages.length) ? data.pages
         : (data.comics || []).map(u => ({ comic_url: u, summary: "", storyboard: [] }));
@@ -251,12 +245,8 @@ function applyPage(i) {
   const sum = String(page.summary || "").trim();
   if (sum) { sumEl.style.display = ""; sumText.textContent = sum; }
   else { sumEl.style.display = "none"; sumText.textContent = ""; }
-  // bubbles
+  // bubbles（仅文字展示，不再自动 / 点击播放音频）
   renderBubbles(page.storyboard || []);
-  // 自动顺序播放
-  stopAudio();
-  audioCtl.page = i;
-  playAllBubbles(i, 0);
 }
 
 function renderBubbles(lines) {
@@ -266,17 +256,14 @@ function renderBubbles(lines) {
     wrap.innerHTML = '<div class="empty">这一幕暂无旁白</div>';
     return;
   }
-  lines.forEach((ln, idx) => {
+  lines.forEach((ln) => {
     const div = document.createElement("div");
     const isNarration = (ln.kind === "narration") || (ln.speaker === "旁白");
     div.className = "bubble " + (isNarration ? "narration" : "dialogue");
-    div.dataset.idx = String(idx);
     const tone = ln.tone ? `<span class="tone">${escapeHtml(ln.tone)}</span>` : "";
     div.innerHTML =
       `<div class="speaker">${escapeHtml(ln.speaker || "旁白")}${tone}</div>` +
-      `<div class="text">${escapeHtml(ln.text || "")}</div>` +
-      `<div class="play-icon">🔊</div>`;
-    div.addEventListener("click", () => { playBubble(current, idx); });
+      `<div class="text">${escapeHtml(ln.text || "")}</div>`;
     wrap.appendChild(div);
   });
 }
@@ -285,64 +272,6 @@ function escapeHtml(s) {
   return String(s || "").replace(/[&<>"']/g, c =>
     ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c])
   );
-}
-
-function ttsUrl(line) {
-  const q = new URLSearchParams({ text: line.text || "" });
-  if (line.speaker) q.set("speaker", line.speaker);
-  if (line.tone) q.set("tone", line.tone);
-  if (line.speaker_gender) q.set("speaker_gender", line.speaker_gender);
-  if (storyId) q.set("story_id", storyId);
-  return "/api/tts?" + q.toString();
-}
-
-function stopAudio() {
-  audioCtl.abort = true;
-  try { if (audioCtl.audio) { audioCtl.audio.pause(); audioCtl.audio.src = ""; } } catch (e) {}
-  audioCtl.audio = null;
-  if (audioCtl.bubbleEl) audioCtl.bubbleEl.classList.remove("playing");
-  audioCtl.bubbleEl = null;
-}
-
-function playOne(pageIdx, bubbleIdx) {
-  return new Promise((resolve) => {
-    if (pageIdx !== current) return resolve();
-    const page = pages[pageIdx] || {};
-    const lines = page.storyboard || [];
-    const ln = lines[bubbleIdx];
-    if (!ln || !ln.text) return resolve();
-    const wrap = document.getElementById("bubbles");
-    const el = wrap.querySelector(`.bubble[data-idx="${bubbleIdx}"]`);
-    audioCtl.abort = false;
-    audioCtl.bubbleEl = el || null;
-    if (el) el.classList.add("playing");
-    const audio = new Audio(ttsUrl(ln));
-    audioCtl.audio = audio;
-    const cleanup = () => {
-      if (el) el.classList.remove("playing");
-      if (audioCtl.audio === audio) audioCtl.audio = null;
-      audioCtl.bubbleEl = null;
-      resolve();
-    };
-    audio.onended = cleanup;
-    audio.onerror = cleanup;
-    audio.play().catch(cleanup);
-  });
-}
-
-async function playAllBubbles(pageIdx, startIdx) {
-  const lines = (pages[pageIdx] && pages[pageIdx].storyboard) || [];
-  for (let i = startIdx; i < lines.length; i++) {
-    if (pageIdx !== current || audioCtl.abort) return;
-    await playOne(pageIdx, i);
-  }
-}
-
-function playBubble(pageIdx, bubbleIdx) {
-  // 单个气泡点击重播：停掉自动播放，单条播完即止。
-  stopAudio();
-  audioCtl.page = pageIdx;
-  playOne(pageIdx, bubbleIdx);
 }
 
 function setupSwipe(deck) {
