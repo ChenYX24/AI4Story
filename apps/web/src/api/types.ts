@@ -45,8 +45,9 @@ export interface Scene {
   title?: string;
   summary?: string;
   narration?: string;
-  // narrative-only
+  // narrative + interactive 都有：narrative 是叙事四格漫画，interactive 是这一交互场景在原故事中的发展过程四格图
   comic_url?: string;
+  // narrative-only
   storyboard?: StoryboardLine[];
   // interactive-only
   interaction_goal?: string;

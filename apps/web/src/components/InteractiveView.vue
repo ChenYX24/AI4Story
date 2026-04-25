@@ -41,7 +41,8 @@ function stopLoadingHints() {
   loadingHint.value = "";
 }
 
-// nextComicUrl: 下一幕的叙事图，loading 时做背景图（后端未来会给"本幕对应的叙事补充图"，届时替换）
+// nextComicUrl: loading 时做背景图。优先取当前互动场景自己在原故事中的发展过程四格图；
+// 老数据/兜底时回退到下一幕的叙事图。
 const props = defineProps<{ scene: Scene; storyId: string; sessionId: string; nextComicUrl?: string }>();
 const emit = defineEmits<{
   (e: "generate", request: {

@@ -543,12 +543,24 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
 
 // TopBar 现在自读 store，无需传 timelineItems
 
-// 下一幕的 comic_url —— 传给互动页 loading 做背景图（用户 #6）
+// 互动场景生成下一幕时的 loading 背景图：优先用当前互动场景自己的"原故事发展过程四格图"。
+// 老故事可能没生成这张图，回退到下一幕（旧逻辑）。
 const nextPreviewComicUrl = computed<string | undefined>(() => {
+  const storyId = store.current?.id || props.id;
+  const currentNode = store.flow[store.cursor];
+
+  if (currentNode?.type === "interactive") {
+    const cur = store.sceneCache?.get?.(`${storyId}:` + currentNode.sceneIdx);
+    if (cur?.comic_url) return cur.comic_url;
+    if (storyId === "little_red_riding_hood") {
+      const pad = String(currentNode.sceneIdx).padStart(3, "0");
+      return `/assets/scenes/${pad}/comic/panel.png`;
+    }
+  }
+
   const nextIdx = store.cursor + 1;
   if (nextIdx >= store.flow.length) return undefined;
   const nextNode = store.flow[nextIdx];
-  const storyId = store.current?.id || props.id;
   const cached = store.sceneCache?.get?.(`${storyId}:` + nextNode.sceneIdx);
   if (cached?.comic_url) return cached.comic_url;
   if (cached?.background_url) return cached.background_url;

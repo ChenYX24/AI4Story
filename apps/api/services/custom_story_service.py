@@ -94,7 +94,9 @@ def _build_story_assets(story_id: str, text: str) -> None:
             target_total_scenes=0,
             max_narrative_scenes=0,
             max_workers=64,
-            asset_workers=max(2, min(4, DEFAULT_MAX_WORKERS)),
+            # 单个场景内有 background / characters / objects / comic 四类任务并发，
+            # 故 asset_workers 至少给到 6，让 comic 不会成为单场景串行尾巴。
+            asset_workers=max(6, min(8, DEFAULT_MAX_WORKERS)),
             no_progress=True,
             progress_callback=lambda p, label: _set_progress(story_id, p, label),
         )

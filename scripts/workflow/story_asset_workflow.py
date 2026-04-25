@@ -661,6 +661,7 @@ def ensure_interactive_scene_directories(scene_root: Path) -> None:
     (scene_root / "image" / "characters").mkdir(parents=True, exist_ok=True)
     (scene_root / "image" / "objects").mkdir(parents=True, exist_ok=True)
     (scene_root / "background").mkdir(parents=True, exist_ok=True)
+    (scene_root / "comic").mkdir(parents=True, exist_ok=True)
 
 
 def ensure_narrative_scene_directories(scene_root: Path) -> None:
@@ -814,6 +815,100 @@ def build_narrative_comic_prompt(scene: dict[str, Any], storyboard_text: str) ->
     return " ".join(part for part in prompt_parts if part.strip())
 
 
+def build_interactive_storyboard_prompt(scene: dict[str, Any]) -> str:
+    scene_payload = {
+        "scene_index": scene.get("scene_index"),
+        "scene_type": scene.get("scene_type"),
+        "interaction_goal": scene.get("interaction_goal"),
+        "initial_frame": scene.get("initial_frame"),
+        "event_outcome": scene.get("event_outcome"),
+        "narration": scene.get("narration"),
+        "characters": scene.get("characters", []),
+        "objects": scene.get("objects", []),
+        "background_visual_description": scene.get("background_visual_description"),
+    }
+    return f"""
+请基于当前 scene.json 的内容（这是一段交互场景在原故事里的发展过程），构造一份适合儿童绘本的四格漫画分镜。
+
+要求：
+1. 整体风格为彩铅手绘风格，童趣可爱，四格漫画分镜构图，适用于儿童绘本。
+2. 必须严格输出以下结构，不要输出 JSON，不要输出解释：
+根据 initial_frame -> interaction_goal -> event_outcome 推进的发展过程设计一组漫画，整体风格为彩铅手绘风格，童趣可爱，按照田字格分隔四格漫画分镜构图，适用于儿童绘本。
+画面一（左上）：
+画面描述：
+画面二（右上）：
+画面描述：
+画面三（左下）：
+画面描述：
+画面四（右下）：
+画面描述：
+3. 四个画面必须是这一交互场景内部的连续推进：以 initial_frame 为起始，过渡至 interaction_goal 中描述的关键互动，最终以 event_outcome 收尾。
+4. 你可以使用 narration、interaction_goal、event_outcome 来帮助拆分四格，但不要照抄成图片中的文字。
+5. 需要综合 background_visual_description，以及 scene 中出现的人物和物体来做分镜安排。
+6. 这是分镜构造稿，不是最终图片提示词，所以可以写清楚每格里谁在做什么、整体场面如何推进。
+
+scene.json 内容：
+{json.dumps(scene_payload, ensure_ascii=False, indent=2)}
+""".strip()
+
+
+def build_interactive_comic_prompt(scene: dict[str, Any], storyboard_text: str) -> str:
+    character_lines: list[str] = []
+    for character in scene.get("characters", []):
+        related = character.get("related_objects", [])
+        related_note = ""
+        if isinstance(related, list) and related:
+            names = ", ".join(item.get("name", "") for item in related if isinstance(item, dict) and item.get("name"))
+            if names:
+                related_note = f" Related props to keep consistent: {names}."
+        character_lines.append(f"{character['name']}.{related_note}")
+
+    object_lines: list[str] = []
+    for obj in scene.get("objects", []):
+        if not isinstance(obj, dict):
+            continue
+        name = str(obj.get("name", "")).strip()
+        description = str(obj.get("appearance_description", "")).strip()
+        if name and description:
+            object_lines.append(f"{name}: {description}")
+
+    initial_frame = str(scene.get("initial_frame", "")).strip()
+    interaction_goal = str(scene.get("interaction_goal", "")).strip()
+    event_outcome = str(scene.get("event_outcome", "")).strip()
+    narration = str(scene.get("narration", "")).strip()
+
+    prompt_parts = [
+        "Generate one single children's story comic page arranged as four continuous comic panels in one image.",
+        "The image must contain exactly 4 connected narrative panels that read in order from panel 1 to panel 4.",
+        "Colored pencil hand-drawn illustration style.",
+        "This depicts the original development arc of an interactive scene from the source story.",
+        f"Initial frame (panel 1 baseline): {initial_frame}.",
+        f"Interaction goal driving the middle panels: {interaction_goal}.",
+        f"Event outcome to land on by panel 4: {event_outcome}.",
+        f"Background environment: {scene.get('background_visual_description', '')}.",
+        f"Storyboard plan to follow: {storyboard_text}",
+    ]
+    if narration:
+        prompt_parts.append(f"Narration caption (for staging only, do not render): {narration}.")
+    if character_lines:
+        prompt_parts.append("Characters to keep consistent with references: " + " ".join(character_lines))
+    if object_lines:
+        prompt_parts.append("Consistent recurring props in this scene: " + " ".join(object_lines))
+    prompt_parts.append(
+        "Break the arc into four sequential beats: setup (initial_frame), rising action toward the interaction, the climax of the interaction, and the outcome."
+    )
+    prompt_parts.append(
+        "Compose it like a polished storybook comic strip with coherent staging, expressive acting, and consistent proportions across all four panels."
+    )
+    prompt_parts.append(
+        "Keep the visual style soft, colorful, and clearly hand-drawn with colored pencils."
+    )
+    prompt_parts.append(
+        "Do not render any words, captions, dialogue balloons, narration boxes, labels, or sound effects anywhere in the image."
+    )
+    return " ".join(part for part in prompt_parts if part.strip())
+
+
 def build_narrative_reference_paths(
     scene: dict[str, Any],
     global_manifest: dict[str, dict[str, dict[str, str]]],
@@ -939,6 +1034,18 @@ def process_scene(
     object_grid_work_dir = scene_root / "_object_grids"
 
     scene_manifest = {"characters": [], "objects": [], "background": str(background_png)}
+
+    comic_dir = scene_root / "comic"
+    comic_raw = comic_dir / "panel_raw.png"
+    comic_png = comic_dir / "panel.png"
+    storyboard_txt = comic_dir / "storyboard.txt"
+    comic_reference_paths = build_narrative_reference_paths(scene, global_manifest)
+    comic_ref_board: Path | None = None
+    if comic_reference_paths:
+        comic_ref_board = create_reference_board(
+            comic_reference_paths, comic_dir / "_narrative_refs.png"
+        )
+
     character_jobs: list[tuple[dict[str, Any], Path | None, list[dict[str, Any]]]] = []
     for character in scene.get("characters", []):
         char_name = normalize_name(character["name"])
@@ -1005,9 +1112,34 @@ def process_scene(
             parallel_workers=scene_asset_workers,
         )
 
+    def generate_interactive_comic_task() -> str | None:
+        if not dashscope_api_key:
+            return None
+        storyboard_text = request_text_completion(
+            api_key=dashscope_api_key,
+            model=qwen_model,
+            prompt=build_interactive_storyboard_prompt(scene),
+            base_url=base_url,
+            timeout=timeout,
+        )
+        storyboard_txt.write_text(storyboard_text, encoding="utf-8")
+        generate_image_to_path(
+            api_key=api_key,
+            prompt=build_interactive_comic_prompt(scene, storyboard_text),
+            size=background_size,
+            output_path=comic_raw,
+            model=seedream_model,
+            provider=provider,
+            reference_images=[str(comic_ref_board)] if comic_ref_board else None,
+        )
+        comic_raw.replace(comic_png)
+        update_progress(overall_progress, f"scene {scene_index}: interactive comic")
+        return str(comic_png.resolve())
+
     with ThreadPoolExecutor(max_workers=max(2, scene_asset_workers)) as executor:
         background_future = executor.submit(generate_background_task)
         object_future = executor.submit(generate_objects_task)
+        comic_future = executor.submit(generate_interactive_comic_task)
         character_futures = {
             executor.submit(generate_character_task, character, ref_board, related_objects): index
             for index, (character, ref_board, related_objects) in enumerate(character_jobs)
@@ -1019,9 +1151,23 @@ def process_scene(
         for _, character_payload in sorted(ordered_characters, key=lambda item: item[0]):
             scene_manifest["characters"].append(character_payload)
         scene_object_results = object_future.result()
+        comic_result: str | None = None
+        try:
+            comic_result = comic_future.result()
+        except Exception as exc:
+            print(f"[comic] interactive comic generation failed for scene {scene_index}: {exc}")
 
     for result in scene_object_results:
         scene_manifest["objects"].append(result)
+
+    if comic_result:
+        scene_manifest["comic"] = comic_result
+        scene_manifest["storyboard"] = str(storyboard_txt.resolve())
+
+    if comic_ref_board and comic_ref_board.exists():
+        comic_ref_board.unlink(missing_ok=True)
+    if comic_raw.exists():
+        comic_raw.unlink(missing_ok=True)
 
     save_json(scene_root / "manifest.json", scene_manifest)
 
@@ -1036,7 +1182,8 @@ def process_scene(
 def scene_work_units(scene: dict[str, Any], narrative_only: bool) -> int:
     units = 1
     if is_interactive_scene(scene["scene_type"]):
-        units += 1
+        units += 1  # background
+        units += 1  # interactive comic (storyboard + 4-panel image)
         units += len(scene.get("characters", []))
         object_count = len(scene.get("objects", []))
         if object_count:

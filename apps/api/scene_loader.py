@@ -187,6 +187,7 @@ def _scene_payload_from_db(story_id: str, scene: dict) -> dict:
         "initial_frame": scene.get("initial_frame") or raw.get("initial_frame", ""),
         "event_outcome": scene.get("event_outcome") or raw.get("event_outcome", ""),
         "narration": scene.get("narration", ""),
+        "comic_url": scene.get("comic_url") or "",
         "background_url": scene.get("background_url") or "",
         "characters": [
             {
@@ -228,6 +229,8 @@ def _scene_payload_from_fs(idx: int, story_id: str) -> dict:
         }
     chars = scene.get("characters", []) or []
     props = scene.get("objects", []) or []
+    comic_path = asset_resolver.path_for(idx, "comic", story_id=story_id)
+    comic_url = asset_resolver.url_for(idx, "comic", story_id=story_id) if comic_path.exists() else ""
     return {
         "index": idx,
         "type": "interactive",
@@ -235,6 +238,7 @@ def _scene_payload_from_fs(idx: int, story_id: str) -> dict:
         "initial_frame": scene.get("initial_frame", ""),
         "event_outcome": scene.get("event_outcome", ""),
         "narration": scene.get("narration", ""),
+        "comic_url": comic_url,
         "background_url": asset_resolver.url_for(idx, "background", story_id=story_id),
         "characters": [
             {
