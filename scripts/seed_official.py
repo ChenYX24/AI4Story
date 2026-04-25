@@ -178,6 +178,24 @@ def seed_story(storage, story_id: str, title: str, *, dry: bool) -> None:
     }
 
     print(f"\n=== seed story {story_id!r} ===")
+
+    # 必须先 upsert 故事行 — scenes 表对 story_id 有 FK 约束。
+    if not dry:
+        db.upsert_story({
+            "id": story_id,
+            "title": title,
+            "summary": raw_meta["story_summary"],
+            "cover_url": None,  # 占位，扫完场景后更新
+            "scene_count": 0,
+            "status": "ready",
+            "is_official": True,
+            "public": True,
+            "owner_user_id": None,
+            "raw_meta": raw_meta,
+            "likes": 512,
+            "input_text": "",
+        })
+
     seed_global_assets(storage, story_id, dry=dry)
 
     scenes_data: list[dict] = []
@@ -217,24 +235,24 @@ def seed_story(storage, story_id: str, title: str, *, dry: bool) -> None:
         if not dry:
             db.upsert_scene(scene_row)
 
-    story_row = {
-        "id": story_id,
-        "title": title,
-        "summary": raw_meta["story_summary"],
-        "cover_url": cover_url,
-        "scene_count": len(scenes_data),
-        "status": "ready",
-        "is_official": True,
-        "public": True,
-        "owner_user_id": None,
-        "raw_meta": raw_meta,
-        "likes": 512,
-        "input_text": "",
-    }
+    # 扫完所有场景后回写 cover_url + scene_count
     if dry:
         print(f"  [DRY] would upsert story {story_id!r} with {len(scenes_data)} scenes")
     else:
-        db.upsert_story(story_row)
+        db.upsert_story({
+            "id": story_id,
+            "title": title,
+            "summary": raw_meta["story_summary"],
+            "cover_url": cover_url,
+            "scene_count": len(scenes_data),
+            "status": "ready",
+            "is_official": True,
+            "public": True,
+            "owner_user_id": None,
+            "raw_meta": raw_meta,
+            "likes": 512,
+            "input_text": "",
+        })
         print(f"  ✓ story upserted: {story_id} ({len(scenes_data)} scenes, cover={cover_url})")
 
 
