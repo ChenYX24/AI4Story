@@ -17,7 +17,10 @@ import {
   fetchPublicStories,
   fetchPublicAssets,
   uploadImage,
+  bookmarkStory,
+  unbookmarkStory,
 } from "@/api/endpoints";
+import { useStoryStore } from "@/stores/story";
 import type { PublicStoryCard, PublicAsset, PublicAssetBundle } from "@/api/types";
 
 const router = useRouter();
@@ -26,6 +29,7 @@ const toast = useToastStore();
 const shelf = useShelfStore();
 const assetShelf = useAssetShelfStore();
 const userStore = useUserStore();
+const storyStore = useStoryStore();
 
 // 未登录时统一弹登录窗 —— 登录成功后回到当前页（用 ?login=1 触发 App.vue 里的 LoginModal）
 function requireLogin(action: string): boolean {
@@ -121,6 +125,36 @@ async function loadPlaza() {
     }
   } finally {
     plazaLoading.value = false;
+  }
+}
+
+// 把别人公开的故事加到 / 移出"我的故事"。同步刷新 storyStore.list 让其它页面同步显示。
+const bookmarkBusyIds = ref<Set<string>>(new Set());
+async function onToggleBookmark(s: PublicStoryCard, e: MouseEvent) {
+  e.stopPropagation();
+  if (s.official) return;
+  if (!requireLogin("收藏故事")) return;
+  if (bookmarkBusyIds.value.has(s.id)) return;
+  const next = new Set(bookmarkBusyIds.value);
+  next.add(s.id);
+  bookmarkBusyIds.value = next;
+  try {
+    if (s.bookmarked) {
+      await unbookmarkStory(s.id);
+      s.bookmarked = false;
+      toast.push("已从我的故事移除", "success");
+    } else {
+      await bookmarkStory(s.id);
+      s.bookmarked = true;
+      toast.push("已添加到我的故事", "success");
+    }
+    void storyStore.loadList?.().catch(() => {});
+  } catch (err: any) {
+    toast.push(`操作失败：${err?.message || err}`, "warn");
+  } finally {
+    const after = new Set(bookmarkBusyIds.value);
+    after.delete(s.id);
+    bookmarkBusyIds.value = after;
   }
 }
 
@@ -448,8 +482,19 @@ async function submitSketch() {
             </div>
             <div class="mt-2 flex items-center justify-between">
               <span class="text-[11px] text-ink-mute">{{ s.scene_count }} 幕</span>
-              <span v-if="s.official" class="px-2 py-0.5 rounded-full text-[11px] bg-gradient-to-r from-gold to-accent text-white">官方</span>
-              <span v-else-if="shelf.has(s.id)" class="px-2 py-0.5 rounded-full text-[11px] bg-good/20 text-good">✓ 在书架</span>
+              <div class="flex items-center gap-1.5">
+                <span v-if="s.official" class="px-2 py-0.5 rounded-full text-[11px] bg-gradient-to-r from-gold to-accent text-white">官方</span>
+                <button
+                  v-if="!s.official"
+                  class="px-2 py-0.5 text-[11px] rounded-full transition"
+                  :class="s.bookmarked
+                    ? 'bg-good/20 text-good hover:bg-warn/20 hover:text-warn'
+                    : 'bg-accent text-white hover:brightness-110'"
+                  :disabled="bookmarkBusyIds.has(s.id)"
+                  :title="s.bookmarked ? '点击取消，从我的故事里移除' : '加到我的故事里'"
+                  @click="(e) => onToggleBookmark(s, e)"
+                >{{ s.bookmarked ? '✓ 已添加' : '＋ 添加到我的故事' }}</button>
+              </div>
             </div>
           </div>
         </BaseCard>

@@ -13,6 +13,12 @@ export interface StoryCard {
   cover_url?: string;
   available?: boolean;
   error_message?: string;
+  /** 作者是否已发布到公开池 */
+  public?: boolean;
+  /** 是否是从别人公开故事 bookmark 来的 */
+  bookmarked?: boolean;
+  /** 公开/收藏卡上展示的原作者昵称 */
+  owner_nickname?: string;
 }
 
 export interface StoriesResponse {
@@ -234,10 +240,13 @@ export interface PublicStoryCard {
   cover_url?: string | null;
   scene_count: number;
   author: string;
+  owner_user_id?: string | null;
+  owner_nickname?: string;
   likes: number;
   official?: boolean;
   category?: string;
   emoji_cover?: string | null;
+  bookmarked?: boolean;
 }
 export interface PublicAsset {
   id: string;

@@ -6,12 +6,14 @@
   - 文件系统回落：当 DB 里没有官方故事时（本地未跑 seed_official）从 scenes/ 读
 """
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from pydantic import BaseModel
 
 from ..config import SCENES_DIR
 from ..scene_loader import load_story
+from ..db import user_by_token
 from .. import db
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -24,10 +26,13 @@ class PublicStoryCard(BaseModel):
     cover_url: str | None = None
     scene_count: int
     author: str
+    owner_user_id: str | None = None
+    owner_nickname: str = ""
     likes: int
     official: bool = False
     category: str = "hot"
     emoji_cover: str | None = None
+    bookmarked: bool = False
 
 
 class PublicAsset(BaseModel):
@@ -61,28 +66,49 @@ class PublicAssetsResponse(BaseModel):
     bundles: list[PublicAssetBundle] = []
 
 
-def _row_to_card(row: dict) -> PublicStoryCard:
+def _row_to_card(row: dict, *, bookmarked: bool = False) -> PublicStoryCard:
+    is_official = bool(row.get("is_official"))
+    nickname = row.get("owner_nickname") or ""
+    if is_official:
+        author = "漫秀官方"
+    else:
+        author = nickname or "用户原创"
     return PublicStoryCard(
         id=row["id"],
         title=row["title"],
         summary=row.get("summary", ""),
         cover_url=row.get("cover_url"),
         scene_count=row.get("scene_count", 0),
-        author="漫秀官方" if row.get("is_official") else "用户原创",
+        author=author,
+        owner_user_id=row.get("owner_user_id"),
+        owner_nickname=nickname,
         likes=row.get("likes", 0),
-        official=row.get("is_official", False),
-        category="official" if row.get("is_official") else "hot",
+        official=is_official,
+        category="official" if is_official else "hot",
+        bookmarked=bookmarked,
     )
 
 
-@router.get("/stories", response_model=PublicStoriesResponse)
-def public_stories() -> PublicStoriesResponse:
-    cards: list[PublicStoryCard] = []
+def _extract_token(authorization: Optional[str]) -> str:
+    if not authorization:
+        return ""
+    parts = authorization.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip()
+    return authorization.strip()
 
-    # 1) DB 里所有公开故事（官方 + 用户主动 share 的）
-    rows = db.list_stories(public=True)
+
+@router.get("/stories", response_model=PublicStoriesResponse)
+def public_stories(authorization: Optional[str] = Header(default=None)) -> PublicStoriesResponse:
+    cards: list[PublicStoryCard] = []
+    user = user_by_token(_extract_token(authorization))
+    user_id = user["id"] if user else None
+    bookmarked_ids = db.list_story_bookmark_ids(user_id) if user_id else set()
+
+    # 1) DB 里所有公开故事（官方 + 用户主动 share 的）；登录用户排除自己发布的（他们能在"我的原创"里看）。
+    rows = db.list_public_stories_with_owner(exclude_user_id=user_id)
     for r in rows:
-        cards.append(_row_to_card(r))
+        cards.append(_row_to_card(r, bookmarked=r["id"] in bookmarked_ids))
 
     # 2) 兜底：DB 里没东西时回落到文件系统的 little_red_riding_hood
     if not cards:

@@ -384,6 +384,77 @@ async function onDeleteCustom(id: string, e: MouseEvent) {
   }
 }
 
+// ---- 我的原创：分享故事（多选 → 把 public 置 true，推到主页热门池）----
+const shareStorySelectMode = ref(false);
+const shareStorySelected = ref<Set<string>>(new Set());
+const shareStoryBusy = ref(false);
+// 只允许选 status === ready 的原创故事进入分享池
+const readyMyStories = computed(() => myStories.value.filter((s) => s.available && (s.status || "ready") === "ready"));
+
+function enterShareStoryMode() {
+  shareStorySelectMode.value = true;
+  shareStorySelected.value = new Set();
+}
+function exitShareStoryMode() {
+  shareStorySelectMode.value = false;
+  shareStorySelected.value = new Set();
+}
+function clearShareStorySelection() {
+  shareStorySelected.value = new Set();
+}
+function toggleShareStorySelect(id: string) {
+  const next = new Set(shareStorySelected.value);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  shareStorySelected.value = next;
+}
+function onMyStoryCardClick(s: any) {
+  if (shareStorySelectMode.value) {
+    if (s.status === "ready" && s.available) toggleShareStorySelect(s.id);
+    else toast.push("故事还没生成完，先等一下", "warn");
+    return;
+  }
+  if (s.available) openStory(s.id);
+}
+
+async function confirmShareStories() {
+  if (shareStorySelected.value.size === 0 || shareStoryBusy.value) return;
+  shareStoryBusy.value = true;
+  try {
+    const { patchCustomStory } = await import("@/api/endpoints");
+    const ids = Array.from(shareStorySelected.value);
+    let ok = 0;
+    for (const id of ids) {
+      try {
+        const updated = await patchCustomStory(id, { public: true });
+        // 把 store.list 同步成 public=true，UI 立即出现"已分享"角标
+        const target = store.list.find((s) => s.id === id);
+        if (target) Object.assign(target, { public: !!updated?.public });
+        ok += 1;
+      } catch (e: any) {
+        toast.push(`「${id}」分享失败：${e?.message || e}`, "warn");
+      }
+    }
+    if (ok) toast.push(`已分享 ${ok} 个故事到热门`, "success");
+    exitShareStoryMode();
+  } finally {
+    shareStoryBusy.value = false;
+  }
+}
+
+async function onUnpublishMyStory(id: string, e: MouseEvent) {
+  e.stopPropagation();
+  if (!confirm("把这个故事从热门池下线？别的用户已经收藏的会暂时看不到。")) return;
+  try {
+    const { patchCustomStory } = await import("@/api/endpoints");
+    const updated = await patchCustomStory(id, { public: false });
+    const target = store.list.find((s) => s.id === id);
+    if (target) Object.assign(target, { public: !!updated?.public });
+    toast.push("已从热门池下线", "success");
+  } catch (e: any) {
+    toast.push(`下线失败：${e?.message || e}`, "warn");
+  }
+}
+
 function onRemoveFromShelf(id: string, e: MouseEvent) {
   e.stopPropagation();
   shelf.remove(id);
@@ -479,9 +550,42 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
 
         <!-- 📘 我创建的 -->
         <section>
-          <div class="font-bold text-ink mb-2 flex items-center gap-2">
+          <div class="font-bold text-ink mb-2 flex items-center gap-2 flex-wrap">
             <span>📘 我的原创</span>
             <span class="text-xs text-ink-mute font-normal">{{ myStories.length }} 本</span>
+            <div class="ml-auto flex items-center gap-2">
+              <template v-if="!shareStorySelectMode">
+                <BaseButton
+                  pill
+                  size="sm"
+                  variant="soft"
+                  :disabled="!readyMyStories.length"
+                  @click="enterShareStoryMode"
+                >📤 分享故事</BaseButton>
+              </template>
+              <template v-else>
+                <span class="text-xs text-ink-soft">已选 {{ shareStorySelected.size }}</span>
+                <BaseButton
+                  pill
+                  size="sm"
+                  variant="soft"
+                  :disabled="shareStorySelected.size === 0"
+                  @click="clearShareStorySelection"
+                >全部清空选中</BaseButton>
+                <BaseButton
+                  pill
+                  size="sm"
+                  :disabled="shareStorySelected.size === 0 || shareStoryBusy"
+                  @click="confirmShareStories"
+                >{{ shareStoryBusy ? "分享中…" : `✨ 分享 (${shareStorySelected.size})` }}</BaseButton>
+                <BaseButton
+                  pill
+                  size="sm"
+                  variant="ghost"
+                  @click="exitShareStoryMode"
+                >取消</BaseButton>
+              </template>
+            </div>
           </div>
           <template v-if="myStories.length === 0">
             <div class="text-center py-10 bg-white rounded-[var(--radius-card)] border border-paper-edge">
@@ -497,7 +601,8 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
               :key="s.id"
               hover
               class="overflow-hidden relative group cursor-pointer"
-              @click="s.available && openStory(s.id)"
+              :class="shareStorySelectMode && shareStorySelected.has(s.id) ? '!border-accent shadow-[0_0_12px_rgba(255,122,61,0.3)] border-2' : ''"
+              @click="onMyStoryCardClick(s)"
             >
               <div
                 class="h-28 grid place-items-center text-4xl"
@@ -505,6 +610,14 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
               >
                 <img v-if="s.cover_url" :src="s.cover_url" loading="lazy" class="w-full h-full object-cover" alt="" />
                 <span v-else>{{ s.status === "generating" ? "⏳" : s.status === "failed" ? "⚠️" : "📘" }}</span>
+                <span
+                  v-if="shareStorySelectMode && shareStorySelected.has(s.id)"
+                  class="absolute top-1.5 left-1.5 w-6 h-6 grid place-items-center bg-accent text-white rounded-full text-xs shadow"
+                >✓</span>
+                <span
+                  v-if="s.public"
+                  class="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 text-[10px] rounded-full bg-accent-soft/85 text-white shadow"
+                >已分享</span>
               </div>
               <div class="p-3">
                 <div class="font-semibold text-sm text-ink truncate">{{ s.title }}</div>
@@ -516,10 +629,17 @@ function openReport(storyId: string, sid?: string) { router.push({ name: "report
                 </div>
               </div>
               <button
+                v-if="!shareStorySelectMode"
                 class="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center"
                 title="删除"
                 @click="(e) => onDeleteCustom(s.id, e)"
               >✕</button>
+              <button
+                v-if="!shareStorySelectMode && s.public"
+                class="absolute top-2 right-2 px-2 py-0.5 text-[11px] rounded-full bg-white/90 text-ink-soft hover:bg-warn/20 hover:text-warn opacity-0 group-hover:opacity-100 transition"
+                title="从公开池下线"
+                @click="(e) => onUnpublishMyStory(s.id, e)"
+              >下线</button>
             </BaseCard>
           </div>
         </section>

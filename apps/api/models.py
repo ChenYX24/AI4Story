@@ -175,6 +175,12 @@ class StoryCard(BaseModel):
     error_message: str | None = None
     progress: int = 0
     progress_label: str = ""
+    # 作者主动 share 出去后 public=True；StoryCard 在"我的原创"卡上据此显示"已分享"角标。
+    public: bool = False
+    # 该卡是从别人发布的故事 bookmark 过来的（出现在我的库存/书架，但作者不是我）
+    bookmarked: bool = False
+    # 用于"热门故事"展示作者昵称（公开/收藏故事才有）
+    owner_nickname: str = ""
 
 
 class StoriesResponse(BaseModel):

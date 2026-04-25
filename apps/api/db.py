@@ -172,6 +172,19 @@ def init_db() -> None:
         c.execute("CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_user_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_assets_scope_story ON assets(scope, story_id, scene_index)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_assets_official ON assets(is_official, scope)")
+        # 用户从主页"热门故事"加到自己账户里的"已收藏故事"列表 —— 故事本体仍归原作者，
+        # 这里只记录 (user_id, story_id) 的引用关系，不复制故事数据。
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS user_story_bookmarks (
+                user_id    TEXT NOT NULL,
+                story_id   TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, story_id),
+                FOREIGN KEY (user_id)  REFERENCES users(id)   ON DELETE CASCADE,
+                FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_story_bookmarks_user ON user_story_bookmarks(user_id)")
 
 
 # ---------- 账号操作 ----------
@@ -564,6 +577,98 @@ def delete_story(story_id: str) -> bool:
     with _conn() as c:
         cur = c.execute("DELETE FROM stories WHERE id = ?", (story_id,))
         return cur.rowcount > 0
+
+
+def update_story_public(story_id: str, owner_user_id: str, public: bool) -> bool:
+    """作者把自己的原创故事发布 / 取消发布。鉴权：owner_user_id 必须匹配。
+    is_official 故事不允许从这里改 public（已经默认是公开的）。"""
+    with _conn() as c:
+        cur = c.execute(
+            "UPDATE stories SET public = ?, updated_at = ? "
+            "WHERE id = ? AND owner_user_id = ? AND is_official = 0",
+            (1 if public else 0, _now(), story_id, owner_user_id),
+        )
+        return cur.rowcount > 0
+
+
+def add_story_bookmark(user_id: str, story_id: str) -> bool:
+    """把别的作者的公开故事加到当前用户的"已收藏"。重复加 idempotent。"""
+    with _conn() as c:
+        # 必须是 public 故事，并且不是自己原创的（自己的没必要 bookmark）
+        row = c.execute(
+            "SELECT public, owner_user_id FROM stories WHERE id = ?", (story_id,)
+        ).fetchone()
+        if not row or not row["public"]:
+            return False
+        if row["owner_user_id"] == user_id:
+            return False
+        c.execute(
+            "INSERT OR IGNORE INTO user_story_bookmarks (user_id, story_id, created_at) VALUES (?,?,?)",
+            (user_id, story_id, _now()),
+        )
+    return True
+
+
+def remove_story_bookmark(user_id: str, story_id: str) -> bool:
+    with _conn() as c:
+        cur = c.execute(
+            "DELETE FROM user_story_bookmarks WHERE user_id = ? AND story_id = ?",
+            (user_id, story_id),
+        )
+        return cur.rowcount > 0
+
+
+def list_bookmarked_stories(user_id: str) -> list[dict]:
+    """当前用户收藏的所有(仍 public 的)故事，每条带原作者 nickname。"""
+    sql = """
+        SELECT s.*, u.nickname AS owner_nickname
+        FROM user_story_bookmarks b
+        JOIN stories s ON s.id = b.story_id
+        LEFT JOIN users u ON u.id = s.owner_user_id
+        WHERE b.user_id = ? AND s.public = 1
+        ORDER BY b.created_at DESC
+    """
+    with _conn() as c:
+        rows = c.execute(sql, (user_id,)).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        d = _row_to_story(r)
+        d["owner_nickname"] = r["owner_nickname"] or ""
+        d["bookmarked"] = True
+        out.append(d)
+    return out
+
+
+def list_story_bookmark_ids(user_id: str) -> set[str]:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT story_id FROM user_story_bookmarks WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    return {r["story_id"] for r in rows}
+
+
+def list_public_stories_with_owner(*, exclude_user_id: Optional[str] = None) -> list[dict]:
+    """主页"热门故事"用：所有 public=1 的故事 + 原作者 nickname。
+    exclude_user_id 用来把当前登录用户自己发布的故事过滤掉（他们已经在"我的原创"里看到了）。"""
+    sql = """
+        SELECT s.*, u.nickname AS owner_nickname
+        FROM stories s
+        LEFT JOIN users u ON u.id = s.owner_user_id
+        WHERE s.public = 1
+    """
+    args: list = []
+    if exclude_user_id:
+        sql += " AND (s.owner_user_id IS NULL OR s.owner_user_id <> ?)"
+        args.append(exclude_user_id)
+    sql += " ORDER BY s.is_official DESC, s.likes DESC, s.updated_at DESC"
+    with _conn() as c:
+        rows = c.execute(sql, args).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        d = _row_to_story(r)
+        d["owner_nickname"] = r["owner_nickname"] or ""
+        out.append(d)
+    return out
 
 
 def _row_to_story(row) -> dict:

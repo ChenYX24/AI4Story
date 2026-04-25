@@ -10,6 +10,31 @@ from ..scene_loader import load_story
 from ..services.custom_story_service import submit_custom_story
 from ..story_registry import delete_custom_story_record, list_custom_story_records, story_exists, story_root, update_custom_story_record
 
+
+def _sync_custom_story_to_db(record: dict, *, public: bool) -> None:
+    """把 registry 里的一条原创故事记录同步到 DB stories 表。
+    user_story_bookmarks 通过 FK 引用 stories.id；要让别人 bookmark 必须先有 DB 行。
+    """
+    if not record or not record.get("id"):
+        return
+    db.upsert_story({
+        "id": record["id"],
+        "title": record.get("title") or "我的自定义故事",
+        "summary": record.get("summary") or "",
+        "cover_url": record.get("cover_url") or "",
+        "scene_count": int(record.get("scene_count") or 0),
+        "status": record.get("status") or "ready",
+        "error_message": record.get("error_message"),
+        "progress": int(record.get("progress") or 100),
+        "progress_label": record.get("progress_label") or "",
+        "is_official": False,
+        "public": public,
+        "owner_user_id": record.get("owner_user_id"),
+        "raw_meta": {},
+        "likes": 0,
+        "input_text": record.get("input_text") or "",
+    })
+
 router = APIRouter()
 
 
@@ -18,7 +43,11 @@ def stories(authorization: Optional[str] = Header(default=None)) -> StoriesRespo
     default_story = load_story()
     user = _user_from_auth(authorization)
     custom_cards = _build_custom_story_cards(user["id"] if user else None)
-    return StoriesResponse(stories=[_build_default_story_card(default_story), *custom_cards])
+    bookmarked_cards: list[StoryCard] = []
+    if user:
+        for row in db.list_bookmarked_stories(user["id"]):
+            bookmarked_cards.append(_db_row_to_card(row, bookmarked=True))
+    return StoriesResponse(stories=[_build_default_story_card(default_story), *custom_cards, *bookmarked_cards])
 
 
 @router.post("/stories/custom", response_model=StoryCard)
@@ -74,11 +103,41 @@ def patch_custom_story(story_id: str, body: dict, authorization: Optional[str] =
         raise HTTPException(status_code=404, detail="故事不存在。")
     if existing.get("owner_user_id") and existing.get("owner_user_id") != user["id"]:
         raise HTTPException(status_code=403, detail="只能编辑自己的故事。")
-    title = (body.get("title") or "").strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="标题不能为空。")
-    record = update_custom_story_record(story_id, title=title)
+
+    updates: dict = {}
+    if "title" in body:
+        title = (body.get("title") or "").strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="标题不能为空。")
+        updates["title"] = title
+    if "public" in body:
+        # 必须等故事生成完成才能分享
+        if (existing.get("status") or "") != "ready":
+            raise HTTPException(status_code=400, detail="故事还没生成完，暂时不能分享。")
+        updates["public"] = bool(body.get("public"))
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="没有需要更新的字段。")
+
+    record = update_custom_story_record(story_id, **updates)
+    # 如果改了 public 状态，同步到 DB stories 表（bookmark 走 FK 必须有这一行）
+    if "public" in updates:
+        _sync_custom_story_to_db(record, public=bool(updates["public"]))
     return _custom_record_to_card(record)
+
+
+@router.post("/stories/{story_id}/bookmark", status_code=204)
+def bookmark_story(story_id: str, authorization: Optional[str] = Header(default=None)) -> None:
+    """把别人 share 出来的公开故事加入到自己的"已收藏"。重复加 idempotent。"""
+    user = _require_user(authorization)
+    if not db.add_story_bookmark(user["id"], story_id):
+        raise HTTPException(status_code=404, detail="故事不可收藏（不公开 / 是自己的 / 已被删除）。")
+
+
+@router.delete("/stories/{story_id}/bookmark", status_code=204)
+def unbookmark_story(story_id: str, authorization: Optional[str] = Header(default=None)) -> None:
+    user = _require_user(authorization)
+    db.remove_story_bookmark(user["id"], story_id)
 
 
 def _build_default_story_card(story: dict) -> StoryCard:
@@ -147,6 +206,29 @@ def _custom_record_to_card(record: dict) -> StoryCard:
         error_message=record.get("error_message"),
         progress=int(record.get("progress") or 0),
         progress_label=record.get("progress_label") or "",
+        public=bool(record.get("public")),
+    )
+
+
+def _db_row_to_card(row: dict, *, bookmarked: bool = False) -> StoryCard:
+    """DB stories 行 → StoryCard，给"已收藏"和"热门"复用。"""
+    status_raw = (row.get("status") or "ready").lower()
+    status = status_raw if status_raw in {"ready", "generating", "failed", "locked"} else "ready"
+    return StoryCard(
+        id=row["id"],
+        title=row.get("title") or "未命名故事",
+        summary=row.get("summary") or "",
+        cover_url=row.get("cover_url") or "",
+        scene_count=int(row.get("scene_count") or 0),
+        available=status == "ready",
+        status=status,
+        is_custom=not row.get("is_official"),
+        error_message=row.get("error_message"),
+        progress=int(row.get("progress") or 100),
+        progress_label=row.get("progress_label") or "",
+        public=bool(row.get("public")),
+        bookmarked=bookmarked,
+        owner_nickname=row.get("owner_nickname") or "",
     )
 
 

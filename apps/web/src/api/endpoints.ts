@@ -25,8 +25,14 @@ export const fetchCustomStory = (id: string) =>
   apiGet<import("./types").StoryCard>(`/api/stories/custom/${encodeURIComponent(id)}`);
 export const deleteCustomStory = (id: string) =>
   apiDelete<{ ok: boolean }>(`/api/stories/custom/${encodeURIComponent(id)}`);
-export const patchCustomStory = (id: string, body: { title?: string }) =>
-  apiPatch<{ ok: boolean }>(`/api/stories/custom/${encodeURIComponent(id)}`, body);
+export const patchCustomStory = (id: string, body: { title?: string; public?: boolean }) =>
+  apiPatch<import("./types").StoryCard>(`/api/stories/custom/${encodeURIComponent(id)}`, body);
+
+// 把别人 share 的公开故事加入到自己的"已收藏"
+export const bookmarkStory = (id: string) =>
+  apiPost<{ ok: boolean }>(`/api/stories/${encodeURIComponent(id)}/bookmark`, {});
+export const unbookmarkStory = (id: string) =>
+  apiDelete<{ ok: boolean }>(`/api/stories/${encodeURIComponent(id)}/bookmark`);
 
 
 // 拉服务器信息（LAN IP 之类）
