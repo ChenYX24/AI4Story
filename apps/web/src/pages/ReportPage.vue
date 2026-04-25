@@ -46,15 +46,31 @@ async function buildShare() {
     const title = (store.current?.title || store.current?.story_summary || "").slice(0, 30);
     const r = await postShare({ story_title: title, comics, props });
     shareId.value = r.share_id;
-    // LAN IP 判断：localhost/127.0.0.1 时从 /api/server-info 取真正局域网 IP，方便手机扫码
-    let host = location.hostname;
-    const isLocal = host === "localhost" || host === "127.0.0.1";
-    if (isLocal) {
-      const info = await fetchServerInfo();
-      if (info.lan_ip && info.lan_ip !== "127.0.0.1") host = info.lan_ip;
+    // 优先用后端给出的 share_url —— 它知道自己绑在哪个 host:port，能避开
+    // Vite dev server (127.0.0.1:5173) 不监听 LAN 的坑。
+    if (r.share_url) {
+      shareUrl.value = r.share_url;
+    } else {
+      // 老服务端兜底：拿 server-info 里的 share_base / lan_ip 自己拼。
+      let base = "";
+      try {
+        const info: any = await fetchServerInfo();
+        if (info?.share_base) base = String(info.share_base).replace(/\/+$/, "");
+      } catch { /* ignore */ }
+      if (!base) {
+        let host = location.hostname;
+        const isLocal = host === "localhost" || host === "127.0.0.1";
+        if (isLocal) {
+          try {
+            const info: any = await fetchServerInfo();
+            if (info?.lan_ip && info.lan_ip !== "127.0.0.1") host = info.lan_ip;
+          } catch { /* ignore */ }
+        }
+        const port = location.port ? `:${location.port}` : "";
+        base = `${location.protocol}//${host}${port}`;
+      }
+      shareUrl.value = `${base}/view/${r.share_id}`;
     }
-    const port = location.port ? `:${location.port}` : "";
-    shareUrl.value = `${location.protocol}//${host}${port}/view/${r.share_id}`;
   } catch (e: any) {
     toast.push(`分享码生成失败：${e.message}`, "warn");
   } finally {

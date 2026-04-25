@@ -1,10 +1,11 @@
 import io
 import json
+import os
 import socket
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,34 @@ def _get_lan_ip() -> str:
     except Exception:
         return "127.0.0.1"
 
+
+def _share_base_url(request: Request | None = None) -> str:
+    """二维码 / 分享链接里 /view/<id> 的根地址。
+
+    优先级：PUBLIC_BASE_URL（部署侧显式给）→ 同 origin（生产 nginx 把 /view 也代理过来时）
+    → 回退到 LAN IP + 实际后端端口（本地开发，Vite 在 127.0.0.1:5173 不可外访，
+      所以必须用后端的 0.0.0.0:8000）。
+    """
+    public_base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if public_base:
+        return public_base
+    if request is not None:
+        host = request.headers.get("host", "")
+        # nginx 转发时 X-Forwarded-Host 才是用户真实访问的 origin
+        forwarded_host = request.headers.get("x-forwarded-host", "").strip()
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").strip() or "http"
+        if forwarded_host:
+            return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+        # 直接 host 头不是回环 / Vite 时也认（生产同 origin）
+        if host and not host.startswith(("127.0.0.1", "localhost")):
+            scheme = request.url.scheme or "http"
+            return f"{scheme}://{host}".rstrip("/")
+    # 本地开发兜底：LAN IP + 后端端口（默认 8000）
+    lan_ip = _get_lan_ip()
+    port = os.getenv("PORT", "8000").strip() or "8000"
+    return f"http://{lan_ip}:{port}"
+
+
 router = APIRouter()
 
 SHARES_DIR = OUTPUTS_ROOT / "_shares"
@@ -34,8 +63,12 @@ class ShareCreateRequest(BaseModel):
 
 
 @router.get("/server-info")
-def server_info() -> dict:
-    return {"lan_ip": _get_lan_ip()}
+def server_info(request: Request) -> dict:
+    return {
+        "lan_ip": _get_lan_ip(),
+        # share_base 用于前端拼 QR / 复制链接，避开 Vite dev port (5173) 不能外访的坑
+        "share_base": _share_base_url(request),
+    }
 
 
 @router.get("/share/{share_id}/qr.svg")
@@ -55,13 +88,14 @@ def share_qr(share_id: str, url: str = Query(default="")) -> Response:
 
 
 @router.post("/share")
-def create_share(req: ShareCreateRequest) -> dict:
+def create_share(req: ShareCreateRequest, request: Request) -> dict:
     share_id = uuid.uuid4().hex[:12]
     data = {"id": share_id, "story_title": req.story_title, "comics": req.comics, "props": req.props}
     (SHARES_DIR / f"{share_id}.json").write_text(
         json.dumps(data, ensure_ascii=False), encoding="utf-8"
     )
-    return {"share_id": share_id}
+    base = _share_base_url(request)
+    return {"share_id": share_id, "share_url": f"{base}/view/{share_id}"}
 
 
 @router.get("/share/{share_id}")

@@ -132,6 +132,7 @@ export interface ShareInit {
 }
 export interface ShareResponse {
   share_id: string;
+  share_url?: string;
 }
 
 // ---- 互动 ----

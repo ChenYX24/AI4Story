@@ -16,6 +16,7 @@ import BaseButton from "./BaseButton.vue";
 import SketchPadModal from "./SketchPadModal.vue";
 import CustomPropCreateModal from "./CustomPropCreateModal.vue";
 import MyAssetsModal from "./MyAssetsModal.vue";
+import { useASR } from "@/composables/useASR";
 
 // ---- 生图 loading hint 轮播 ----
 const LOADING_HINTS = [
@@ -59,6 +60,26 @@ const ops = defineModel<Operation[]>("ops", { default: () => [] });
 
 const toast = useToastStore();
 const sessions = useSessionStore();
+
+// 三处文本输入（pair action / freeform / 造道具名）共用一个 ASR 实例。
+// 一次识别完成后填回目标字段；和 StoryPage 聊天框麦克风的交互一致。
+const asr = useASR({ lang: "zh-CN" });
+async function _micRecognize(): Promise<string | null> {
+  if (!asr.supported) {
+    toast.push("当前浏览器不支持语音输入，建议使用 Chrome", "warn");
+    return null;
+  }
+  if (asr.listening.value) return null;
+  try {
+    return (await asr.listenOnce()).trim() || null;
+  } catch (e: any) {
+    toast.push(`没听清：${e?.message || e}`, "warn");
+    return null;
+  }
+}
+async function micFillAction() { const t = await _micRecognize(); if (t) actionText.value = t; }
+async function micFillFreeform() { const t = await _micRecognize(); if (t) freeformText.value = t; }
+async function micFillNewProp() { const t = await _micRecognize(); if (t) newPropName.value = t; }
 const assetShelf = useAssetShelfStore();
 const interactStore = useInteractStore();
 const storyStore = useStoryStore();
@@ -213,6 +234,94 @@ function allowDrop(e: DragEvent) {
   e.preventDefault();
   if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 }
+
+// ---- 触屏拖拽（iPad / 手机）：HTML5 DnD 在 iOS Safari 不会从触摸触发，需要自己用 touch 事件实现 ----
+let touchDragGhost: HTMLElement | null = null;
+function _positionGhost(x: number, y: number) {
+  if (!touchDragGhost) return;
+  touchDragGhost.style.left = `${x}px`;
+  touchDragGhost.style.top = `${y}px`;
+}
+function _cleanupTouchDrag() {
+  document.removeEventListener("touchmove", _onTouchMove);
+  document.removeEventListener("touchend", _onTouchEnd);
+  document.removeEventListener("touchcancel", _onTouchEnd);
+  if (touchDragGhost) {
+    touchDragGhost.remove();
+    touchDragGhost = null;
+  }
+}
+function _onTouchMove(e: TouchEvent) {
+  if (!touchDragGhost || e.touches.length !== 1) return;
+  // 阻止页面滚动（手指已经在拖资产）
+  e.preventDefault();
+  const t = e.touches[0];
+  _positionGhost(t.clientX, t.clientY);
+}
+function _onTouchEnd(e: TouchEvent) {
+  const t = e.changedTouches?.[0];
+  _cleanupTouchDrag();
+  if (!dragSource || !stageRef.value || !t) {
+    dragSource = null;
+    return;
+  }
+  const rect = stageRef.value.getBoundingClientRect();
+  const inside = t.clientX >= rect.left && t.clientX <= rect.right
+    && t.clientY >= rect.top && t.clientY <= rect.bottom;
+  if (inside) {
+    const x = (t.clientX - rect.left) / rect.width;
+    const y = (t.clientY - rect.top) / rect.height;
+    placed.value.push({
+      id: `${dragSource.kind}-${dragSource.name}-${Date.now()}`,
+      name: dragSource.name,
+      kind: dragSource.kind,
+      url: dragSource.url,
+      x, y,
+      scale: 1, rotation: 0,
+    });
+  }
+  dragSource = null;
+}
+function onSidebarTouchStart(
+  e: TouchEvent,
+  item: { name: string; url?: string },
+  kind: "character" | "object",
+) {
+  if (e.touches.length !== 1) return;
+  // 锁定 dragSource（让落点判定能用到 url / kind / name），并起一个跟手指走的"幽灵"小卡。
+  dragSource = { name: item.name, kind, url: item.url };
+  const t = e.touches[0];
+  const ghost = document.createElement("div");
+  ghost.style.cssText = [
+    "position:fixed", "left:0", "top:0", "pointer-events:none", "z-index:9999",
+    "width:72px", "height:72px", "background:#fff", "border-radius:12px",
+    "box-shadow:0 10px 28px rgba(0,0,0,0.22)",
+    "display:flex", "align-items:center", "justify-content:center",
+    "transform:translate(-50%,-50%)", "opacity:0.95",
+  ].join(";");
+  if (item.url) {
+    const img = document.createElement("img");
+    img.src = item.url;
+    img.style.cssText = "width:56px;height:56px;object-fit:contain;pointer-events:none;";
+    ghost.appendChild(img);
+  } else {
+    ghost.textContent = item.name || "•";
+    ghost.style.fontSize = "12px";
+    ghost.style.color = "#3d2b1f";
+  }
+  document.body.appendChild(ghost);
+  touchDragGhost = ghost;
+  _positionGhost(t.clientX, t.clientY);
+  // touchmove 必须 non-passive 才能 preventDefault 阻止滚动
+  document.addEventListener("touchmove", _onTouchMove, { passive: false });
+  document.addEventListener("touchend", _onTouchEnd);
+  document.addEventListener("touchcancel", _onTouchEnd);
+}
+
+onBeforeUnmount(() => {
+  _cleanupTouchDrag();
+  dragSource = null;
+});
 
 // ---- Multi-pointer gesture tracking ----
 // 每个物体上当前活动的 pointers（pointerId → clientX/Y）
@@ -878,8 +987,10 @@ defineExpose({
             v-for="c in sidebarChars"
             :key="c.name"
             draggable="true"
-            class="bg-paper-deep rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing"
+            class="bg-paper-deep rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing select-none"
+            style="touch-action: none;"
             @dragstart="(e) => onSidebarDragStart(e, c, 'character')"
+            @touchstart="(e) => onSidebarTouchStart(e, c, 'character')"
           >
             <img v-if="c.url" :src="c.url" class="w-12 h-12 object-contain" :alt="c.name" />
             <div class="text-[10px] mt-1 text-ink-soft truncate w-full">{{ c.name }}</div>
@@ -891,8 +1002,10 @@ defineExpose({
             v-for="p in sidebarProps"
             :key="p.name"
             draggable="true"
-            class="bg-gold-mute/40 rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing"
+            class="bg-gold-mute/40 rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing select-none"
+            style="touch-action: none;"
             @dragstart="(e) => onSidebarDragStart(e, p, 'object')"
+            @touchstart="(e) => onSidebarTouchStart(e, p, 'object')"
           >
             <img v-if="p.url" :src="p.url" class="w-12 h-12 object-contain" :alt="p.name" />
             <div class="text-[10px] mt-1 text-ink truncate w-full">{{ p.name }}</div>
@@ -921,9 +1034,11 @@ defineExpose({
               v-for="cp in customProps"
               :key="cp.url"
               draggable="true"
-              class="bg-gold-mute/40 rounded-lg p-1.5 grid place-items-center text-center cursor-grab active:cursor-grabbing relative border border-gold/30"
+              class="bg-gold-mute/40 rounded-lg p-1.5 grid place-items-center text-center cursor-grab active:cursor-grabbing relative border border-gold/30 select-none"
+              style="touch-action: none;"
               :title="`${cp.name} —— 拖到舞台使用`"
               @dragstart="(e) => onSidebarDragStart(e, { name: cp.name, url: cp.url } as any, 'object')"
+              @touchstart="(e) => onSidebarTouchStart(e, { name: cp.name, url: cp.url } as any, 'object')"
             >
               <img v-if="cp.url" :src="cp.url" class="w-10 h-10 object-contain" :alt="cp.name" />
               <div class="text-[10px] mt-0.5 text-ink truncate w-full">{{ cp.name }}</div>
@@ -957,14 +1072,23 @@ defineExpose({
         <div class="border-t border-paper-edge pt-2 space-y-2">
           <div class="text-xs font-bold text-ink-soft">✨ 造个新道具</div>
           <!-- AI 生成 -->
-          <input
-            v-model="newPropName"
-            type="text"
-            placeholder="AI 画：比如「会发光的画笔」"
-            maxlength="16"
-            class="w-full px-2 py-1.5 text-xs rounded border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-            @keydown.enter="addCustomProp"
-          />
+          <div class="flex gap-2">
+            <input
+              v-model="newPropName"
+              type="text"
+              placeholder="AI 画：比如「会发光的画笔」"
+              maxlength="16"
+              class="flex-1 min-w-0 px-2 py-1.5 text-xs rounded border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+              @keydown.enter="addCustomProp"
+            />
+            <button
+              :disabled="!asr.supported || asr.listening.value"
+              class="w-7 h-7 rounded-full bg-paper-deep hover:bg-gold-mute text-ink-soft grid place-items-center disabled:opacity-40 transition shrink-0 text-xs"
+              :class="asr.listening.value && 'bg-warn/30'"
+              :title="asr.supported ? '语音输入' : '当前浏览器不支持语音'"
+              @click="micFillNewProp"
+            >🎤</button>
+          </div>
           <button
             class="w-full text-xs px-2 py-1 rounded bg-gradient-to-br from-accent-soft to-accent-deep text-white hover:brightness-110 disabled:opacity-50"
             :disabled="!newPropName.trim()"
@@ -1019,6 +1143,13 @@ defineExpose({
               @keydown.enter="addPairOp"
             />
             <button
+              :disabled="!asr.supported || asr.listening.value"
+              class="w-9 h-9 rounded-full bg-paper-deep hover:bg-gold-mute text-ink-soft grid place-items-center disabled:opacity-40 transition shrink-0"
+              :class="asr.listening.value && 'bg-warn/30'"
+              :title="asr.supported ? '语音输入' : '当前浏览器不支持语音'"
+              @click="micFillAction"
+            >🎤</button>
+            <button
               class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
               :disabled="!selA || !actionText.trim()"
               @click="addPairOp"
@@ -1035,6 +1166,13 @@ defineExpose({
               class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
               @keydown.enter="addFreeformOp"
             />
+            <button
+              :disabled="!asr.supported || asr.listening.value"
+              class="w-9 h-9 rounded-full bg-paper-deep hover:bg-gold-mute text-ink-soft grid place-items-center disabled:opacity-40 transition shrink-0"
+              :class="asr.listening.value && 'bg-warn/30'"
+              :title="asr.supported ? '语音输入' : '当前浏览器不支持语音'"
+              @click="micFillFreeform"
+            >🎤</button>
             <button
               class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
               :disabled="!freeformText.trim()"
