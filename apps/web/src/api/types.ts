@@ -284,3 +284,66 @@ export interface UploadImageResponse {
   url: string;
   size: number;
 }
+
+// ── 复述 (Retell) ──────────────────────────────────────────────
+
+export interface RetellStartRequest {
+  story_id: string;
+  session_id?: string | null;
+}
+
+export interface RetellSceneItem {
+  scene_index: number;
+  type: string;
+  comic_url?: string;
+  summary?: string;
+  narration?: string;
+  hint_question: string;
+}
+
+export interface RetellStartResponse {
+  session_id: string;
+  story_title: string;
+  total_scenes: number;
+  scenes: RetellSceneItem[];
+}
+
+export interface RetellSubmitRequest {
+  session_id: string;
+  scene_index: number;
+  child_text: string;
+}
+
+export interface RetellFeedback {
+  recognized_text: string;
+  correctness: number;
+  covered_points: string[];
+  missed_points: string[];
+  encouragement: string;
+  suggestion: string;
+}
+
+export interface RetellSubmitResponse {
+  feedback: RetellFeedback;
+}
+
+export interface RetellSummaryRequest {
+  session_id: string;
+}
+
+export interface RetellSceneResultItem {
+  scene_index: number;
+  correctness: number;
+  child_text: string;
+  covered_points: string[];
+}
+
+export interface RetellSummaryResponse {
+  overall_score: number;
+  star_count: number;
+  badge: string;
+  strengths: string[];
+  growth_areas: string[];
+  encouragement_summary: string;
+  scene_results: RetellSceneResultItem[];
+}

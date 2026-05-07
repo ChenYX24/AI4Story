@@ -154,3 +154,18 @@ export const updatePack = (code: string, body: { name?: string; description?: st
   apiPut<PackOut>(`/api/packs/${encodeURIComponent(code)}`, body);
 export const deletePack = (code: string) =>
   apiDelete<{ ok: boolean }>(`/api/packs/${encodeURIComponent(code)}`);
+
+// ── 复述 (Retell) ──────────────────────────────────────────────
+
+import type {
+  RetellStartRequest, RetellStartResponse,
+  RetellSubmitRequest, RetellSubmitResponse,
+  RetellSummaryRequest, RetellSummaryResponse,
+} from "./types";
+
+export const postRetellStart = (req: RetellStartRequest) =>
+  apiPost<RetellStartResponse>("/api/retell/start", req);
+export const postRetellSubmit = (req: RetellSubmitRequest) =>
+  apiPost<RetellSubmitResponse>("/api/retell/submit", req);
+export const postRetellSummary = (req: RetellSummaryRequest) =>
+  apiPost<RetellSummaryResponse>("/api/retell/summary", req);

@@ -24,6 +24,13 @@ const routes: RouteRecordRaw[] = [
     props: true,
     meta: { requiresAuth: true },
   },
+  {
+    path: "/story/:id/retell",
+    name: "retell",
+    component: () => import("@/pages/RetellPage.vue"),
+    props: true,
+    meta: { requiresAuth: true },
+  },
   { path: "/profile", name: "profile", component: () => import("@/pages/ProfilePage.vue"), meta: { requiresAuth: true } },
   { path: "/:path(.*)", name: "not-found", component: () => import("@/pages/NotFoundPage.vue") },
 ];
@@ -35,7 +42,7 @@ const router = createRouter({
 });
 
 router.beforeEach((to, from) => {
-  if (from.name === "story" && to.name !== "story" && to.name !== "report") {
+  if (from.name === "story" && to.name !== "story" && to.name !== "report" && to.name !== "retell") {
     const story = useStoryStore();
     const storyId = String(from.params.id || "");
     if (story.hasPendingWork(storyId)) {

@@ -216,3 +216,67 @@ class ReportResponse(BaseModel):
     share: dict                   # {summary, honor_title, achievements:[{icon,text}]}
     kid_section: dict             # {title, your_story, original_story, differences:[...], questions:[...]}
     parent_section: dict          # {title, traits:[...], weaknesses:[...], observations:[...], suggestions:[...], metrics:[{name,value,description}]}
+
+
+# ── Retell (复述) ──────────────────────────────────────────────
+
+
+class RetellStartRequest(BaseModel):
+    story_id: str
+    session_id: str | None = None
+
+
+class RetellSceneItem(BaseModel):
+    scene_index: int
+    type: str
+    comic_url: str = ""
+    summary: str = ""
+    narration: str = ""
+    hint_question: str = ""
+
+
+class RetellStartResponse(BaseModel):
+    session_id: str
+    story_title: str = ""
+    total_scenes: int = 0
+    scenes: list[RetellSceneItem] = Field(default_factory=list)
+
+
+class RetellSubmitRequest(BaseModel):
+    session_id: str
+    scene_index: int
+    child_text: str = Field(min_length=1)
+
+
+class RetellFeedback(BaseModel):
+    recognized_text: str = ""
+    correctness: int = 0
+    covered_points: list[str] = Field(default_factory=list)
+    missed_points: list[str] = Field(default_factory=list)
+    encouragement: str = ""
+    suggestion: str = ""
+
+
+class RetellSubmitResponse(BaseModel):
+    feedback: RetellFeedback
+
+
+class RetellSummaryRequest(BaseModel):
+    session_id: str
+
+
+class RetellSceneResultItem(BaseModel):
+    scene_index: int
+    correctness: int = 0
+    child_text: str = ""
+    covered_points: list[str] = Field(default_factory=list)
+
+
+class RetellSummaryResponse(BaseModel):
+    overall_score: int = 0
+    star_count: int = 0
+    badge: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    growth_areas: list[str] = Field(default_factory=list)
+    encouragement_summary: str = ""
+    scene_results: list[RetellSceneResultItem] = Field(default_factory=list)
