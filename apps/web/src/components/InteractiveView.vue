@@ -1,6 +1,5 @@
 <script setup lang="ts">
-// 互动场景：拖拽角色/道具到背景 → 选两个 + 输入动作 → 加入 ops 序列 → 完成 → /api/interact
-// 保留与 web-legacy/js/interactive_view.js 一致的 contract，但用 Pointer Events + Vue reactivity 重写
+// 互动场景：拖拽角色/道具到舞台 → 自由摆放 → 和讲故事的人聊天
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useToastStore } from "@/stores/toast";
 import { useSessionStore } from "@/stores/session";
@@ -8,123 +7,52 @@ import { useAssetShelfStore } from "@/stores/assetShelf";
 import { useInteractStore } from "@/stores/interact";
 import { useStoryStore } from "@/stores/story";
 import { fetchPlacements, createProp, uploadImage } from "@/api/endpoints";
-import type {
-  Scene, SceneCharacter, SceneProp,
-  Transform, Operation, CustomProp,
-} from "@/api/types";
-import BaseButton from "./BaseButton.vue";
+import type { Scene, SceneCharacter, SceneProp, CustomProp } from "@/api/types";
 import SketchPadModal from "./SketchPadModal.vue";
 import CustomPropCreateModal from "./CustomPropCreateModal.vue";
 import MyAssetsModal from "./MyAssetsModal.vue";
-import { useASR } from "@/composables/useASR";
 
-// ---- 生图 loading hint 轮播 ----
-const LOADING_HINTS = [
-  "AI 正在调色盘里挑颜色…",
-  "小画笔正在认真地画…",
-  "把你说的故事变成画…",
-  "再加一点点魔法…",
-  "快完成啦，再等一下～",
-];
-const loadingHint = ref("");
-let loadingTimer: ReturnType<typeof setInterval> | null = null;
-function startLoadingHints() {
-  stopLoadingHints();
-  let i = 0;
-  loadingHint.value = LOADING_HINTS[0];
-  loadingTimer = setInterval(() => {
-    i = (i + 1) % LOADING_HINTS.length;
-    loadingHint.value = LOADING_HINTS[i];
-  }, 2600);
-}
-function stopLoadingHints() {
-  if (loadingTimer) { clearInterval(loadingTimer); loadingTimer = null; }
-  loadingHint.value = "";
-}
-
-// nextComicUrl: loading 时做背景图。优先取当前互动场景自己在原故事中的发展过程四格图；
-// 老数据/兜底时回退到下一幕的叙事图。
-const props = defineProps<{ scene: Scene; storyId: string; sessionId: string; nextComicUrl?: string }>();
-const emit = defineEmits<{
-  (e: "generate", request: {
-    story_id: string;
-    session_id: string;
-    scene_idx: number;
-    placements: Transform[];
-    ops: Operation[];
-    custom_props: CustomProp[];
-  }): void;
-}>();
-// 双向绑定 ops，让父组件（StoryPage 右侧对话栏）也能展示 + 删除
-const ops = defineModel<Operation[]>("ops", { default: () => [] });
+const props = defineProps<{ scene: Scene; storyId: string; sessionId: string }>();
 
 const toast = useToastStore();
 const sessions = useSessionStore();
-
-// 三处文本输入（pair action / freeform / 造道具名）共用一个 ASR 实例。
-// 一次识别完成后填回目标字段；和 StoryPage 聊天框麦克风的交互一致。
-const asr = useASR({ lang: "zh-CN" });
-async function _micRecognize(): Promise<string | null> {
-  if (!asr.supported) {
-    toast.push("当前浏览器不支持语音输入，建议使用 Chrome", "warn");
-    return null;
-  }
-  if (asr.listening.value) return null;
-  try {
-    return (await asr.listenOnce()).trim() || null;
-  } catch (e: any) {
-    toast.push(`没听清：${e?.message || e}`, "warn");
-    return null;
-  }
-}
-async function micFillAction() { const t = await _micRecognize(); if (t) actionText.value = t; }
-async function micFillFreeform() { const t = await _micRecognize(); if (t) freeformText.value = t; }
-async function micFillNewProp() { const t = await _micRecognize(); if (t) newPropName.value = t; }
 const assetShelf = useAssetShelfStore();
 const interactStore = useInteractStore();
 const storyStore = useStoryStore();
 
 interface PlacedItem {
-  id: string;          // unique within this scene session
+  id: string;
   name: string;
   kind: "character" | "object";
   url?: string;
   custom_url?: string;
-  // 0..1 normalized coords
   x: number;
   y: number;
   scale: number;
   rotation: number;
   isCustom?: boolean;
-  // 道具 AI 生成中：显示 spinner + 参考图占位
   loading?: boolean;
-  refImage?: string;   // 占位期间展示的参考图（上传/画板/拍照的原图）
+  refImage?: string;
 }
 
 const placed = ref<PlacedItem[]>([]);
 const customProps = ref<CustomProp[]>([]);
-const generating = ref(false);
 
-// 新造道具：作画中占位（在 aside "✨ 我造的道具" 区域显示 spinner），完成后搬到 customProps
 interface PendingProp {
   tempId: string;
   name: string;
   refImage?: string;
 }
 const pendingProps = ref<PendingProp[]>([]);
-// C7: 生成下一幕的二次确认
-const confirmingComplete = ref(false);
 
-// 选两个对象做交互
-const selA = ref<PlacedItem | null>(null);
-const selB = ref<PlacedItem | null>(null);
-const actionText = ref("");
-const freeformText = ref("");
+const selectedId = ref<string | null>(null);
 const newPropName = ref("");
-
 const sessionId = computed(() => props.sessionId);
 
-// 预置 placements (从后端读默认布局)；placement 不带 url，从 scene.characters / .props 里按 name 查
+// 引导提示状态
+const hasDragged = ref(false);
+const dragHintDismissed = ref(false);
+
 function findUrlByName(name: string, kind: "character" | "object"): string | undefined {
   if (kind === "character") {
     return props.scene.characters?.find((c) => c.name === name)?.url;
@@ -133,7 +61,6 @@ function findUrlByName(name: string, kind: "character" | "object"): string | und
 }
 
 async function loadInitialPlacements() {
-  // 参考 legacy：初始只放角色 (character)，道具留在侧边栏让用户主动拖
   try {
     const r = await fetchPlacements(props.storyId, props.scene.index);
     for (const p of r.placements) {
@@ -149,7 +76,6 @@ async function loadInitialPlacements() {
       });
     }
   } catch { /* no initial placements = ok */ }
-  // 如果 placements 里没有角色（极端情况），按 scene.characters 的 default_x/y 铺开
   if (placed.value.length === 0 && props.scene.characters?.length) {
     props.scene.characters.forEach((c, i) => {
       placed.value.push({
@@ -167,28 +93,28 @@ async function loadInitialPlacements() {
 }
 
 onMounted(() => {
-  // 先尝试恢复本幕之前的摆放 / ops / customProps（翻页回看 or 重玩都不丢）
   const saved = interactStore.get(sessionId.value, props.scene.index);
-  if (saved && (saved.placed.length || saved.ops.length || saved.customProps.length)) {
+  if (saved && saved.placed.length) {
     placed.value = saved.placed.map((p) => ({ ...p }));
-    ops.value = saved.ops.map((o) => ({ ...o }));
-    customProps.value = saved.customProps.map((c) => ({ ...c }));
+    customProps.value = [...(saved.customProps || [])];
+    hasDragged.value = true;
   } else {
     void loadInitialPlacements();
   }
   document.addEventListener("keydown", onStageKey);
 });
+
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onStageKey);
+  _cleanupTouchDrag();
+  dragSource = null;
 });
 
-// 状态变化 → 持久化到 interact store（翻页离开再回来不丢）
 watch(
-  [placed, ops, customProps],
+  [placed, customProps],
   () => {
     interactStore.save(sessionId.value, props.scene.index, {
       placed: placed.value,
-      ops: ops.value,
       customProps: customProps.value,
     });
   },
@@ -198,7 +124,6 @@ watch(
 function persistSceneState() {
   interactStore.save(sessionId.value, props.scene.index, {
     placed: placed.value,
-    ops: ops.value,
     customProps: customProps.value,
   });
 }
@@ -227,6 +152,7 @@ function onStageDrop(e: DragEvent) {
     x, y,
     scale: 1, rotation: 0,
   });
+  hasDragged.value = true;
   dragSource = null;
 }
 
@@ -235,7 +161,7 @@ function allowDrop(e: DragEvent) {
   if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
 }
 
-// ---- 触屏拖拽（iPad / 手机）：HTML5 DnD 在 iOS Safari 不会从触摸触发，需要自己用 touch 事件实现 ----
+// ---- Touch drag (iPad / mobile) ----
 let touchDragGhost: HTMLElement | null = null;
 function _positionGhost(x: number, y: number) {
   if (!touchDragGhost) return;
@@ -253,7 +179,6 @@ function _cleanupTouchDrag() {
 }
 function _onTouchMove(e: TouchEvent) {
   if (!touchDragGhost || e.touches.length !== 1) return;
-  // 阻止页面滚动（手指已经在拖资产）
   e.preventDefault();
   const t = e.touches[0];
   _positionGhost(t.clientX, t.clientY);
@@ -279,6 +204,7 @@ function _onTouchEnd(e: TouchEvent) {
       x, y,
       scale: 1, rotation: 0,
     });
+    hasDragged.value = true;
   }
   dragSource = null;
 }
@@ -288,13 +214,12 @@ function onSidebarTouchStart(
   kind: "character" | "object",
 ) {
   if (e.touches.length !== 1) return;
-  // 锁定 dragSource（让落点判定能用到 url / kind / name），并起一个跟手指走的"幽灵"小卡。
   dragSource = { name: item.name, kind, url: item.url };
   const t = e.touches[0];
   const ghost = document.createElement("div");
   ghost.style.cssText = [
     "position:fixed", "left:0", "top:0", "pointer-events:none", "z-index:9999",
-    "width:72px", "height:72px", "background:#fff", "border-radius:12px",
+    "width:64px", "height:64px", "background:#fff", "border-radius:14px",
     "box-shadow:0 10px 28px rgba(0,0,0,0.22)",
     "display:flex", "align-items:center", "justify-content:center",
     "transform:translate(-50%,-50%)", "opacity:0.95",
@@ -302,7 +227,7 @@ function onSidebarTouchStart(
   if (item.url) {
     const img = document.createElement("img");
     img.src = item.url;
-    img.style.cssText = "width:56px;height:56px;object-fit:contain;pointer-events:none;";
+    img.style.cssText = "width:48px;height:48px;object-fit:contain;pointer-events:none;";
     ghost.appendChild(img);
   } else {
     ghost.textContent = item.name || "•";
@@ -312,19 +237,12 @@ function onSidebarTouchStart(
   document.body.appendChild(ghost);
   touchDragGhost = ghost;
   _positionGhost(t.clientX, t.clientY);
-  // touchmove 必须 non-passive 才能 preventDefault 阻止滚动
   document.addEventListener("touchmove", _onTouchMove, { passive: false });
   document.addEventListener("touchend", _onTouchEnd);
   document.addEventListener("touchcancel", _onTouchEnd);
 }
 
-onBeforeUnmount(() => {
-  _cleanupTouchDrag();
-  dragSource = null;
-});
-
-// ---- Multi-pointer gesture tracking ----
-// 每个物体上当前活动的 pointers（pointerId → clientX/Y）
+// ---- Pointer interaction on stage (single-finger move + two-finger pinch/rotate) ----
 const itemActivePointers = new Map<string, Map<number, { clientX: number; clientY: number }>>();
 
 interface PinchState {
@@ -335,22 +253,7 @@ interface PinchState {
   startRotation: number;
 }
 let pinch: PinchState | null = null;
-
-// 单指拖移（不在 pinch/corner resize 中时）
 let activePointer: { id: string; pointerId: number; offX: number; offY: number } | null = null;
-
-// 角落手柄：拖它同时缩放 + 旋转
-interface CornerState {
-  itemId: string;
-  pointerId: number;
-  centerPx: number;   // stage-relative px
-  centerPy: number;
-  startDist: number;
-  startAngle: number;
-  startScale: number;
-  startRotation: number;
-}
-let cornerResize: CornerState | null = null;
 
 function pointerDist(a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -376,7 +279,6 @@ function enterPinchIfPossible(item: PlacedItem) {
     startScale: item.scale,
     startRotation: item.rotation,
   };
-  // 进入 pinch → 清单指移动
   if (activePointer?.id === item.id) activePointer = null;
 }
 
@@ -391,7 +293,6 @@ function onItemPointerDown(e: PointerEvent, item: PlacedItem) {
     enterPinchIfPossible(item);
     return;
   }
-  // 单指 → drag 移动
   const rect = stageRef.value.getBoundingClientRect();
   activePointer = {
     id: item.id,
@@ -404,28 +305,6 @@ function onItemPointerDown(e: PointerEvent, item: PlacedItem) {
 function onStagePointerMove(e: PointerEvent) {
   if (!stageRef.value) return;
 
-  // 1. corner resize 优先
-  if (cornerResize && cornerResize.pointerId === e.pointerId) {
-    const item = placed.value.find((p) => p.id === cornerResize!.itemId);
-    if (!item) return;
-    const rect = stageRef.value.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-    const dx = px - cornerResize.centerPx;
-    const dy = py - cornerResize.centerPy;
-    const dist = Math.hypot(dx, dy);
-    const angle = Math.atan2(dy, dx);
-    item.scale = clamp(
-      cornerResize.startScale * (dist / Math.max(8, cornerResize.startDist)),
-      MIN_SCALE, MAX_SCALE,
-    );
-    item.rotation = wrapDeg(
-      cornerResize.startRotation + ((angle - cornerResize.startAngle) * 180) / Math.PI,
-    );
-    return;
-  }
-
-  // 2. pinch（两指）更新
   if (pinch) {
     const map = itemActivePointers.get(pinch.itemId);
     if (!map) { pinch = null; return; }
@@ -449,7 +328,6 @@ function onStagePointerMove(e: PointerEvent) {
     }
   }
 
-  // 3. 单指拖移
   if (activePointer && activePointer.pointerId === e.pointerId) {
     const rect = stageRef.value.getBoundingClientRect();
     const item = placed.value.find((p) => p.id === activePointer!.id);
@@ -460,149 +338,52 @@ function onStagePointerMove(e: PointerEvent) {
 }
 
 function onStagePointerUp(e?: PointerEvent) {
-  if (!e) { activePointer = null; pinch = null; cornerResize = null; itemActivePointers.clear(); return; }
-  // 从所有 item maps 里移除这个 pointerId
+  if (!e) { activePointer = null; pinch = null; itemActivePointers.clear(); return; }
   for (const map of itemActivePointers.values()) map.delete(e.pointerId);
   if (pinch) {
     const m = itemActivePointers.get(pinch.itemId);
     if (!m || m.size < 2) pinch = null;
   }
-  if (cornerResize && cornerResize.pointerId === e.pointerId) cornerResize = null;
   if (activePointer && activePointer.pointerId === e.pointerId) activePointer = null;
 }
 
-// 角落手柄：pointerdown 独立处理
-function onCornerPointerDown(e: PointerEvent, item: PlacedItem) {
-  e.stopPropagation();
-  if (!stageRef.value) return;
-  (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-  const stageRect = stageRef.value.getBoundingClientRect();
-  const centerPx = item.x * stageRect.width;
-  const centerPy = item.y * stageRect.height;
-  const px = e.clientX - stageRect.left;
-  const py = e.clientY - stageRect.top;
-  const dx = px - centerPx;
-  const dy = py - centerPy;
-  cornerResize = {
-    itemId: item.id,
-    pointerId: e.pointerId,
-    centerPx, centerPy,
-    startDist: Math.hypot(dx, dy),
-    startAngle: Math.atan2(dy, dx),
-    startScale: item.scale,
-    startRotation: item.rotation,
-  };
-}
-
-// ---- 选两个做 op ----
-function selectItem(item: PlacedItem) {
-  if (!selA.value)             { selA.value = item; return; }
-  if (selA.value.id === item.id){ selA.value = null;  selB.value = null; return; }
-  if (!selB.value)             { selB.value = item; return; }
-  if (selB.value.id === item.id){ selB.value = null;  return; }
-  // 重选 A
-  selA.value = item; selB.value = null;
-}
-
-function addPairOp() {
-  if (!selA.value || !actionText.value.trim()) {
-    toast.push("先选两个东西，再写动作", "warn");
-    return;
-  }
-  ops.value.push({
-    subject: selA.value.name,
-    subject_kind: selA.value.kind,
-    target: selB.value?.name,
-    target_kind: selB.value?.kind,
-    action: actionText.value.trim(),
-  });
-  actionText.value = "";
-  selA.value = null;
-  selB.value = null;
-}
-
-function addFreeformOp() {
-  const t = freeformText.value.trim();
-  if (!t) return;
-  ops.value.push({ action: t });
-  freeformText.value = "";
-}
-
-function removePlaced(id: string) {
-  // 移出舞台时如果该道具是自造道具，连同"✨ 我造的道具"列表一起删掉，
-  // 这样下次想再用，就要重新通过"添加我的资产"对话框选/造一次。
-  const item = placed.value.find((p) => p.id === id);
-  placed.value = placed.value.filter((p) => p.id !== id);
-  if (item?.custom_url) {
-    customProps.value = customProps.value.filter((c) => c.url !== item.custom_url);
-  }
-  if (selA.value?.id === id) selA.value = null;
-  if (selB.value?.id === id) selB.value = null;
-}
-
-// ---- 选中后对物体做变换 ----
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 3.0;
-const ROT_STEP = 15;
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function scaleItem(item: PlacedItem, factor: number) {
-  item.scale = clamp(Number((item.scale * factor).toFixed(3)), MIN_SCALE, MAX_SCALE);
-}
-function rotateItem(item: PlacedItem, deg: number) {
-  let r = (item.rotation + deg) % 360;
-  if (r > 180) r -= 360;
-  if (r < -180) r += 360;
-  item.rotation = r;
-}
-function resetItem(item: PlacedItem) {
-  item.scale = 1;
-  item.rotation = 0;
+// ---- Select / Delete ----
+function toggleSelect(item: PlacedItem) {
+  selectedId.value = selectedId.value === item.id ? null : item.id;
 }
 
-// 当只有 A 选中（没有 B）时认为在单选编辑态，显示工具条
-const editingItem = computed<PlacedItem | null>(() => {
-  if (selA.value && !selB.value) return selA.value;
-  return null;
-});
-
-// 舞台空白处点击 → 取消选中
 function onStageBackgroundClick() {
-  selA.value = null;
-  selB.value = null;
+  selectedId.value = null;
 }
 
-// 键盘：Delete 删 / =+缩放 / -缩小 / r/R 旋转
+function removePlaced(id: string) {
+  const item = placed.value.find((p) => p.id === id);
+  placed.value = placed.value.filter((p) => p.id !== id);
+  if (item?.custom_url) {
+    customProps.value = customProps.value.filter((c) => c.url !== item.custom_url);
+  }
+  if (selectedId.value === id) selectedId.value = null;
+}
+
 function onStageKey(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null;
   if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-  const item = editingItem.value;
-  if (!item) return;
-  switch (e.key) {
-    case "Delete":
-    case "Backspace":
-      removePlaced(item.id);
+  if (e.key === "Delete" || e.key === "Backspace") {
+    if (selectedId.value) {
+      removePlaced(selectedId.value);
       e.preventDefault();
-      break;
-    case "=":
-    case "+":
-      scaleItem(item, 1.1); e.preventDefault(); break;
-    case "-":
-    case "_":
-      scaleItem(item, 1 / 1.1); e.preventDefault(); break;
-    case "r":
-      rotateItem(item, ROT_STEP); e.preventDefault(); break;
-    case "R":
-      rotateItem(item, -ROT_STEP); e.preventDefault(); break;
-    case "0":
-      resetItem(item); e.preventDefault(); break;
+    }
   }
 }
 
-// ---- 创建自定义道具 —— 后台生成：占位在 aside 道具栏（不自动上舞台），完成后可手动拖入 ----
+// ---- Create custom prop ----
 async function addCustomProp() {
   const name = newPropName.value.trim();
   if (!name) return;
@@ -610,14 +391,13 @@ async function addCustomProp() {
   const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
   pendingProps.value.push({ tempId, name });
   storyStore.startPendingProp(props.storyId);
-  toast.push(`🎨 「${name}」正在后台作画…`, "info");
+  toast.push(`「${name}」正在后台作画…`, "info");
   try {
     const r = await createProp({
       session_id: sessionId.value,
       scene_idx: props.scene.index,
       name,
     });
-    // 完成：从 pendingProps 移除，加入 customProps（aside 展示 + API 发送）+ 写入 assetShelf 持久化
     pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     customProps.value.push({ name: r.name, url: r.url });
     persistSceneState();
@@ -629,7 +409,7 @@ async function addCustomProp() {
       origin_scene_idx: props.scene.index,
     });
     sessions.markGeneratedNotice(props.storyId);
-    toast.push(`✨ 「${r.name}」画好啦，拖到舞台就能用～`, "success");
+    toast.push(`「${r.name}」画好啦，拖到舞台就能用～`, "success");
   } catch (e: any) {
     pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     toast.push(`新道具创建失败：${e?.message || e}`, "error");
@@ -638,37 +418,7 @@ async function addCustomProp() {
   }
 }
 
-// ---- 完成 → /api/interact ----
-// 入口：点"完成"按钮 → 弹确认框；确认后调 doComplete（C7）
-function askComplete() {
-  if (!ops.value.length) {
-    toast.push("先安排至少一个动作", "warn");
-    return;
-  }
-  confirmingComplete.value = true;
-}
-
-function doComplete() {
-  confirmingComplete.value = false;
-  generating.value = true;
-  startLoadingHints();
-  const transforms: Transform[] = placed.value.map((p) => ({
-    name: p.name, kind: p.kind, x: p.x, y: p.y, scale: p.scale, rotation: p.rotation,
-    custom_url: p.custom_url,
-  }));
-  emit("generate", {
-    story_id: props.storyId,
-    session_id: sessionId.value,
-    scene_idx: props.scene.index,
-    placements: transforms,
-    ops: ops.value.map((o) => ({ ...o })),
-    custom_props: customProps.value.map((c) => ({ ...c })),
-  });
-}
-
-onBeforeUnmount(stopLoadingHints);
-
-// ---- F: 上传 / 拍照 / 画板 作为自定义道具的"参考图" ----
+// ---- Upload / Camera / Sketch ----
 const showSketchPad = ref(false);
 const cameraOpen = ref(false);
 const cameraStream = ref<MediaStream | null>(null);
@@ -676,7 +426,7 @@ const videoEl = ref<HTMLVideoElement | null>(null);
 
 async function onUploadPick(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0];
-  (e.target as HTMLInputElement).value = ""; // 允许同名重选
+  (e.target as HTMLInputElement).value = "";
   if (!file) return;
   if (!file.type.startsWith("image/")) { toast.push("请选择图片", "warn"); return; }
   if (file.size > 6 * 1024 * 1024) { toast.push("图片不能超过 6MB", "warn"); return; }
@@ -725,12 +475,10 @@ async function onSketchDone(dataUrl: string) {
   await addCustomFromImage(dataUrl, "");
 }
 
-// 上传/拍照/画板完成 → 先存盘 → 弹 CustomPropCreateModal 让用户填名称/描述 → 再决定 AI 画或直接用
 const propModalOpen = ref(false);
 const propModalRefUrl = ref("");
 const propModalDefaultName = ref("");
 
-// 📦 我的资产 弹窗
 const myAssetsOpen = ref(false);
 function addAssetToStage(asset: {
   id: string;
@@ -739,7 +487,6 @@ function addAssetToStage(asset: {
   kind: "character" | "object";
   origin: string;
 }) {
-  // 放在舞台中心；用户之后可以自由拖动
   const isCustom = asset.origin === "mine";
   placed.value.push({
     id: `${asset.kind}-${asset.name}-${Date.now()}`,
@@ -753,10 +500,10 @@ function addAssetToStage(asset: {
     scale: 1,
     rotation: 0,
   });
-  // 自造道具同时推进 customProps（作为生成下一幕时的参考图候选）
   if (isCustom && !customProps.value.some((c) => c.url === asset.url)) {
     customProps.value = [...customProps.value, { name: asset.name, url: asset.url }];
   }
+  hasDragged.value = true;
   toast.push(`已添加「${asset.name}」到舞台`, "info");
 }
 
@@ -772,7 +519,6 @@ async function addCustomFromImage(dataUrl: string, defaultName: string) {
 }
 
 async function onPropModalSubmit(payload: { name: string; description: string; skipAi: boolean }) {
-  // skipAi：直接用原图，瞬间完成；加入 customProps + 持久化 myAssets，不自动上舞台
   if (payload.skipAi) {
     customProps.value.push({ name: payload.name, url: propModalRefUrl.value });
     persistSceneState();
@@ -783,25 +529,23 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
       origin_story_id: props.storyId,
       origin_scene_idx: props.scene.index,
     });
-    toast.push(`✅ 「${payload.name}」已加到道具库，拖到舞台即可使用`, "success");
+    toast.push(`「${payload.name}」已加到道具库，拖到舞台即可使用`, "success");
     propModalOpen.value = false;
     return;
   }
-  // AI 路径：立即关 modal + 占位进 aside，createProp 后台进行，完成后加入 customProps 并持久化
   const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
   const refImage = propModalRefUrl.value;
   const name = payload.name;
-  const description = payload.description;
   propModalOpen.value = false;
   pendingProps.value.push({ tempId, name, refImage });
   storyStore.startPendingProp(props.storyId);
-  toast.push(`🎨 「${name}」在后台作画，稍等片刻…`, "info");
+  toast.push(`「${name}」在后台作画，稍等片刻…`, "info");
   try {
     const r = await createProp({
       session_id: sessionId.value,
       scene_idx: props.scene.index,
       name,
-      description: description || undefined,
+      description: payload.description || undefined,
       reference_image_url: refImage,
       skip_ai: false,
     });
@@ -816,7 +560,7 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
       origin_scene_idx: props.scene.index,
     });
     sessions.markGeneratedNotice(props.storyId);
-    toast.push(`✨ 「${r.name}」画好啦，拖到舞台就能用～`, "success");
+    toast.push(`「${r.name}」画好啦，拖到舞台就能用～`, "success");
   } catch (e: any) {
     pendingProps.value = pendingProps.value.filter((p) => p.tempId !== tempId);
     toast.push(`生成失败：${e?.message || e}`, "error");
@@ -828,12 +572,7 @@ async function onPropModalSubmit(payload: { name: string; description: string; s
 const sidebarChars = computed(() => props.scene.characters || []);
 const sidebarProps = computed(() => props.scene.props || []);
 
-// 暴露给父组件（StoryPage）—— 让它把"完成/清空"按钮放到 book card 底部固定位置
-defineExpose({
-  askComplete,
-  clearOps: () => { ops.value = []; },
-  isGenerating: () => generating.value,
-});
+const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.value && placed.value.length === 0);
 </script>
 
 <template>
@@ -841,37 +580,13 @@ defineExpose({
     <!-- 互动目标提示 -->
     <div class="mb-3 text-xs text-ink-soft px-1 flex items-center gap-2 flex-wrap">
       <span class="inline-flex items-center gap-1 bg-gold/15 px-2 py-1 rounded-full border border-gold/30 text-ink">
-        🎯 <span class="font-semibold">互动目标：</span><span class="text-ink-soft">{{ scene.interaction_goal || "把场景填满" }}</span>
+        <span class="font-semibold">互动目标：</span><span class="text-ink-soft">{{ scene.interaction_goal || "把场景填满" }}</span>
       </span>
-      <span class="hidden md:inline text-ink-mute">把侧边的道具拖进舞台 · 点选两个对象再写"做什么" · 多次安排后点完成</span>
+      <span class="hidden md:inline text-ink-mute">把侧边的角色和道具拖进舞台，创造你心中的故事场景</span>
     </div>
 
-    <!-- 生图 loading 覆盖：显示下一幕叙事图原图（无蒙版），前景只叠一张小 loading 卡 -->
-    <Transition name="modal">
-      <div
-        v-if="generating"
-        class="absolute inset-0 z-30 rounded-xl overflow-hidden"
-      >
-        <img
-          v-if="nextComicUrl || scene.comic_url"
-          :src="nextComicUrl || scene.comic_url"
-          class="absolute inset-0 w-full h-full object-cover"
-          alt="下一幕预览"
-        />
-        <div v-else class="absolute inset-0 bg-paper"></div>
-        <!-- 前景 loading 小卡（底部居中，不遮挡剧情图） -->
-        <div class="absolute left-1/2 bottom-6 -translate-x-1/2 px-5 py-3 bg-white/92 rounded-full shadow-[var(--shadow-card-lg)] border border-paper-edge flex items-center gap-3 fade-in max-w-[90%]">
-          <div class="w-6 h-6 border-[3px] border-gold-mute border-t-accent rounded-full animate-spin shrink-0"></div>
-          <div class="min-w-0">
-            <div class="font-display font-bold text-sm leading-tight">AI 正在作画…</div>
-            <div class="text-[11px] text-ink-soft animate-pulse truncate">{{ loadingHint }}</div>
-          </div>
-        </div>
-      </div>
-    </Transition>
-
     <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0" style="grid-template-rows: minmax(0, 1fr);">
-      <!-- 舞台 —— 填满 grid cell，图 object-contain 完整显示，顶部对齐（留白在底部） -->
+      <!-- 舞台 -->
       <div
         ref="stageRef"
         class="relative bg-paper rounded-xl overflow-hidden border border-paper-edge select-none h-full w-full min-h-0"
@@ -886,35 +601,46 @@ defineExpose({
       >
         <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-contain object-top pointer-events-none" alt="背景" />
 
+        <!-- 空舞台拖拽引导 -->
+        <Transition name="hint">
+          <div
+            v-if="showDragHint"
+            class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 pointer-events-none"
+          >
+            <div class="text-5xl animate-floaty">👆</div>
+            <div class="px-5 py-3 rounded-2xl bg-white/92 shadow-[var(--shadow-card)] border-2 border-dashed border-gold/60 text-center">
+              <div class="text-sm font-bold text-ink mb-1">把侧边的角色拖到这里吧！</div>
+              <div class="text-xs text-ink-mute">按住角色或道具，拖到舞台上</div>
+            </div>
+            <button
+              class="pointer-events-auto text-xs text-ink-mute underline hover:text-ink transition cursor-pointer"
+              @click.stop="dragHintDismissed = true"
+            >知道了</button>
+          </div>
+        </Transition>
+
         <!-- 已放置的物体 -->
         <div
           v-for="item in placed"
           :key="item.id"
           class="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing transition-shadow"
-          :class="[
-            selA?.id === item.id && 'z-10',
-            selB?.id === item.id && 'z-10',
-          ]"
+          :class="[selectedId === item.id && 'z-10']"
           :style="{
             left: `${item.x * 100}%`,
             top: `${item.y * 100}%`,
             width: `${72 * item.scale}px`,
           }"
           @pointerdown="(e) => onItemPointerDown(e, item)"
-          @click.stop="selectItem(item)"
+          @click.stop="toggleSelect(item)"
         >
-          <!-- 选中外框（不随 rotate 翻转）-->
+          <!-- 选中外框 -->
           <div
-            v-if="selA?.id === item.id || selB?.id === item.id"
-            class="absolute -inset-2 rounded-xl pointer-events-none"
-            :class="selA?.id === item.id ? 'ring-[3px] ring-accent shadow-[0_0_16px_rgba(255,122,61,0.4)]' : 'ring-[3px] ring-good shadow-[0_0_16px_rgba(91,191,130,0.4)]'"
+            v-if="selectedId === item.id"
+            class="absolute -inset-2 rounded-xl pointer-events-none ring-[3px] ring-accent shadow-[0_0_16px_rgba(255,122,61,0.4)]"
           ></div>
 
-          <!-- 本体：旋转只作用到图片 / 标签，不动外框/工具条 -->
           <div :style="{ transform: `rotate(${item.rotation}deg)` }" class="relative">
-            <!-- 完成：最终 url -->
             <img v-if="item.url && !item.loading" :src="item.url" :alt="item.name" class="w-full h-auto pointer-events-none drop-shadow-md" />
-            <!-- AI 作画中占位 -->
             <div v-else-if="item.loading" class="w-full aspect-square relative rounded-xl overflow-hidden bg-white/80 shadow-md">
               <img
                 v-if="item.refImage"
@@ -936,58 +662,29 @@ defineExpose({
 
           <div class="text-[10px] text-center text-ink-soft mt-0.5 px-1 bg-white/70 rounded pointer-events-none">{{ item.name }}</div>
 
-          <!-- 右下角落手柄 — 拖动同时缩放 + 旋转（仅单选态） -->
+          <!-- 选中后删除按钮 -->
           <button
-            v-if="editingItem?.id === item.id"
-            class="absolute -right-2 -bottom-2 w-6 h-6 rounded-full bg-accent text-white text-xs grid place-items-center shadow-[0_4px_10px_rgba(255,122,61,0.45)] cursor-nwse-resize hover:bg-accent-deep active:scale-95 transition"
-            title="拖动缩放 / 旋转"
-            @pointerdown.stop="(e) => onCornerPointerDown(e, item)"
-            @click.stop
-          >⇲</button>
-
-          <!-- 选中工具条 — 单选（A 且无 B）时显示 -->
-          <div
-            v-if="editingItem?.id === item.id"
-            class="absolute left-1/2 -translate-x-1/2 -top-11 flex gap-0.5 items-center bg-white/95 rounded-full border border-paper-edge shadow-[0_4px_14px_rgba(122,90,54,0.2)] px-1 py-0.5 fade-in"
-            @click.stop
-          >
-            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="缩小" @click="scaleItem(item, 1/1.15)">−</button>
-            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="放大" @click="scaleItem(item, 1.15)">+</button>
-            <span class="w-px h-4 bg-paper-edge mx-0.5"></span>
-            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="逆时针旋转 15°" @click="rotateItem(item, -ROT_STEP)">↺</button>
-            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep" title="顺时针旋转 15°" @click="rotateItem(item, ROT_STEP)">↻</button>
-            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-paper-deep text-[11px]" title="复位" @click="resetItem(item)">⟳</button>
-            <span class="w-px h-4 bg-paper-edge mx-0.5"></span>
-            <button class="w-7 h-7 grid place-items-center rounded-full hover:bg-warn/15 text-warn" title="删除（Del）" @click="removePlaced(item.id)">✕</button>
-          </div>
-        </div>
-
-        <!-- 选中提示 -->
-        <div
-          v-if="selA || selB"
-          class="absolute top-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/95 text-xs text-ink-soft shadow pointer-events-none"
-        >
-          <template v-if="selA && selB">
-            已选：<span class="text-accent-deep font-semibold">{{ selA.name }}</span>
-            + <span class="text-good font-semibold">{{ selB.name }}</span>
-            <span class="ml-2 text-ink-mute">下方写"做什么"</span>
-          </template>
-          <template v-else-if="selA">
-            已选 <span class="text-accent-deep font-semibold">{{ selA.name }}</span>
-            <span class="ml-2 text-ink-mute">拖右下 ⇲ 缩放旋转 · 双指捏合 · 再点一个对象可组合动作</span>
-          </template>
+            v-if="selectedId === item.id"
+            class="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-warn text-white text-xs grid place-items-center shadow-md hover:bg-warn/80 active:scale-95 transition cursor-pointer z-20"
+            title="移除"
+            @click.stop="removePlaced(item.id)"
+          >✕</button>
         </div>
       </div>
 
-      <!-- 侧边：角色 / 道具 / 我造的道具（内部可滚动，显式滚动条） -->
+      <!-- 侧边栏 -->
       <aside class="interact-aside bg-white/60 border border-paper-edge rounded-xl p-3 overflow-y-scroll flex flex-col gap-3 h-full min-h-0">
-        <div class="text-xs font-bold text-ink-soft mb-2">👥 角色（拖到舞台）</div>
+        <!-- 角色 -->
+        <div class="text-xs font-bold text-ink-soft mb-1 flex items-center gap-1.5">
+          <span>👥 角色</span>
+          <span class="text-[10px] font-normal text-ink-mute bg-gold/20 px-1.5 py-0.5 rounded-full drag-badge-pulse">拖到舞台</span>
+        </div>
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
             v-for="c in sidebarChars"
             :key="c.name"
             draggable="true"
-            class="bg-paper-deep rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing select-none"
+            class="sidebar-item bg-paper-deep rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing select-none hover:bg-gold-mute/60 hover:shadow-md active:scale-95 transition-all"
             style="touch-action: none;"
             @dragstart="(e) => onSidebarDragStart(e, c, 'character')"
             @touchstart="(e) => onSidebarTouchStart(e, c, 'character')"
@@ -996,13 +693,18 @@ defineExpose({
             <div class="text-[10px] mt-1 text-ink-soft truncate w-full">{{ c.name }}</div>
           </div>
         </div>
-        <div class="text-xs font-bold text-ink-soft mb-2">🎁 道具</div>
+
+        <!-- 道具 -->
+        <div class="text-xs font-bold text-ink-soft mb-1 flex items-center gap-1.5">
+          <span>🎁 道具</span>
+          <span class="text-[10px] font-normal text-ink-mute bg-gold/20 px-1.5 py-0.5 rounded-full drag-badge-pulse">拖到舞台</span>
+        </div>
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div
             v-for="p in sidebarProps"
             :key="p.name"
             draggable="true"
-            class="bg-gold-mute/40 rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing select-none"
+            class="sidebar-item bg-gold-mute/40 rounded-lg p-2 grid place-items-center text-center cursor-grab active:cursor-grabbing select-none hover:bg-gold-mute/70 hover:shadow-md active:scale-95 transition-all"
             style="touch-action: none;"
             @dragstart="(e) => onSidebarDragStart(e, p, 'object')"
             @touchstart="(e) => onSidebarTouchStart(e, p, 'object')"
@@ -1010,31 +712,28 @@ defineExpose({
             <img v-if="p.url" :src="p.url" class="w-12 h-12 object-contain" :alt="p.name" />
             <div class="text-[10px] mt-1 text-ink truncate w-full">{{ p.name }}</div>
           </div>
-          <!-- ➕ 打开"我的资产"会话框 -->
           <button
-            class="bg-paper-deep hover:bg-gold-mute/60 active:scale-95 rounded-lg p-2 grid place-items-center text-center border border-dashed border-paper-edge hover:border-gold/40 transition"
-            :title="'浏览账户下所有已有资产'"
+            class="sidebar-item bg-paper-deep hover:bg-gold-mute/60 active:scale-95 rounded-lg p-2 grid place-items-center text-center border border-dashed border-paper-edge hover:border-gold/40 transition cursor-pointer"
+            title="浏览账户下所有已有资产"
             @click="myAssetsOpen = true"
           >
             <div class="w-12 h-12 grid place-items-center text-2xl text-ink-soft">＋</div>
             <div class="text-[10px] mt-1 text-ink-soft truncate w-full">我的资产</div>
           </button>
         </div>
-        <!-- 动作序列已挪到 StoryPage 右侧对话栏 -->
 
-        <!-- ✨ 我造的道具（当前 session 造的 + 作画中占位） -->
+        <!-- 我造的道具 -->
         <div v-if="pendingProps.length || customProps.length" class="border-t border-paper-edge pt-2">
           <div class="text-xs font-bold text-ink-soft mb-2 flex items-center justify-between">
             <span>✨ 我造的道具</span>
             <span v-if="pendingProps.length" class="text-[10px] text-ink-mute font-normal">作画中 {{ pendingProps.length }}</span>
           </div>
           <div class="grid grid-cols-2 gap-2">
-            <!-- 已完成：可拖入舞台 -->
             <div
               v-for="cp in customProps"
               :key="cp.url"
               draggable="true"
-              class="bg-gold-mute/40 rounded-lg p-1.5 grid place-items-center text-center cursor-grab active:cursor-grabbing relative border border-gold/30 select-none"
+              class="sidebar-item bg-gold-mute/40 rounded-lg p-1.5 grid place-items-center text-center cursor-grab active:cursor-grabbing relative border border-gold/30 select-none hover:shadow-md active:scale-95 transition-all"
               style="touch-action: none;"
               :title="`${cp.name} —— 拖到舞台使用`"
               @dragstart="(e) => onSidebarDragStart(e, { name: cp.name, url: cp.url } as any, 'object')"
@@ -1043,7 +742,6 @@ defineExpose({
               <img v-if="cp.url" :src="cp.url" class="w-10 h-10 object-contain" :alt="cp.name" />
               <div class="text-[10px] mt-0.5 text-ink truncate w-full">{{ cp.name }}</div>
             </div>
-            <!-- 作画中：spinner 占位 -->
             <div
               v-for="p in pendingProps"
               :key="p.tempId"
@@ -1071,7 +769,6 @@ defineExpose({
         <!-- 创建新道具 -->
         <div class="border-t border-paper-edge pt-2 space-y-2">
           <div class="text-xs font-bold text-ink-soft">✨ 造个新道具</div>
-          <!-- AI 生成 -->
           <div class="flex gap-2">
             <input
               v-model="newPropName"
@@ -1081,20 +778,12 @@ defineExpose({
               class="flex-1 min-w-0 px-2 py-1.5 text-xs rounded border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
               @keydown.enter="addCustomProp"
             />
-            <button
-              :disabled="!asr.supported || asr.listening.value"
-              class="w-7 h-7 rounded-full bg-paper-deep hover:bg-gold-mute text-ink-soft grid place-items-center disabled:opacity-40 transition shrink-0 text-xs"
-              :class="asr.listening.value && 'bg-warn/30'"
-              :title="asr.supported ? '语音输入' : '当前浏览器不支持语音'"
-              @click="micFillNewProp"
-            >🎤</button>
           </div>
           <button
-            class="w-full text-xs px-2 py-1 rounded bg-gradient-to-br from-accent-soft to-accent-deep text-white hover:brightness-110 disabled:opacity-50"
+            class="w-full text-xs px-2 py-1 rounded bg-gradient-to-br from-accent-soft to-accent-deep text-white hover:brightness-110 disabled:opacity-50 transition cursor-pointer"
             :disabled="!newPropName.trim()"
             @click="addCustomProp"
           >＋ AI 生成</button>
-          <!-- 上传 / 拍照 / 画板 -->
           <div class="grid grid-cols-3 gap-1">
             <label
               class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge cursor-pointer transition"
@@ -1105,7 +794,7 @@ defineExpose({
               <input type="file" accept="image/*" class="hidden" @change="onUploadPick" />
             </label>
             <button
-              class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge transition"
+              class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge transition cursor-pointer"
               title="摄像头拍照"
               @click="openCamera"
             >
@@ -1113,7 +802,7 @@ defineExpose({
               <span>拍照</span>
             </button>
             <button
-              class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge transition"
+              class="flex flex-col items-center justify-center gap-1 text-[11px] px-1 py-2 rounded bg-paper hover:bg-gold-mute border border-paper-edge transition cursor-pointer"
               title="画板绘制"
               @click="showSketchPad = true"
             >
@@ -1124,66 +813,6 @@ defineExpose({
         </div>
       </aside>
     </div>
-
-    <!-- 操作输入区 —— 通过 Teleport 送到 StoryPage 右侧对话栏（左边免滚动） -->
-    <Teleport to="#interact-inputs-slot" defer>
-      <div class="space-y-3">
-        <div>
-          <div class="text-xs font-semibold text-ink-soft mb-1.5">📌 让两个对象做点什么</div>
-          <div class="text-[11px] text-ink-mute mb-2 min-h-[14px]">
-            {{ selA ? `主语：${selA.name}` : "先点舞台上一个对象作为主语" }}
-            {{ selB ? `· 对象：${selB.name}` : (selA ? "（可选：再点一个作为对象）" : "") }}
-          </div>
-          <div class="flex gap-2">
-            <input
-              v-model="actionText"
-              type="text"
-              placeholder="例如：把鲜花送给"
-              class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-              @keydown.enter="addPairOp"
-            />
-            <button
-              :disabled="!asr.supported || asr.listening.value"
-              class="w-9 h-9 rounded-full bg-paper-deep hover:bg-gold-mute text-ink-soft grid place-items-center disabled:opacity-40 transition shrink-0"
-              :class="asr.listening.value && 'bg-warn/30'"
-              :title="asr.supported ? '语音输入' : '当前浏览器不支持语音'"
-              @click="micFillAction"
-            >🎤</button>
-            <button
-              class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
-              :disabled="!selA || !actionText.trim()"
-              @click="addPairOp"
-            >＋</button>
-          </div>
-        </div>
-        <div class="border-t border-dashed border-paper-edge pt-3">
-          <div class="text-xs font-semibold text-ink-soft mb-1.5">💭 自由描述一件场景里发生的事</div>
-          <div class="flex gap-2">
-            <input
-              v-model="freeformText"
-              type="text"
-              placeholder="例如：天上下起了花瓣雨"
-              class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
-              @keydown.enter="addFreeformOp"
-            />
-            <button
-              :disabled="!asr.supported || asr.listening.value"
-              class="w-9 h-9 rounded-full bg-paper-deep hover:bg-gold-mute text-ink-soft grid place-items-center disabled:opacity-40 transition shrink-0"
-              :class="asr.listening.value && 'bg-warn/30'"
-              :title="asr.supported ? '语音输入' : '当前浏览器不支持语音'"
-              @click="micFillFreeform"
-            >🎤</button>
-            <button
-              class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
-              :disabled="!freeformText.trim()"
-              @click="addFreeformOp"
-            >＋</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- 完成按钮已挪到 StoryPage 书本 card 底部（通过 defineExpose），确保永不被 overflow 截 -->
 
     <!-- 摄像头 modal -->
     <Teleport to="body">
@@ -1196,14 +825,14 @@ defineExpose({
           <div class="bg-white rounded-2xl p-4 max-w-[520px] w-full">
             <div class="flex items-center justify-between mb-2">
               <h3 class="font-bold">📷 摄像头拍照</h3>
-              <button class="w-8 h-8 rounded-full bg-paper-deep hover:bg-gold-mute" @click="closeCamera">✕</button>
+              <button class="w-8 h-8 rounded-full bg-paper-deep hover:bg-gold-mute cursor-pointer" @click="closeCamera">✕</button>
             </div>
             <div class="bg-cinema rounded-xl overflow-hidden aspect-video">
               <video ref="videoEl" class="w-full h-full object-contain" playsinline muted></video>
             </div>
             <div class="flex justify-end gap-2 mt-3">
-              <BaseButton variant="soft" pill size="sm" @click="closeCamera">取消</BaseButton>
-              <BaseButton pill size="sm" @click="snap">📸 拍下</BaseButton>
+              <button class="px-4 py-1.5 text-sm rounded-full bg-paper-deep hover:bg-gold-mute cursor-pointer transition" @click="closeCamera">取消</button>
+              <button class="px-4 py-1.5 text-sm rounded-full bg-accent text-white hover:brightness-110 cursor-pointer transition" @click="snap">📸 拍下</button>
             </div>
           </div>
         </div>
@@ -1222,56 +851,13 @@ defineExpose({
       @submit="onPropModalSubmit"
     />
 
-    <!-- 📦 我的资产 modal -->
+    <!-- 我的资产 modal -->
     <MyAssetsModal
       :open="myAssetsOpen"
       :session-custom-props="customProps"
       @close="myAssetsOpen = false"
       @pick="addAssetToStage"
     />
-
-    <!-- 生成下一幕二次确认（C7） -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div
-          v-if="confirmingComplete"
-          class="fixed inset-0 z-[70] bg-cinema/70 backdrop-blur-sm grid place-items-center p-4"
-          @click.self="confirmingComplete = false"
-        >
-          <div class="bg-white rounded-2xl p-6 max-w-[440px] w-full shadow-[var(--shadow-card-lg)] fade-in">
-            <div class="flex items-start gap-3">
-              <div class="text-4xl">✨</div>
-              <div class="flex-1">
-                <h3 class="font-display font-bold text-lg m-0 mb-1">确认推进到下一幕？</h3>
-                <p class="text-sm text-ink-soft m-0">
-                  当前的 <span class="text-accent-deep font-semibold">{{ ops.length }}</span> 个动作
-                  和所有道具摆放将被锁定，交给 AI 作画。稍后不能再修改这一幕。
-                </p>
-              </div>
-            </div>
-            <!-- ops 摘要 -->
-            <div v-if="ops.length" class="mt-3 max-h-36 overflow-y-auto no-scrollbar bg-paper rounded-lg p-2 text-[11px] space-y-1">
-              <div
-                v-for="(o, i) in ops"
-                :key="i"
-                class="flex gap-1.5"
-              >
-                <span class="text-accent-deep font-semibold shrink-0">{{ i + 1 }}.</span>
-                <span class="text-ink">
-                  <template v-if="o.subject && o.target">「{{ o.subject }}」对「{{ o.target }}」：{{ o.action }}</template>
-                  <template v-else-if="o.subject">「{{ o.subject }}」：{{ o.action }}</template>
-                  <template v-else>{{ o.action }}</template>
-                </span>
-              </div>
-            </div>
-            <div class="mt-5 flex justify-end gap-2">
-              <BaseButton variant="soft" size="sm" pill @click="confirmingComplete = false">再想想</BaseButton>
-              <BaseButton size="sm" pill @click="doComplete">✨ 确认生成</BaseButton>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
   </div>
 </template>
 
@@ -1279,7 +865,9 @@ defineExpose({
 .modal-enter-active, .modal-leave-active { transition: all 0.25s ease; }
 .modal-enter-from, .modal-leave-to { opacity: 0; transform: scale(0.98); }
 
-/* 互动页侧边栏显式滚动条 —— 暗示"下面还有内容" */
+.hint-enter-active, .hint-leave-active { transition: all 0.35s ease; }
+.hint-enter-from, .hint-leave-to { opacity: 0; transform: scale(0.95); }
+
 .interact-aside {
   scrollbar-width: thin;
   scrollbar-color: rgba(213, 147, 57, 0.45) transparent;
@@ -1291,4 +879,23 @@ defineExpose({
   border-radius: 4px;
 }
 .interact-aside::-webkit-scrollbar-thumb:hover { background: rgba(213, 147, 57, 0.85); }
+
+/* 侧边栏道具 hover 动效 */
+.sidebar-item {
+  will-change: transform;
+  animation: item-settle 0.3s ease-out;
+}
+@keyframes item-settle {
+  from { transform: translateY(2px); opacity: 0.7; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* "拖到舞台" 徽章呼吸动效 */
+.drag-badge-pulse {
+  animation: badge-breathe 2s ease-in-out infinite;
+}
+@keyframes badge-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
 </style>

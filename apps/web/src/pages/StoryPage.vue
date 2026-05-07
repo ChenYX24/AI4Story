@@ -12,8 +12,8 @@ import BaseModal from "@/components/BaseModal.vue";
 import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
-import { postChat, postInteract, postReport, fetchChatSuggestions } from "@/api/endpoints";
-import type { Scene, InteractRequest, InteractResponse, Operation } from "@/api/types";
+import { postChat, postReport, fetchChatSuggestions } from "@/api/endpoints";
+import type { Scene, InteractResponse } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
 const route = useRoute();
@@ -79,14 +79,12 @@ async function loadCursor(idx: number) {
         dynamicNode.value = null;
         pendingDynamicPreview.value = pending?.previewUrl || null;
         pendingDynamicError.value = pending?.error || null;
-        interactiveOps.value = [];
       } else {
         // 源 interactive 场景的 meta 仍然作为 scene.value 背景（供 summary 卡用），但 type 在模板分支里按 dynamicNode 优先
         scene.value = await store.ensureScene(node.sceneIdx).catch(() => null as any);
         dynamicNode.value = dyn.payload;
         pendingDynamicPreview.value = null;
         pendingDynamicError.value = null;
-        interactiveOps.value = [];
         store.trackComic(dyn.payload.comic_url);
         if (dyn.payload.storyboard?.length) {
           tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id, speaker_gender: l.speaker_gender })));
@@ -105,7 +103,6 @@ async function loadCursor(idx: number) {
       const savedInteract = sc.type === "interactive" && activeSessionId.value
         ? interactStore.get(activeSessionId.value, sc.index)
         : undefined;
-      interactiveOps.value = savedInteract?.ops?.map((o) => ({ ...o })) || [];
       // narrative + interactive 都可能携带 storyboard（旁白 + 0-2 句对白）
       if (sc.storyboard?.length) {
         tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id, speaker_gender: l.speaker_gender })));
@@ -207,11 +204,6 @@ function goReport() {
   sess.completeSession(sid, buildCurrentPlayState() || currentPlayState());
   startReportInBackground();
   router.push({ name: "report", params: { id: props.id }, query: { sid } });
-}
-
-function isLastInteractiveScene(sceneIdx: number): boolean {
-  const scenes = store.current?.scenes || [];
-  return !scenes.some((s) => s.type === "interactive" && s.index > sceneIdx);
 }
 
 async function advanceNode() {
@@ -360,64 +352,6 @@ async function startMic() {
 }
 
 // 互动完成回调 — dynamic 幕 splice 到 flow 中（当前 interactive 之后），cursor 前进到新幕
-async function onInteractDone(
-  payload: InteractResponse,
-  snap: { ops: any[]; custom_props: any[] },
-) {
-  const sourceSceneIdx = scene.value?.index;
-  if (sourceSceneIdx === undefined) return;
-  store.addInteraction({
-    scene_idx: sourceSceneIdx,
-    interaction_goal: scene.value?.interaction_goal,
-    ops: snap.ops,
-    custom_props: snap.custom_props,
-    dynamic_summary: payload.summary,
-    comic_url: payload.comic_url,
-  });
-  store.recordDynamic(sourceSceneIdx, {
-    payload,
-    snapOps: snap.ops,
-    snapProps: snap.custom_props,
-  });
-  // splice 到 flow：已有同源 dynamic 会先被清除
-  const insertedAt = store.insertDynamicAfter(store.cursor, sourceSceneIdx);
-  toast.push("✨ 你的故事段落已经画好了", "success");
-  await loadCursor(insertedAt);
-}
-
-function onInteractGenerate(request: InteractRequest) {
-  const sourceSceneIdx = scene.value?.index;
-  if (sourceSceneIdx === undefined) return;
-  const sourceGoal = scene.value?.interaction_goal;
-  const previewUrl = nextPreviewComicUrl.value;
-  store.recordPendingDynamic(sourceSceneIdx, {
-    previewUrl,
-    snapOps: request.ops,
-    snapProps: request.custom_props,
-    startedAt: new Date().toISOString(),
-  });
-  const insertedAt = store.insertDynamicAfter(store.cursor, sourceSceneIdx);
-  void loadCursor(insertedAt);
-
-  void postInteract(request).then((payload) => {
-    store.addInteraction({
-      scene_idx: sourceSceneIdx,
-      interaction_goal: sourceGoal,
-      ops: request.ops,
-      custom_props: request.custom_props,
-      dynamic_summary: payload.summary,
-      comic_url: payload.comic_url,
-    });
-    store.recordDynamic(sourceSceneIdx, {
-      payload,
-      snapOps: request.ops,
-      snapProps: request.custom_props,
-    });
-    sess.markGeneratedNotice(props.id);
-    toast.push("Generated new story scene", "success");
-    if (isLastInteractiveScene(sourceSceneIdx)) startReportInBackground();
-    const active = store.flow[store.cursor];
-    if (active?.type === "dynamic" && active.sceneIdx === sourceSceneIdx) {
       void loadCursor(store.cursor);
     }
   }).catch((e: any) => {
@@ -428,7 +362,6 @@ function onInteractGenerate(request: InteractRequest) {
   });
 }
 
-void onInteractDone;
 
 
 // E3：进行中 session 恢复弹窗
@@ -635,43 +568,8 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
 
 // 互动场景生成下一幕时的 loading 背景图：优先用当前互动场景自己的"原故事发展过程四格图"。
 // 老故事可能没生成这张图，回退到下一幕（旧逻辑）。
-const nextPreviewComicUrl = computed<string | undefined>(() => {
-  const storyId = store.current?.id || props.id;
-  const currentNode = store.flow[store.cursor];
-
-  if (currentNode?.type === "interactive") {
-    const cur = store.sceneCache?.get?.(`${storyId}:` + currentNode.sceneIdx);
-    if (cur?.comic_url) return cur.comic_url;
-    if (storyId === "little_red_riding_hood") {
-      const pad = String(currentNode.sceneIdx).padStart(3, "0");
-      return `/assets/scenes/${pad}/comic/panel.png`;
-    }
-  }
-
-  const nextIdx = store.cursor + 1;
-  if (nextIdx >= store.flow.length) return undefined;
-  const nextNode = store.flow[nextIdx];
-  const cached = store.sceneCache?.get?.(`${storyId}:` + nextNode.sceneIdx);
-  if (cached?.comic_url) return cached.comic_url;
-  if (cached?.background_url) return cached.background_url;
-  const pad = String(nextNode.sceneIdx).padStart(3, "0");
-  if (storyId && storyId !== "little_red_riding_hood") return undefined;
-  return nextNode.type === "narrative"
-    ? `/assets/scenes/${pad}/comic/panel.png`
-    : `/assets/scenes/${pad}/background/background.png`;
-});
-
-// 互动场景的 ops —— 与 InteractiveView 双向绑定（defineModel），在右侧对话栏展示 + 删除
-const interactiveOps = ref<Operation[]>([]);
-function removeInteractiveOp(i: number) {
-  interactiveOps.value.splice(i, 1);
-}
 
 // ref 拿到 InteractiveView 以调用暴露方法（完成/清空）
-const interactiveRef = ref<{ askComplete: () => void; clearOps: () => void; isGenerating: () => boolean } | null>(null);
-function callInteractiveComplete() { interactiveRef.value?.askComplete(); }
-function callInteractiveClear() { interactiveRef.value?.clearOps(); }
-const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?.() ?? false);
 </script>
 
 <template>
@@ -804,13 +702,9 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                 <!-- 互动 -->
                 <template v-else>
                   <InteractiveView
-                    ref="interactiveRef"
-                    v-model:ops="interactiveOps"
                     :scene="scene"
                     :story-id="props.id"
                     :session-id="currentSessionId()"
-                    :next-comic-url="nextPreviewComicUrl"
-                    @generate="onInteractGenerate"
                   />
                 </template>
               </div>
@@ -853,22 +747,9 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
                     {{ comicView === 'custom' ? '✨ 新故事' : '📖 原故事' }}
                   </BaseButton>
                 </div>
-                <template v-if="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic">
-                  <BaseButton
-                    size="sm"
-                    pill
-                    class="ml-auto"
-                    :disabled="interactiveOps.length === 0 || interactiveGenerating"
-                    @click="callInteractiveComplete"
-                  >
-                    {{ interactiveGenerating ? "AI 正在画…" : `✨ 完成 (${interactiveOps.length}) 并生成下一幕` }}
-                  </BaseButton>
-                </template>
-                <template v-else>
-                  <BaseButton size="sm" pill class="ml-auto" @click="advanceNode">
-                    {{ isLast ? "📊 查看报告" : "继续 ⏭" }}
-                  </BaseButton>
-                </template>
+                <BaseButton size="sm" pill class="ml-auto" @click="advanceNode">
+                  {{ isLast ? "📊 查看报告" : "继续 ⏭" }}
+                </BaseButton>
               </div>
             </div>
           </div>
@@ -882,43 +763,6 @@ const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?
           <p class="text-sm text-ink-soft leading-relaxed m-0">
             {{ scene?.summary || scene?.narration || store.current?.story_summary || "" }}
           </p>
-        </BaseCard>
-
-        <!-- 互动节点：操作输入区（Teleport 自 InteractiveView） -->
-        <BaseCard v-show="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic" class="p-4">
-          <div id="interact-inputs-slot"></div>
-        </BaseCard>
-
-        <!-- 互动节点：动作序列卡（从舞台侧挪过来，方便和对话一起看） -->
-        <BaseCard v-if="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic" class="p-4">
-          <div class="text-sm font-semibold mb-2 flex items-center justify-between">
-            <span>🎬 动作序列<span v-if="interactiveOps.length" class="text-xs text-ink-mute font-normal ml-1">· 共 {{ interactiveOps.length }}</span></span>
-            <button
-              v-if="interactiveOps.length > 0"
-              class="text-[11px] px-2 py-0.5 rounded-full bg-paper-deep hover:bg-warn/15 text-ink-soft hover:text-warn transition"
-              :disabled="interactiveGenerating"
-              title="清空所有动作"
-              @click="callInteractiveClear"
-            >🗑 清空</button>
-          </div>
-          <div v-if="!interactiveOps.length" class="text-xs text-ink-mute text-center py-3 border border-dashed border-paper-edge rounded">
-            还没安排动作<br />选两个对象 → 写"做什么"
-          </div>
-          <div v-else class="space-y-1.5 max-h-48 overflow-y-auto no-scrollbar pr-1">
-            <div
-              v-for="(o, i) in interactiveOps"
-              :key="i"
-              class="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-accent/10 border border-accent/25 text-xs leading-snug"
-            >
-              <span class="font-semibold text-accent-deep shrink-0">{{ i + 1 }}.</span>
-              <span class="flex-1 text-ink break-words">
-                <template v-if="o.subject && o.target">「{{ o.subject }}」对「{{ o.target }}」：{{ o.action }}</template>
-                <template v-else-if="o.subject">「{{ o.subject }}」：{{ o.action }}</template>
-                <template v-else>{{ o.action }}</template>
-              </span>
-              <button class="text-warn hover:text-warn/70 shrink-0" title="移除" @click="removeInteractiveOp(i)">×</button>
-            </div>
-          </div>
         </BaseCard>
 
         <!-- 旁白流（narrative / dynamic / pending-dynamic 都用同一套逐句展开；
