@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRouter } from "vue-router";
 import { useStoryStore } from "@/stores/story";
 import { useRetell } from "@/composables/useRetell";
 import { useTTSPreload } from "@/composables/useTTSPreload";
@@ -15,7 +15,6 @@ import RetellSummaryView from "@/components/RetellSummaryView.vue";
 import { useToastStore } from "@/stores/toast";
 
 const props = defineProps<{ id: string }>();
-const route = useRoute();
 const router = useRouter();
 const story = useStoryStore();
 const toast = useToastStore();

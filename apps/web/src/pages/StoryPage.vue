@@ -100,9 +100,6 @@ async function loadCursor(idx: number) {
       dynamicNode.value = null;
       pendingDynamicPreview.value = null;
       pendingDynamicError.value = null;
-      const savedInteract = sc.type === "interactive" && activeSessionId.value
-        ? interactStore.get(activeSessionId.value, sc.index)
-        : undefined;
       // narrative + interactive 都可能携带 storyboard（旁白 + 0-2 句对白）
       if (sc.storyboard?.length) {
         tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id, speaker_gender: l.speaker_gender })));
