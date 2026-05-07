@@ -351,17 +351,6 @@ async function startMic() {
   }
 }
 
-// 互动完成回调 — dynamic 幕 splice 到 flow 中（当前 interactive 之后），cursor 前进到新幕
-      void loadCursor(store.cursor);
-    }
-  }).catch((e: any) => {
-    const msg = e?.message || String(e);
-    store.failPendingDynamic(sourceSceneIdx, msg);
-    pendingDynamicError.value = msg;
-    toast.push(`Generate failed: ${msg}`, "error");
-  });
-}
-
 
 
 // E3：进行中 session 恢复弹窗
