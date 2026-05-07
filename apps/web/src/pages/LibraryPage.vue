@@ -8,6 +8,7 @@ import BaseModal from "@/components/BaseModal.vue";
 import BaseTabs from "@/components/BaseTabs.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import { useStoryStore } from "@/stores/story";
+import { thumbUrl } from "@/api/client";
 import { useShelfStore } from "@/stores/shelf";
 import { useToastStore } from "@/stores/toast";
 import { deleteCustomStory, patchCustomStory } from "@/api/endpoints";
@@ -38,6 +39,11 @@ function toggleShelf(s: StoryCard, e: MouseEvent) {
   e.stopPropagation();
   shelf.toggle(s.id);
   toast.push(shelf.has(s.id) ? `已加到书架` : `已从书架移除`, "success");
+}
+
+function goRetell(id: string, e: MouseEvent) {
+  e.stopPropagation();
+  router.push({ name: "retell", params: { id } });
 }
 
 // 已看过的自定义故事 id — 用来显示红点 new-indicator
@@ -182,7 +188,7 @@ async function onDelete(id: string, e: MouseEvent) {
           >
             <img
               v-if="story.cover_url"
-              :src="story.cover_url"
+              :src="thumbUrl(story.cover_url, 440)"
               loading="lazy"
               decoding="async"
               class="absolute inset-0 w-full h-full object-cover"
@@ -239,6 +245,14 @@ async function onDelete(id: string, e: MouseEvent) {
               :title="shelf.has(story.id) ? '从书架移除' : '加到书架'"
               @click="(e) => toggleShelf(story, e)"
             >{{ shelf.has(story.id) ? "★" : "☆" }}</button>
+
+            <!-- 复述按钮（左下角）-->
+            <button
+              v-if="story.available"
+              class="absolute bottom-2 left-2 w-8 h-8 rounded-full grid place-items-center transition backdrop-blur text-base bg-white/90 text-ink-soft hover:bg-accent/20 hover:text-accent"
+              title="复述故事"
+              @click="(e) => goRetell(story.id, e)"
+            >🔄</button>
           </div>
           <div class="p-4">
             <div class="font-bold text-ink leading-snug">{{ story.title }}</div>

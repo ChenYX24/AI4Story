@@ -494,9 +494,14 @@ const reportTabs = [
 
         <div class="mt-8 flex justify-between flex-wrap gap-2">
           <BaseButton variant="soft" pill @click="router.push('/library')">← 回书架</BaseButton>
-          <BaseButton pill @click="router.push({ name: 'story', params: { id: props.id } })">
-            🔁 再玩一遍
-          </BaseButton>
+          <div class="flex gap-2">
+            <BaseButton variant="soft" pill @click="router.push({ name: 'retell', params: { id: props.id } })">
+              🔄 复述故事
+            </BaseButton>
+            <BaseButton pill @click="router.push({ name: 'story', params: { id: props.id } })">
+              🔁 再玩一遍
+            </BaseButton>
+          </div>
         </div>
       </section>
     </div>

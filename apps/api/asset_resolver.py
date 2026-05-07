@@ -48,6 +48,11 @@ def url_for(scene_idx: int, kind: AssetKind, name: str | None = None, story_id: 
     return f"/outputs/{rel.as_posix()}"
 
 
+def thumb_url(original_url: str, width: int = 400) -> str:
+    """Generate a proxied thumbnail URL for an internal image path."""
+    return f"/api/image/proxy?path={original_url}&width={width}"
+
+
 def resolve_interactive_asset(scene_idx: int, name: str, kind: str, story_id: str | None = None) -> Path:
     """Try scene-local first, fall back to global. Raise with helpful context on miss."""
     scene_kind = "scene_character" if kind == "character" else "scene_object"

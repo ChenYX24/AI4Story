@@ -89,3 +89,9 @@ export async function apiDelete<T = unknown>(path: string): Promise<T> {
   });
   return handle(r) as Promise<T>;
 }
+
+/** Generate a proxied thumbnail URL for an internal image path. */
+export function thumbUrl(originalUrl: string | null | undefined, width = 400): string {
+  if (!originalUrl) return "";
+  return `${BASE}/api/image/proxy?path=${encodeURIComponent(originalUrl)}&width=${width}`;
+}

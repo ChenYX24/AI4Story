@@ -9,6 +9,7 @@ from .routers import (
     auth,
     chat,
     create_prop,
+    image_proxy,
     interact,
     placements,
     public,
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router, prefix="/api")
     app.include_router(video_import.router, prefix="/api")
     app.include_router(retell.router, prefix="/api")
+    app.include_router(image_proxy.router, prefix="/api")
 
     @app.get("/view/{share_id}")
     def share_view_page(share_id: str) -> HTMLResponse:

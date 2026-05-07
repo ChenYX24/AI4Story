@@ -3,6 +3,7 @@ import { onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useStoryStore } from "@/stores/story";
 import { useRetell } from "@/composables/useRetell";
+import { thumbUrl } from "@/api/client";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import TopBar from "@/components/TopBar.vue";
 import BaseButton from "@/components/BaseButton.vue";
@@ -126,7 +127,7 @@ watch(
           <BaseCard class="overflow-hidden !p-0">
             <img
               v-if="retell.currentScene.value?.comic_url"
-              :src="retell.currentScene.value.comic_url"
+              :src="thumbUrl(retell.currentScene.value.comic_url, 700)"
               :alt="`场景 ${retell.currentScene.value?.scene_index}`"
               class="w-full h-auto object-cover rounded-2xl"
               loading="lazy"

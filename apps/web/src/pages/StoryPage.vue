@@ -733,9 +733,14 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
                     {{ comicView === 'custom' ? '✨ 新故事' : '📖 原故事' }}
                   </BaseButton>
                 </div>
-                <BaseButton size="sm" pill class="ml-auto" @click="advanceNode">
-                  {{ isLast ? "📊 查看报告" : "继续 ⏭" }}
-                </BaseButton>
+                <div class="ml-auto flex items-center gap-2">
+                  <BaseButton variant="ghost" size="sm" pill @click="router.push({ name: 'retell', params: { id: props.id } })">
+                    🔄 复述
+                  </BaseButton>
+                  <BaseButton size="sm" pill @click="advanceNode">
+                    {{ isLast ? "📊 查看报告" : "继续 ⏭" }}
+                  </BaseButton>
+                </div>
               </div>
             </div>
           </div>
