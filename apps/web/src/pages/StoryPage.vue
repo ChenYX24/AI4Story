@@ -13,6 +13,7 @@ import { useASR } from "@/composables/useASR";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import { postChat, postReport, fetchChatSuggestions } from "@/api/endpoints";
+import { thumbUrl } from "@/api/client";
 import type { Scene, InteractResponse } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
@@ -122,10 +123,10 @@ async function prefetchNode(idx: number) {
   try {
     const sc = await store.ensureScene(node.sceneIdx);
     const urls: string[] = [];
-    if (sc.comic_url) urls.push(sc.comic_url);
-    if (sc.background_url) urls.push(sc.background_url);
-    (sc.characters || []).forEach((c) => c.url && urls.push(c.url));
-    (sc.props || []).forEach((p) => p.url && urls.push(p.url));
+    if (sc.comic_url) urls.push(thumbUrl(sc.comic_url, 600));
+    if (sc.background_url) urls.push(thumbUrl(sc.background_url, 800));
+    (sc.characters || []).forEach((c) => c.url && urls.push(thumbUrl(c.url, 128)));
+    (sc.props || []).forEach((p) => p.url && urls.push(thumbUrl(p.url, 128)));
     urls.forEach((u) => { const img = new Image(); img.src = u; });
   } catch { /* silent */ }
 }
@@ -637,8 +638,10 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
                 <template v-if="dynamicNode">
                   <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper narrative-magic">
                     <img
-                      :src="comicView === 'original' ? (scene?.comic_url || dynamicNode.comic_url) : dynamicNode.comic_url"
+                      :src="thumbUrl(comicView === 'original' ? (scene?.comic_url || dynamicNode.comic_url) : dynamicNode.comic_url, 700)"
                       class="absolute inset-0 w-full h-full object-contain z-10"
+                      loading="lazy"
+                      decoding="async"
                       :alt="comicView === 'original' ? '原故事场景' : '新段落'"
                     />
                   </div>
@@ -667,6 +670,7 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
                       v-if="pendingDynamicPreview"
                       :src="pendingDynamicPreview"
                       class="absolute inset-0 w-full h-full object-contain"
+                      loading="lazy"
                       alt="原故事四格预览"
                     />
                     <div v-else class="absolute inset-0 bg-gradient-to-br from-paper-deep to-gold-mute"></div>
@@ -677,8 +681,10 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
                   <div class="flex-1 min-h-0 relative rounded-xl overflow-hidden bg-paper">
                     <img
                       v-if="scene.comic_url"
-                      :src="scene.comic_url"
+                      :src="thumbUrl(scene.comic_url, 700)"
                       alt="场景连环画"
+                      loading="lazy"
+                      decoding="async"
                       class="absolute inset-0 w-full h-full object-contain"
                     />
                     <div v-else class="absolute inset-0 grid place-items-center text-ink-mute">（此幕无图）</div>

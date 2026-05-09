@@ -7,6 +7,7 @@ import { useAssetShelfStore } from "@/stores/assetShelf";
 import { useInteractStore } from "@/stores/interact";
 import { useStoryStore } from "@/stores/story";
 import { fetchPlacements, createProp, uploadImage } from "@/api/endpoints";
+import { thumbUrl } from "@/api/client";
 import type { Scene, SceneCharacter, SceneProp, CustomProp } from "@/api/types";
 import SketchPadModal from "./SketchPadModal.vue";
 import CustomPropCreateModal from "./CustomPropCreateModal.vue";
@@ -19,6 +20,11 @@ const sessions = useSessionStore();
 const assetShelf = useAssetShelfStore();
 const interactStore = useInteractStore();
 const storyStore = useStoryStore();
+
+// 缩略图宽度 — 按使用场景分档，避免加载全尺寸 PNG
+const TW_SIDEBAR = 128;
+const TW_STAGE = 320;
+const TW_BG = 900;
 
 interface PlacedItem {
   id: string;
@@ -49,9 +55,39 @@ const selectedId = ref<string | null>(null);
 const newPropName = ref("");
 const sessionId = computed(() => props.sessionId);
 
-// 引导提示状态
+// ---- 渐进式引导 ----
 const hasDragged = ref(false);
+const hasSelected = ref(false);
+const hasScaled = ref(false);
 const dragHintDismissed = ref(false);
+const guideStep = ref<"drag" | "select" | "manipulate" | "done">("drag");
+const tipIndex = ref(0);
+const tips = [
+  "把角色拖到舞台上开始创作",
+  "点击角色可以选中它",
+  "选中后拖拽移动 · 双指缩放 · Delete 删除",
+  "试试「造个新道具」AI 帮你画！",
+];
+let tipTimer: ReturnType<typeof setInterval> | null = null;
+
+function updateGuideStep() {
+  if (placed.value.length === 0 && !dragHintDismissed.value) {
+    guideStep.value = "drag";
+  } else if (!hasSelected.value) {
+    guideStep.value = "select";
+  } else if (!hasScaled.value && selectedId.value) {
+    guideStep.value = "manipulate";
+  } else {
+    guideStep.value = "done";
+  }
+}
+
+function onItemInteraction(kind: "drag" | "select" | "scale") {
+  if (kind === "drag") hasDragged.value = true;
+  if (kind === "select") hasSelected.value = true;
+  if (kind === "scale") hasScaled.value = true;
+  updateGuideStep();
+}
 
 function findUrlByName(name: string, kind: "character" | "object"): string | undefined {
   if (kind === "character") {
@@ -102,12 +138,16 @@ onMounted(() => {
     void loadInitialPlacements();
   }
   document.addEventListener("keydown", onStageKey);
+  tipTimer = setInterval(() => {
+    tipIndex.value = (tipIndex.value + 1) % tips.length;
+  }, 6000);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onStageKey);
   _cleanupTouchDrag();
   dragSource = null;
+  if (tipTimer) { clearInterval(tipTimer); tipTimer = null; }
 });
 
 watch(
@@ -152,7 +192,7 @@ function onStageDrop(e: DragEvent) {
     x, y,
     scale: 1, rotation: 0,
   });
-  hasDragged.value = true;
+  onItemInteraction("drag");
   dragSource = null;
 }
 
@@ -204,7 +244,7 @@ function _onTouchEnd(e: TouchEvent) {
       x, y,
       scale: 1, rotation: 0,
     });
-    hasDragged.value = true;
+    onItemInteraction("drag");
   }
   dragSource = null;
 }
@@ -226,7 +266,7 @@ function onSidebarTouchStart(
   ].join(";");
   if (item.url) {
     const img = document.createElement("img");
-    img.src = item.url;
+    img.src = thumbUrl(item.url, 72);
     img.style.cssText = "width:48px;height:48px;object-fit:contain;pointer-events:none;";
     ghost.appendChild(img);
   } else {
@@ -324,6 +364,9 @@ function onStagePointerMove(e: PointerEvent) {
       item.rotation = wrapDeg(
         pinch.startRotation + ((angle - pinch.startAngle) * 180) / Math.PI,
       );
+      if (Math.abs(item.scale - (pinch.startScale)) > 0.05) {
+        onItemInteraction("scale");
+      }
       return;
     }
   }
@@ -356,7 +399,9 @@ function clamp(n: number, lo: number, hi: number) {
 
 // ---- Select / Delete ----
 function toggleSelect(item: PlacedItem) {
-  selectedId.value = selectedId.value === item.id ? null : item.id;
+  const wasSelected = selectedId.value === item.id;
+  selectedId.value = wasSelected ? null : item.id;
+  if (!wasSelected) onItemInteraction("select");
 }
 
 function onStageBackgroundClick() {
@@ -503,7 +548,7 @@ function addAssetToStage(asset: {
   if (isCustom && !customProps.value.some((c) => c.url === asset.url)) {
     customProps.value = [...customProps.value, { name: asset.name, url: asset.url }];
   }
-  hasDragged.value = true;
+  onItemInteraction("drag");
   toast.push(`已添加「${asset.name}」到舞台`, "info");
 }
 
@@ -573,16 +618,30 @@ const sidebarChars = computed(() => props.scene.characters || []);
 const sidebarProps = computed(() => props.scene.props || []);
 
 const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.value && placed.value.length === 0);
+const showCreateHighlight = computed(() => hasDragged.value && customProps.value.length === 0);
 </script>
 
 <template>
   <div class="flex-1 flex flex-col relative min-h-0">
-    <!-- 互动目标提示 -->
-    <div class="mb-3 text-xs text-ink-soft px-1 flex items-center gap-2 flex-wrap">
-      <span class="inline-flex items-center gap-1 bg-gold/15 px-2 py-1 rounded-full border border-gold/30 text-ink">
+    <!-- 渐进式引导栏 -->
+    <div class="mb-3 text-xs px-1 flex items-center gap-2 flex-wrap">
+      <span class="inline-flex items-center gap-1 bg-gold/15 px-2 py-1 rounded-full border border-gold/30 text-ink shrink-0">
         <span class="font-semibold">互动目标：</span><span class="text-ink-soft">{{ scene.interaction_goal || "把场景填满" }}</span>
       </span>
-      <span class="hidden md:inline text-ink-mute">把侧边的角色和道具拖进舞台，创造你心中的故事场景</span>
+      <Transition name="hint" mode="out-in">
+        <span v-if="guideStep === 'drag'" key="drag" class="hidden md:inline text-ink-mute">
+          👆 把侧边的角色拖到舞台上开始创作
+        </span>
+        <span v-else-if="guideStep === 'select'" key="select" class="hidden md:inline text-ink-mute">
+          💡 点击舞台上的角色或道具可以选中它
+        </span>
+        <span v-else-if="guideStep === 'manipulate'" key="manipulate" class="hidden md:inline text-ink-mute">
+          ✋ 拖拽移动位置 · 🤏 双指缩放旋转 · ⌨️ 按 Delete 删除
+        </span>
+        <span v-else key="done" class="hidden md:inline text-ink-mute opacity-70">
+          {{ tips[tipIndex] }}
+        </span>
+      </Transition>
     </div>
 
     <div class="flex-1 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 min-h-0" style="grid-template-rows: minmax(0, 1fr);">
@@ -599,7 +658,14 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
         @pointerleave="() => onStagePointerUp()"
         @click.self="onStageBackgroundClick"
       >
-        <img v-if="scene.background_url" :src="scene.background_url" class="absolute inset-0 w-full h-full object-contain object-top pointer-events-none" alt="背景" />
+        <img
+          v-if="scene.background_url"
+          :src="thumbUrl(scene.background_url, TW_BG)"
+          loading="eager"
+          decoding="async"
+          class="absolute inset-0 w-full h-full object-contain object-top pointer-events-none"
+          alt="背景"
+        />
 
         <!-- 空舞台拖拽引导 -->
         <Transition name="hint">
@@ -619,7 +685,7 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
           </div>
         </Transition>
 
-        <!-- 已放置的物体 -->
+        <!-- 已放置物体 -->
         <div
           v-for="item in placed"
           :key="item.id"
@@ -633,14 +699,25 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
           @pointerdown="(e) => onItemPointerDown(e, item)"
           @click.stop="toggleSelect(item)"
         >
-          <!-- 选中外框 -->
+          <!-- 选中外框 + 操作提示 -->
           <div
             v-if="selectedId === item.id"
             class="absolute -inset-2 rounded-xl pointer-events-none ring-[3px] ring-accent shadow-[0_0_16px_rgba(255,122,61,0.4)]"
-          ></div>
+          >
+            <div class="absolute -bottom-7 left-1/2 -translate-x-1/2 bg-accent text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap shadow-md">
+              拖拽移动 · 双指缩放 · Delete 删除
+            </div>
+          </div>
 
           <div :style="{ transform: `rotate(${item.rotation}deg)` }" class="relative">
-            <img v-if="item.url && !item.loading" :src="item.url" :alt="item.name" class="w-full h-auto pointer-events-none drop-shadow-md" />
+            <img
+              v-if="item.url && !item.loading"
+              :src="thumbUrl(item.url, TW_STAGE)"
+              :alt="item.name"
+              loading="lazy"
+              decoding="async"
+              class="w-full h-auto pointer-events-none drop-shadow-md"
+            />
             <div v-else-if="item.loading" class="w-full aspect-square relative rounded-xl overflow-hidden bg-white/80 shadow-md">
               <img
                 v-if="item.refImage"
@@ -662,7 +739,7 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
 
           <div class="text-[10px] text-center text-ink-soft mt-0.5 px-1 bg-white/70 rounded pointer-events-none">{{ item.name }}</div>
 
-          <!-- 选中后删除按钮 -->
+          <!-- 选中删除按钮 -->
           <button
             v-if="selectedId === item.id"
             class="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-warn text-white text-xs grid place-items-center shadow-md hover:bg-warn/80 active:scale-95 transition cursor-pointer z-20"
@@ -689,7 +766,7 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
             @dragstart="(e) => onSidebarDragStart(e, c, 'character')"
             @touchstart="(e) => onSidebarTouchStart(e, c, 'character')"
           >
-            <img v-if="c.url" :src="c.url" class="w-12 h-12 object-contain" :alt="c.name" />
+            <img v-if="c.url" :src="thumbUrl(c.url, TW_SIDEBAR)" loading="lazy" decoding="async" class="w-12 h-12 object-contain" :alt="c.name" />
             <div class="text-[10px] mt-1 text-ink-soft truncate w-full">{{ c.name }}</div>
           </div>
         </div>
@@ -709,7 +786,7 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
             @dragstart="(e) => onSidebarDragStart(e, p, 'object')"
             @touchstart="(e) => onSidebarTouchStart(e, p, 'object')"
           >
-            <img v-if="p.url" :src="p.url" class="w-12 h-12 object-contain" :alt="p.name" />
+            <img v-if="p.url" :src="thumbUrl(p.url, TW_SIDEBAR)" loading="lazy" decoding="async" class="w-12 h-12 object-contain" :alt="p.name" />
             <div class="text-[10px] mt-1 text-ink truncate w-full">{{ p.name }}</div>
           </div>
           <button
@@ -739,7 +816,7 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
               @dragstart="(e) => onSidebarDragStart(e, { name: cp.name, url: cp.url } as any, 'object')"
               @touchstart="(e) => onSidebarTouchStart(e, { name: cp.name, url: cp.url } as any, 'object')"
             >
-              <img v-if="cp.url" :src="cp.url" class="w-10 h-10 object-contain" :alt="cp.name" />
+              <img v-if="cp.url" :src="thumbUrl(cp.url, TW_SIDEBAR)" loading="lazy" decoding="async" class="w-10 h-10 object-contain" :alt="cp.name" />
               <div class="text-[10px] mt-0.5 text-ink truncate w-full">{{ cp.name }}</div>
             </div>
             <div
@@ -766,9 +843,12 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
           </div>
         </div>
 
-        <!-- 创建新道具 -->
-        <div class="border-t border-paper-edge pt-2 space-y-2">
-          <div class="text-xs font-bold text-ink-soft">✨ 造个新道具</div>
+        <!-- 创建新道具 —— 首次无道具时高亮提示 -->
+        <div class="border-t border-paper-edge pt-2 space-y-2" :class="{ 'create-section-glow': showCreateHighlight }">
+          <div class="text-xs font-bold text-ink-soft flex items-center gap-2">
+            <span>✨ 造个新道具</span>
+            <span v-if="showCreateHighlight" class="text-[10px] text-accent animate-pulse font-normal">试试看！</span>
+          </div>
           <div class="flex gap-2">
             <input
               v-model="newPropName"
@@ -880,7 +960,6 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
 }
 .interact-aside::-webkit-scrollbar-thumb:hover { background: rgba(213, 147, 57, 0.85); }
 
-/* 侧边栏道具 hover 动效 */
 .sidebar-item {
   will-change: transform;
   animation: item-settle 0.3s ease-out;
@@ -890,12 +969,22 @@ const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.valu
   to { transform: translateY(0); opacity: 1; }
 }
 
-/* "拖到舞台" 徽章呼吸动效 */
 .drag-badge-pulse {
   animation: badge-breathe 2s ease-in-out infinite;
 }
 @keyframes badge-breathe {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
+}
+
+/* "造个新道具" 首次引导高亮 */
+.create-section-glow {
+  animation: create-glow 2.5s ease-in-out infinite;
+  border-radius: 12px;
+  box-shadow: 0 0 0 2px rgba(255, 122, 61, 0.18);
+}
+@keyframes create-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(255, 122, 61, 0.12); }
+  50% { box-shadow: 0 0 0 3px rgba(255, 122, 61, 0.32), 0 0 18px rgba(255, 169, 82, 0.18); }
 }
 </style>
