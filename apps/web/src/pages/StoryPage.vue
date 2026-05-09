@@ -110,6 +110,11 @@ async function loadCursor(idx: number) {
     }
 
     // 下一幕预取（scene + 图片）
+    // 叙事/动态场景自动播放第一句旁白
+    if ((node.type === "narrative" || node.type === "dynamic") && activeStoryboard.value.length > 0) {
+      setTimeout(() => { if (lineCursor.value === 0) advanceLine(); }, 500);
+    }
+
     prefetchNode(idx + 1);
     if (idx === store.flow.length - 1) {
       sess.completeSession(currentSessionId(), buildCurrentPlayState());
@@ -744,7 +749,9 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
                     🔄 复述
                   </BaseButton>
                   <BaseButton size="sm" pill @click="advanceNode">
-                    {{ isLast ? "📊 查看报告" : "继续 ⏭" }}
+                    <template v-if="isLast">📊 查看报告</template>
+                    <template v-else-if="node?.type === 'interactive'">✨ 看看故事怎么发展</template>
+                    <template v-else>继续 ⏭</template>
                   </BaseButton>
                 </div>
               </div>

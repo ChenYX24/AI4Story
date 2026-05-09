@@ -53,6 +53,7 @@ const pendingProps = ref<PendingProp[]>([]);
 
 const selectedId = ref<string | null>(null);
 const newPropName = ref("");
+const latestDropId = ref<string | null>(null);
 const sessionId = computed(() => props.sessionId);
 
 // ---- 渐进式引导 ----
@@ -181,17 +182,35 @@ function onSidebarDragStart(e: DragEvent, item: SceneCharacter | SceneProp, kind
 function onStageDrop(e: DragEvent) {
   e.preventDefault();
   if (!dragSource || !stageRef.value) return;
+
+  // 角色不可重复拖放
+  if (dragSource.kind === "character" && placed.value.some((p) => p.name === dragSource!.name && p.kind === "character")) {
+    toast.push(`「${dragSource.name}」已经在舞台上了`, "info");
+    dragSource = null;
+    return;
+  }
+  // 道具同名的也不重复（同一场景同一道具只有一个）
+  if (placed.value.some((p) => p.name === dragSource!.name)) {
+    toast.push(`「${dragSource.name}」已经在舞台上了`, "info");
+    dragSource = null;
+    return;
+  }
+
   const rect = stageRef.value.getBoundingClientRect();
   const x = (e.clientX - rect.left) / rect.width;
   const y = (e.clientY - rect.top) / rect.height;
-  placed.value.push({
+  const newItem: PlacedItem = {
     id: `${dragSource.kind}-${dragSource.name}-${Date.now()}`,
     name: dragSource.name,
     kind: dragSource.kind,
     url: dragSource.url,
     x, y,
     scale: 1, rotation: 0,
-  });
+  };
+  placed.value.push(newItem);
+  // 短暂高亮新加的道具
+  latestDropId.value = newItem.id;
+  setTimeout(() => { if (latestDropId.value === newItem.id) latestDropId.value = null; }, 1200);
   onItemInteraction("drag");
   dragSource = null;
 }
@@ -234,16 +253,30 @@ function _onTouchEnd(e: TouchEvent) {
   const inside = t.clientX >= rect.left && t.clientX <= rect.right
     && t.clientY >= rect.top && t.clientY <= rect.bottom;
   if (inside) {
+    // 角色/道具不可重复拖放
+    if (dragSource.kind === "character" && placed.value.some((p) => p.name === dragSource!.name && p.kind === "character")) {
+      toast.push(`「${dragSource.name}」已经在舞台上了`, "info");
+      dragSource = null;
+      return;
+    }
+    if (placed.value.some((p) => p.name === dragSource!.name)) {
+      toast.push(`「${dragSource.name}」已经在舞台上了`, "info");
+      dragSource = null;
+      return;
+    }
     const x = (t.clientX - rect.left) / rect.width;
     const y = (t.clientY - rect.top) / rect.height;
-    placed.value.push({
+    const newItem: PlacedItem = {
       id: `${dragSource.kind}-${dragSource.name}-${Date.now()}`,
       name: dragSource.name,
       kind: dragSource.kind,
       url: dragSource.url,
       x, y,
       scale: 1, rotation: 0,
-    });
+    };
+    placed.value.push(newItem);
+    latestDropId.value = newItem.id;
+    setTimeout(() => { if (latestDropId.value === newItem.id) latestDropId.value = null; }, 1200);
     onItemInteraction("drag");
   }
   dragSource = null;
@@ -690,7 +723,7 @@ const showCreateHighlight = computed(() => hasDragged.value && customProps.value
           v-for="item in placed"
           :key="item.id"
           class="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing transition-shadow"
-          :class="[selectedId === item.id && 'z-10']"
+          :class="[selectedId === item.id && 'z-10', latestDropId === item.id && 'animate-item-drop']"
           :style="{
             left: `${item.x * 100}%`,
             top: `${item.y * 100}%`,
@@ -986,5 +1019,17 @@ const showCreateHighlight = computed(() => hasDragged.value && customProps.value
 @keyframes create-glow {
   0%, 100% { box-shadow: 0 0 0 2px rgba(255, 122, 61, 0.12); }
   50% { box-shadow: 0 0 0 3px rgba(255, 122, 61, 0.32), 0 0 18px rgba(255, 169, 82, 0.18); }
+}
+
+/* 道具/角色放入舞台的弹跳动画 */
+.animate-item-drop {
+  animation: item-drop-bounce 0.5s ease-out;
+}
+@keyframes item-drop-bounce {
+  0%   { transform: translate(-50%, -50%) scale(0.3); opacity: 0.3; }
+  50%  { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+  70%  { transform: translate(-50%, -50%) scale(0.9); }
+  85%  { transform: translate(-50%, -50%) scale(1.03); }
+  100% { transform: translate(-50%, -50%) scale(1); }
 }
 </style>
