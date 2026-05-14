@@ -90,8 +90,13 @@ export async function apiDelete<T = unknown>(path: string): Promise<T> {
   return handle(r) as Promise<T>;
 }
 
-/** Generate a proxied thumbnail URL for an internal image path. */
+/**
+ * Generate a proxied thumbnail URL for internal image paths.
+ * External URLs (OSS/CDN) are returned as-is — they already serve optimized images.
+ */
 export function thumbUrl(originalUrl: string | null | undefined, width = 400): string {
   if (!originalUrl) return "";
+  // External URLs (OSS / CDN / S3) — pass through directly
+  if (originalUrl.startsWith("http://") || originalUrl.startsWith("https://")) return originalUrl;
   return `${BASE}/api/image/proxy?path=${encodeURIComponent(originalUrl)}&width=${width}`;
 }
