@@ -1,6 +1,6 @@
 import logging
 
-from ..config import DASHSCOPE_API_KEY
+from ..config import LLM_API_KEY
 from ..scene_loader import _load_scene_json, load_story
 from .qwen_service import QwenError, call_chat
 
@@ -35,8 +35,8 @@ def clear_chat_history(session_id: str) -> None:
 def reply_to(scene_idx: int, user_text: str, story_id: str | None = None, session_id: str = "") -> str:
     if not user_text.strip():
         return "我没听清呢，再说一遍好吗？"
-    if not DASHSCOPE_API_KEY:
-        raise ChatServiceError("DASHSCOPE_API_KEY 未配置；无法调用讲故事大模型。")
+    if not LLM_API_KEY:
+        raise ChatServiceError("LLM_API_KEY 未配置；无法调用讲故事大模型。")
 
     try:
         story = load_story(story_id)

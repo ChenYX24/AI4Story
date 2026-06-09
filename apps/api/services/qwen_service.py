@@ -4,13 +4,23 @@ from typing import Any
 
 import requests
 
-from ..config import DASHSCOPE_API_KEY, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, QWEN_ASR_MODEL
+from ..config import (
+    DASHSCOPE_API_KEY,
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_MODEL,
+    QWEN_ASR_MODEL,
+)
 
-# Chat / 文本生成默认走 LLM_BASE_URL（默认 mikaovo.ai） + LLM_MODEL（默认 gpt-5-4）。
+# Chat / 文本生成默认走 LLM_BASE_URL（默认 mikaovo.ai） + LLM_MODEL（默认 grok-4.3）。
 # 同时保留 DashScope 配置：call_asr_audio 仍然必须命中 DashScope 自己的 ASR 接口。
 BASE_URL = LLM_BASE_URL
 DEFAULT_MODEL = LLM_MODEL
 ASR_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# Module-level session: reuse connections (keep-alive + TLS reuse) across the
+# repeated chat calls to the same gateway, saving handshake overhead.
+_session = requests.Session()
 
 
 class QwenError(RuntimeError):
@@ -28,6 +38,19 @@ def _extract_json(text: str) -> dict[str, Any]:
     if not m:
         raise QwenError(f"no JSON in response: {text[:400]}")
     return json.loads(m.group(0))
+
+
+def _post_chat(payload: dict[str, Any], timeout: int) -> requests.Response:
+    headers = {
+        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    return _session.post(
+        f"{BASE_URL}/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=timeout,
+    )
 
 
 def call_json(
@@ -52,19 +75,10 @@ def call_json(
         "response_format": {"type": "json_object"},
         "stream": False,
     }
-    headers = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
-        "Content-Type": "application/json",
-    }
     last_err: Exception | None = None
     for _ in range(retries + 1):
         try:
-            resp = requests.post(
-                f"{BASE_URL}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=timeout,
-            )
+            resp = _post_chat(payload, timeout)
             if resp.status_code >= 400:
                 raise QwenError(f"HTTP {resp.status_code}: {resp.text[:400]}")
             data = resp.json()
@@ -95,16 +109,7 @@ def call_text(
         "temperature": temperature,
         "stream": False,
     }
-    headers = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    resp = requests.post(
-        f"{BASE_URL}/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=timeout,
-    )
+    resp = _post_chat(payload, timeout)
     if resp.status_code >= 400:
         raise QwenError(f"HTTP {resp.status_code}: {resp.text[:400]}")
     data = resp.json()
@@ -127,16 +132,7 @@ def call_chat(
         "temperature": temperature,
         "stream": False,
     }
-    headers = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    resp = requests.post(
-        f"{BASE_URL}/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=timeout,
-    )
+    resp = _post_chat(payload, timeout)
     if resp.status_code >= 400:
         raise QwenError(f"HTTP {resp.status_code}: {resp.text[:400]}")
     data = resp.json()
@@ -177,7 +173,7 @@ def call_asr_audio(
         "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
         "Content-Type": "application/json",
     }
-    resp = requests.post(
+    resp = _session.post(
         f"{ASR_BASE_URL}/chat/completions",
         headers=headers,
         json=payload,

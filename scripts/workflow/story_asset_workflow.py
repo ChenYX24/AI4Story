@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from PIL import Image
 from tqdm import tqdm
 
+from scripts.http_retry import post_with_retry
 from scripts.image_generation.seedream_client import DEFAULT_MODEL as DEFAULT_SEEDREAM_MODEL
 from scripts.image_generation.seedream_client import build_grid_prompt
 from scripts.image_generation.seedream_client import generate_image_to_path
@@ -38,8 +39,9 @@ from scripts.story.story_scene_splitter import (
 )
 
 # Chat / 文本生成默认与 apps/api/config.LLM_MODEL 同源（环境变量 LLM_MODEL 可覆盖）。
-# 名字保留 "QWEN_MODEL" 是历史命名，实际是任意 OpenAI-compatible 模型 id（默认 gpt-5-4）。
-DEFAULT_QWEN_MODEL = os.getenv("LLM_MODEL", "gpt-5-4")
+# 名字保留 "QWEN_MODEL" 是历史命名，实际是任意 OpenAI-compatible 模型 id。
+DEFAULT_QWEN_MODEL = os.getenv("LLM_MODEL", "grok-4.3")
+DEFAULT_SEEDREAM_BASE_URL = os.getenv("SEEDREAM_BASE_URL") or os.getenv("LLM_BASE_URL") or "https://api.mikaovo.ai/v1"
 # 摆放识别需要 vision-capable 模型；如果默认 chat 模型不支持图，部署侧给 PLACEMENT_VISION_MODEL 单独配。
 PLACEMENT_VISION_MODEL = os.getenv("PLACEMENT_VISION_MODEL", DEFAULT_QWEN_MODEL)
 MIN_SEEDREAM_PIXELS = 3686400
@@ -79,7 +81,7 @@ def request_vision_json(
         "temperature": 0.3,
         "stream": False,
     }
-    resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    resp = post_with_retry(url, retries=2, headers=headers, json=payload, timeout=timeout)
     if resp.status_code >= 400:
         raise RuntimeError(f"Vision API HTTP {resp.status_code}: {resp.text[:400]}")
     raw = resp.json()["choices"][0]["message"]["content"]
@@ -313,6 +315,7 @@ def build_partial_asset_grid_prompt(
 def generate_object_grid_assets(
     api_key: str,
     provider: str,
+    seedream_base_url: str | None,
     model: str,
     size: str,
     entries: list[dict[str, Any]],
@@ -342,6 +345,7 @@ def generate_object_grid_assets(
             output_path=raw_grid_path,
             model=model,
             provider=provider,
+            base_url=seedream_base_url,
         )
 
         with Image.open(raw_grid_path) as raw_grid_image:
@@ -476,6 +480,7 @@ def prepare_scene_object_grid_entries(scene: dict[str, Any]) -> list[dict[str, A
 def generate_isolated_asset(
     api_key: str,
     provider: str,
+    seedream_base_url: str | None,
     model: str,
     size: str,
     prompt: str,
@@ -492,6 +497,7 @@ def generate_isolated_asset(
         output_path=raw_output_path,
         model=model,
         provider=provider,
+        base_url=seedream_base_url,
         reference_images=[str(path) for path in reference_images or []],
     )
     return postprocess_single_asset(
@@ -575,6 +581,7 @@ def build_global_assets(
     output_root: Path,
     api_key: str,
     provider: str,
+    seedream_base_url: str | None,
     seedream_model: str,
     asset_size: str,
     overall_progress: tqdm | None = None,
@@ -604,6 +611,7 @@ def build_global_assets(
                 generate_object_grid_assets,
                 api_key=api_key,
                 provider=provider,
+                seedream_base_url=seedream_base_url,
                 model=seedream_model,
                 size=asset_size,
                 entries=prepare_global_character_grid_entries(characters),
@@ -620,6 +628,7 @@ def build_global_assets(
                 generate_object_grid_assets,
                 api_key=api_key,
                 provider=provider,
+                seedream_base_url=seedream_base_url,
                 model=seedream_model,
                 size=asset_size,
                 entries=objects,
@@ -698,7 +707,7 @@ def request_text_completion(
         "stream": False,
         "enable_thinking": False,
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    response = post_with_retry(url, retries=2, headers=headers, json=payload, timeout=timeout)
     if response.status_code >= 400:
         raise RuntimeError(
             f"Storyboard request failed with HTTP {response.status_code} at {url}\n"
@@ -977,6 +986,7 @@ def process_scene(
     dashscope_api_key: str | None,
     api_key: str,
     provider: str,
+    seedream_base_url: str | None,
     seedream_model: str,
     asset_size: str,
     background_size: str,
@@ -996,14 +1006,22 @@ def process_scene(
         update_progress(overall_progress, f"scene {scene_index}: scene.json")
 
         comic_dir = scene_root / "comic"
+        comic_raw = comic_dir / "panel_raw.png"
+        comic_png = comic_dir / "panel.png"
+        storyboard_txt = comic_dir / "storyboard.txt"
+        # Resume support: a finished narrative scene already has its panel + manifest.
+        # Skip the storyboard LLM call and the comic image generation so a retry only
+        # fills the scenes that never completed (interactive scenes already skip via
+        # per-asset .exists() guards below).
+        if comic_png.exists() and (scene_root / "manifest.json").exists():
+            update_progress(overall_progress, f"scene {scene_index}: narrative comic (cached)")
+            return
+
         reference_paths = build_narrative_reference_paths(scene, global_manifest)
         ref_board = None
         if reference_paths:
             ref_board = create_reference_board(reference_paths, comic_dir / "_narrative_refs.png")
 
-        comic_raw = comic_dir / "panel_raw.png"
-        comic_png = comic_dir / "panel.png"
-        storyboard_txt = comic_dir / "storyboard.txt"
         if not dashscope_api_key:
             raise ValueError("Narrative comic generation requires DashScope API key for storyboard construction.")
         storyboard_text = request_text_completion(
@@ -1021,6 +1039,7 @@ def process_scene(
             output_path=comic_raw,
             model=seedream_model,
             provider=provider,
+            base_url=seedream_base_url,
             reference_images=[str(ref_board)] if ref_board else None,
         )
         comic_raw.replace(comic_png)
@@ -1097,6 +1116,7 @@ def process_scene(
             output_path=background_raw,
             model=seedream_model,
             provider=provider,
+            base_url=seedream_base_url,
         )
         background_raw.replace(background_png)
         update_progress(overall_progress, f"scene {scene_index}: background")
@@ -1107,6 +1127,7 @@ def process_scene(
         result = generate_isolated_asset(
             api_key=api_key,
             provider=provider,
+            seedream_base_url=seedream_base_url,
             model=seedream_model,
             size=asset_size,
             prompt=build_scene_character_prompt(scene, character, related_objects),
@@ -1123,6 +1144,7 @@ def process_scene(
         return generate_object_grid_assets(
             api_key=api_key,
             provider=provider,
+            seedream_base_url=seedream_base_url,
             model=seedream_model,
             size=asset_size,
             entries=prepare_scene_object_grid_entries(scene),
@@ -1152,6 +1174,7 @@ def process_scene(
             output_path=comic_raw,
             model=seedream_model,
             provider=provider,
+            base_url=seedream_base_url,
             reference_images=[str(comic_ref_board)] if comic_ref_board else None,
         )
         comic_raw.replace(comic_png)
@@ -1301,6 +1324,7 @@ def run_workflow(args: argparse.Namespace) -> Path:
             output_root=output_root,
             api_key=args.ark_api_key,
             provider=args.provider,
+            seedream_base_url=getattr(args, "seedream_base_url", None),
             seedream_model=args.seedream_model,
             asset_size=args.asset_size,
             overall_progress=overall_progress,
@@ -1331,6 +1355,7 @@ def run_workflow(args: argparse.Namespace) -> Path:
                 dashscope_api_key=args.dashscope_api_key,
                 api_key=args.ark_api_key,
                 provider=args.provider,
+                seedream_base_url=getattr(args, "seedream_base_url", None),
                 seedream_model=args.seedream_model,
                 asset_size=args.asset_size,
                 background_size=args.background_size,
@@ -1367,12 +1392,13 @@ def main() -> None:
     parser.add_argument("--use-existing-global", action="store_true", help="Reuse the existing scenes/global assets and manifest.")
     parser.add_argument("--interactive-only", action="store_true", help="Only process interactive scenes during asset generation.")
     parser.add_argument("--narrative-only", action="store_true", help="Only process narrative scenes and skip all interactive-scene image generation.")
-    parser.add_argument("--dashscope-api-key", default=os.getenv("DASHSCOPE_API_KEY"), help="DashScope API key for scene splitting.")
-    parser.add_argument("--ark-api-key", default=os.getenv("ARK_API_KEY"), help="Volcengine ARK API key for image generation.")
+    parser.add_argument("--dashscope-api-key", default=os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY"), help="LLM API key for scene splitting/storyboard text.")
+    parser.add_argument("--ark-api-key", default=os.getenv("SEEDREAM_API_KEY") or os.getenv("ARK_API_KEY") or os.getenv("LLM_API_KEY"), help="Seedream API key for image generation.")
     parser.add_argument("--qwen-model", default=DEFAULT_QWEN_MODEL, help="Qwen model for scene splitting.")
     parser.add_argument("--seedream-model", default=DEFAULT_SEEDREAM_MODEL, help="Seedream model for image generation.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Bailian OpenAI-compatible base URL.")
-    parser.add_argument("--provider", default="ark", choices=["ark", "las"], help="Volcengine endpoint family.")
+    parser.add_argument("--seedream-base-url", default=DEFAULT_SEEDREAM_BASE_URL, help="OpenAI-compatible image-generation base URL.")
+    parser.add_argument("--provider", default=os.getenv("SEEDREAM_PROVIDER", "openai"), choices=["openai", "mikaovo", "custom", "ark", "las"], help="Seedream endpoint family.")
     parser.add_argument("--temperature", type=float, default=0.2, help="Scene-splitting sampling temperature.")
     parser.add_argument("--timeout", type=int, default=300, help="HTTP timeout in seconds.")
     parser.add_argument("--asset-size", default="2048x2048", help="Single foreground asset image size.")
@@ -1390,11 +1416,11 @@ def main() -> None:
         raise ValueError("--max-workers and --asset-workers must be positive integers.")
 
     if not args.use_existing_scenes and not args.dashscope_api_key:
-        raise ValueError("Missing DashScope API key. Set DASHSCOPE_API_KEY or pass --dashscope-api-key.")
+        raise ValueError("Missing LLM API key. Set LLM_API_KEY or pass --dashscope-api-key.")
     if not args.interactive_only and not args.dashscope_api_key:
-        raise ValueError("Narrative comic generation requires DashScope API key. Set DASHSCOPE_API_KEY or pass --dashscope-api-key.")
+        raise ValueError("Narrative comic generation requires LLM API key. Set LLM_API_KEY or pass --dashscope-api-key.")
     if not args.ark_api_key:
-        raise ValueError("Missing Volcengine API key. Set ARK_API_KEY or pass --ark-api-key.")
+        raise ValueError("Missing Seedream API key. Set SEEDREAM_API_KEY or pass --ark-api-key.")
 
     output_root = run_workflow(args)
     print(f"Workflow completed. Outputs saved to: {output_root}")

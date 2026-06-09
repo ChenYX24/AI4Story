@@ -4,7 +4,9 @@
 set -euo pipefail
 
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8000}"
+PORT="${PORT:-8010}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+VITE_API_PROXY_TARGET="${VITE_API_PROXY_TARGET:-http://127.0.0.1:${PORT}}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 KEY_FILE="${ROOT}/start_webdemo.keys.sh"
 LOG_DIR="${ROOT}/outputs/logs"
@@ -14,12 +16,14 @@ mkdir -p "${LOG_DIR}"
 if [[ ! -f "$KEY_FILE" ]]; then
   cat >"$KEY_FILE" <<'EOF'
 #!/usr/bin/env bash
-export ARK_API_KEY="PASTE_SEEDREAM_API_KEY_HERE"
-# 主语言模型（默认 mikaovo.ai 的 gpt-5-4），把 mikaovo 平台的 API key 粘进来。
+export SEEDREAM_API_KEY="PASTE_SEEDREAM_API_KEY_HERE"
+export SEEDREAM_BASE_URL="https://api.mikaovo.ai/v1"
+export SEEDREAM_PROVIDER="openai"
+export SEEDREAM_MODEL="doubao-seedream-5-0-lite-260128"
+# 主语言模型（默认 mikaovo.ai 的 grok-4.3），把 mikaovo 平台的 API key 粘进来。
 export LLM_API_KEY="PASTE_LLM_API_KEY_HERE"
-# 可选覆盖：默认 https://api.mikaovo.ai/v1 / gpt-5-4，没事别动。
-# export LLM_BASE_URL="https://api.mikaovo.ai/v1"
-# export LLM_MODEL="gpt-5-4"
+export LLM_BASE_URL="https://api.mikaovo.ai/v1"
+export LLM_MODEL="grok-4.3"
 # ASR（语音识别）仍走 DashScope；不用语音可留空。
 export DASHSCOPE_API_KEY="PASTE_DASHSCOPE_API_KEY_HERE"
 export XIAOMI_TTS_API_KEY="PASTE_XIAOMI_TTS_API_KEY_HERE"
@@ -28,8 +32,17 @@ fi
 # shellcheck source=/dev/null
 source "$KEY_FILE"
 
-if [[ "${ARK_API_KEY}" == "PASTE_SEEDREAM_API_KEY_HERE" ]]; then
-  echo "[ERROR] ARK_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
+if [[ -z "${SEEDREAM_API_KEY:-}" && -n "${ARK_API_KEY:-}" ]]; then
+  export SEEDREAM_API_KEY="${ARK_API_KEY}"
+fi
+export SEEDREAM_BASE_URL="${SEEDREAM_BASE_URL:-${LLM_BASE_URL:-https://api.mikaovo.ai/v1}}"
+export SEEDREAM_PROVIDER="${SEEDREAM_PROVIDER:-openai}"
+export SEEDREAM_MODEL="${SEEDREAM_MODEL:-doubao-seedream-5-0-lite-260128}"
+export LLM_BASE_URL="${LLM_BASE_URL:-https://api.mikaovo.ai/v1}"
+export LLM_MODEL="${LLM_MODEL:-grok-4.3}"
+
+if [[ "${SEEDREAM_API_KEY:-}" == "PASTE_SEEDREAM_API_KEY_HERE" || -z "${SEEDREAM_API_KEY:-}" ]]; then
+  echo "[ERROR] SEEDREAM_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
 fi
 if [[ "${LLM_API_KEY:-}" == "PASTE_LLM_API_KEY_HERE" || -z "${LLM_API_KEY:-}" ]]; then
   echo "[ERROR] LLM_API_KEY not filled in yet. Edit: $KEY_FILE"; exit 1
@@ -65,7 +78,7 @@ fi
 
 # ---- 检查端口 ----
 if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "[ERROR] Port ${PORT} is already in use. PORT=8001 ./start_webdemo.sh"; exit 1
+  echo "[ERROR] Port ${PORT} is already in use. PORT=8011 ./start_webdemo.sh"; exit 1
 fi
 
 # ---- 前端依赖 ----
@@ -84,7 +97,9 @@ fi
 # ---- 启动后端 ----
 echo "[START] Backend: uvicorn on http://${HOST}:${PORT}"
 cd "${ROOT}"
+export SEEDREAM_API_KEY SEEDREAM_BASE_URL SEEDREAM_PROVIDER SEEDREAM_MODEL
 export ARK_API_KEY DASHSCOPE_API_KEY XIAOMI_TTS_API_KEY LLM_API_KEY LLM_BASE_URL LLM_MODEL
+export VITE_API_PROXY_TARGET
 "${PYTHON_EXE}" -m uvicorn apps.api.main:create_app \
   --host "${HOST}" --port "${PORT}" --factory --reload \
   >>"${LOG_DIR}/backend.out.log" 2>>"${LOG_DIR}/backend.err.log" &
@@ -93,9 +108,9 @@ BACKEND_PID=$!
 # ---- 启动前端 ----
 echo "[START] Frontend: Vite dev server"
 if command -v pnpm >/dev/null 2>&1; then
-  (cd "${WEB_DIR}" && pnpm dev) &
+  (cd "${WEB_DIR}" && pnpm dev --host 127.0.0.1 --port "${FRONTEND_PORT}") &
 else
-  (cd "${WEB_DIR}" && npm run dev) &
+  (cd "${WEB_DIR}" && npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}") &
 fi
 FRONTEND_PID=$!
 
@@ -107,9 +122,9 @@ URL="http://127.0.0.1:${PORT}"
 deadline=$((SECONDS + 30))
 while (( SECONDS < deadline )); do
   if curl -sf --max-time 2 "${URL}/healthz" >/dev/null 2>&1; then
-    echo "[READY] Backend ready. Frontend at http://localhost:5173"
-    if command -v open >/dev/null 2>&1; then open "http://localhost:5173"
-    elif command -v xdg-open >/dev/null 2>&1; then xdg-open "http://localhost:5173"
+    echo "[READY] Backend ready. Frontend at http://localhost:${FRONTEND_PORT}"
+    if command -v open >/dev/null 2>&1; then open "http://localhost:${FRONTEND_PORT}"
+    elif command -v xdg-open >/dev/null 2>&1; then xdg-open "http://localhost:${FRONTEND_PORT}"
     fi
     break
   fi

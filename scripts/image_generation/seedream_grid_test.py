@@ -51,18 +51,19 @@ def main() -> None:
     parser.add_argument("--output", default=str(PROJECT_ROOT / "outputs" / "images" / "grid.png"), help="Path to save the generated image.")
     parser.add_argument("--size", default="2048x2048", help="Output image size, e.g. 1024x1024 or 2048x2048.")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Seedream model ID, not display name.")
-    parser.add_argument("--api-key", default=None, help="ARK API key. Defaults to ARK_API_KEY env var.")
+    parser.add_argument("--api-key", default=None, help="Seedream API key. Defaults to SEEDREAM_API_KEY, ARK_API_KEY, then LLM_API_KEY.")
+    parser.add_argument("--base-url", default=os.getenv("SEEDREAM_BASE_URL") or os.getenv("LLM_BASE_URL") or "https://api.mikaovo.ai/v1", help="OpenAI-compatible image-generation base URL.")
     parser.add_argument(
         "--provider",
-        default="ark",
-        choices=["ark", "las"],
-        help="Which Volcengine endpoint family to use. 'ark' for Ark API, 'las' for LAS operator API.",
+        default=os.getenv("SEEDREAM_PROVIDER", "openai"),
+        choices=["openai", "mikaovo", "custom", "ark", "las"],
+        help="Seedream endpoint family.",
     )
     args = parser.parse_args()
 
-    api_key = args.api_key or os.getenv("ARK_API_KEY")
+    api_key = args.api_key or os.getenv("SEEDREAM_API_KEY") or os.getenv("ARK_API_KEY") or os.getenv("LLM_API_KEY")
     if not api_key:
-        raise ValueError("Missing API key. Set ARK_API_KEY or pass --api-key.")
+        raise ValueError("Missing API key. Set SEEDREAM_API_KEY or pass --api-key.")
 
     input_path = Path(args.input).resolve()
     output_path = Path(args.output).resolve()
@@ -76,6 +77,7 @@ def main() -> None:
         output_path=output_path,
         model=args.model,
         provider=args.provider,
+        base_url=args.base_url,
     )
 
     print("Prompt used:")

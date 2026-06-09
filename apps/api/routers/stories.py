@@ -7,7 +7,7 @@ from ..db import user_by_token
 from .. import db
 from ..models import CustomStoryCreateRequest, StoriesResponse, StoryCard
 from ..scene_loader import load_story
-from ..services.custom_story_service import submit_custom_story
+from ..services.custom_story_service import retry_custom_story, submit_custom_story
 from ..story_registry import delete_custom_story_record, list_custom_story_records, story_exists, story_root, update_custom_story_record
 
 
@@ -81,6 +81,24 @@ def get_custom_story(story_id: str, authorization: Optional[str] = Header(defaul
     if owner and (not user or user.get("id") != owner):
         raise HTTPException(status_code=404, detail="故事不存在。")
     return _custom_record_to_card(record)
+
+
+@router.post("/stories/custom/{story_id}/retry", response_model=StoryCard)
+def retry_custom_story_endpoint(story_id: str, authorization: Optional[str] = Header(default=None)) -> StoryCard:
+    """Resume a failed custom-story build, continuing from already-generated assets."""
+    user = _require_user(authorization)
+    record = next((r for r in list_custom_story_records() if r.get("id") == story_id), None)
+    if not record:
+        raise HTTPException(status_code=404, detail="故事不存在。")
+    if record.get("owner_user_id") and record.get("owner_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="只能重试自己的故事。")
+    try:
+        updated = retry_custom_story(story_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=424, detail=str(exc))
+    return _custom_record_to_card(updated)
 
 
 @router.delete("/stories/custom/{story_id}", status_code=204)

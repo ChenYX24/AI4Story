@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from ..config import ARK_API_KEY, DASHSCOPE_API_KEY
+from ..config import LLM_API_KEY, SEEDREAM_API_KEY
 from ..models import (
     BatchCreatePropsRequest,
     BatchCreatePropsResponse,
@@ -23,8 +23,8 @@ def create_prop(req: CreatePropRequest) -> CreatePropResponse:
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="物品名不能为空")
     # skip_ai 时不强制要 ARK key；常规 AI 生成时才要
-    if not req.skip_ai and not ARK_API_KEY:
-        raise HTTPException(status_code=424, detail="服务器未配置 ARK_API_KEY")
+    if not req.skip_ai and not SEEDREAM_API_KEY:
+        raise HTTPException(status_code=424, detail="服务器未配置 SEEDREAM_API_KEY")
     try:
         url, _ = create_custom_prop(
             req.session_id,
@@ -48,8 +48,8 @@ def create_props_batch(req: BatchCreatePropsRequest) -> BatchCreatePropsResponse
         raise HTTPException(status_code=400, detail="请先填入至少 1 个物品")
     if len(req.items) > 9:
         raise HTTPException(status_code=400, detail="一次最多生成 9 个")
-    if not ARK_API_KEY:
-        raise HTTPException(status_code=424, detail="服务器未配置 ARK_API_KEY")
+    if not SEEDREAM_API_KEY:
+        raise HTTPException(status_code=424, detail="服务器未配置 SEEDREAM_API_KEY")
     try:
         results = create_custom_props_batch(
             req.session_id,
@@ -66,10 +66,10 @@ def create_props_batch(req: BatchCreatePropsRequest) -> BatchCreatePropsResponse
 def create_props_smart(req: SmartCreatePropsRequest) -> SmartCreatePropsResponse:
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="请先说明要创造什么")
-    if not ARK_API_KEY:
-        raise HTTPException(status_code=424, detail="服务器未配置 ARK_API_KEY")
-    if not DASHSCOPE_API_KEY:
-        raise HTTPException(status_code=424, detail="服务器未配置 DASHSCOPE_API_KEY（解析需要）")
+    if not SEEDREAM_API_KEY:
+        raise HTTPException(status_code=424, detail="服务器未配置 SEEDREAM_API_KEY")
+    if not LLM_API_KEY:
+        raise HTTPException(status_code=424, detail="服务器未配置 LLM_API_KEY（解析需要）")
     try:
         parsed, results = smart_create_props(
             session_id=req.session_id,

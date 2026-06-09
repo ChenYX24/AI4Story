@@ -25,6 +25,8 @@ export const fetchCustomStory = (id: string) =>
   apiGet<import("./types").StoryCard>(`/api/stories/custom/${encodeURIComponent(id)}`);
 export const deleteCustomStory = (id: string) =>
   apiDelete<{ ok: boolean }>(`/api/stories/custom/${encodeURIComponent(id)}`);
+export const retryCustomStory = (id: string) =>
+  apiPost<import("./types").StoryCard>(`/api/stories/custom/${encodeURIComponent(id)}/retry`, {});
 export const patchCustomStory = (id: string, body: { title?: string; public?: boolean }) =>
   apiPatch<import("./types").StoryCard>(`/api/stories/custom/${encodeURIComponent(id)}`, body);
 

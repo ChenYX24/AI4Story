@@ -3,6 +3,8 @@ import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8010";
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
@@ -14,11 +16,11 @@ export default defineConfig({
     host: "127.0.0.1",
     // 开发时把后端 API / 静态资源走代理
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/outputs": "http://127.0.0.1:8000",
-      "/assets/scenes": "http://127.0.0.1:8000",
-      "/view": "http://127.0.0.1:8000",
-      "/healthz": "http://127.0.0.1:8000",
+      "/api": apiProxyTarget,
+      "/outputs": apiProxyTarget,
+      "/assets/scenes": apiProxyTarget,
+      "/view": apiProxyTarget,
+      "/healthz": apiProxyTarget,
     },
   },
   build: {

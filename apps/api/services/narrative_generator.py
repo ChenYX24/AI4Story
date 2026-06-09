@@ -4,18 +4,21 @@ import logging
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from fastapi import BackgroundTasks
 from PIL import Image
 
 log = logging.getLogger(__name__)
 
-from ..asset_resolver import path_for, resolve_interactive_asset
+from ..asset_resolver import path_for, resolve_asset_url_to_path, resolve_interactive_asset
 from ..config import (
-    ARK_API_KEY,
     OUTPUTS_ROOT,
     PROJECT_ROOT,
+    SEEDREAM_API_KEY,
+    SEEDREAM_BASE_URL,
     SEEDREAM_MODEL,
     SEEDREAM_PROVIDER,
     SEEDREAM_SIZE,
@@ -23,7 +26,7 @@ from ..config import (
 )
 from ..models import CustomProp, InteractRequest, Operation, Transform
 from ..scene_loader import _load_scene_json, load_story
-from ..storage import get_storage
+from ..storage import LocalStorage, get_storage
 from .qwen_service import QwenError, call_json
 
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -39,7 +42,10 @@ THUMB_SIZE = 256
 def _format_ops(ops: list[Operation]) -> list[str]:
     lines: list[str] = []
     for i, op in enumerate(ops, 1):
-        if op.subject and op.target:
+        if op.participants:
+            names = "、".join(p.name for p in op.participants)
+            lines.append(f"{i}. 涉及「{names}」：{op.action}")
+        elif op.subject and op.target:
             lines.append(f"{i}. 让「{op.subject}」对「{op.target}」：{op.action}")
         elif op.subject and not op.target:
             lines.append(f"{i}. 让「{op.subject}」：{op.action}")
@@ -168,11 +174,15 @@ def _collect_reference_paths(
             custom_prop_by_name[pl.name].url if pl.name in custom_prop_by_name else None
         )
         if custom_url:
-            rel = custom_url.lstrip("/")
-            candidate = (PROJECT_ROOT / rel).resolve()
-            if candidate.exists() and candidate not in seen:
+            candidate = resolve_asset_url_to_path(custom_url)
+            if candidate is not None and candidate not in seen:
                 paths.append(candidate)
                 seen.add(candidate)
+            elif candidate is None:
+                log.warning(
+                    "[interact] custom prop reference image not resolvable, skipped: name=%r url=%r",
+                    pl.name, custom_url,
+                )
             continue
         try:
             p = resolve_interactive_asset(
@@ -185,6 +195,19 @@ def _collect_reference_paths(
             seen.add(p)
 
     return paths
+
+
+def _build_ref_board(req: InteractRequest, scene_chars: list[str], out_dir: Path) -> Path | None:
+    """Collect reference images and composite them into one board.
+
+    Depends only on req.placements (not on the Qwen text output), so it can run on
+    a worker thread in parallel with step 1 to hide its wall-clock cost.
+    """
+    ref_paths = _collect_reference_paths(req, scene_chars)
+    log.info("[interact] reference board: %d source image(s)", len(ref_paths))
+    if not ref_paths:
+        return None
+    return create_reference_board(ref_paths, out_dir / "_refboard.png", cell_size=512)
 
 
 def _storyboard_from_panels(panels: list[dict[str, Any]]) -> str:
@@ -247,7 +270,9 @@ def _write_thumb(src: Path, dst: Path) -> None:
         im.save(dst, format="JPEG", quality=85)
 
 
-def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
+def generate_dynamic_node(
+    req: InteractRequest, background: BackgroundTasks | None = None
+) -> dict[str, Any]:
     t0 = time.time()
     scene = _load_scene_json(req.scene_idx, req.story_id)
     story = load_story(req.story_id)
@@ -273,8 +298,15 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
         (s for s in all_scenes if s.get("scene_index") == req.scene_idx + 1), None
     )
 
-    # 1) Qwen: narrative content
-    log.info("[interact] step 1/3: calling Qwen for narrative text …")
+    # Pre-create the node dir so the reference board can be written in parallel.
+    node_id = f"dyn-{uuid.uuid4().hex[:10]}"
+    out_dir = OUTPUTS_ROOT / req.session_id / "dynamic" / node_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) Qwen narrative text  ‖  2) reference board.
+    # The reference board only depends on req.placements, so build it on a worker
+    # thread while the Qwen text call is in flight, then join before Seedream.
+    log.info("[interact] step 1/2 (parallel): Qwen narrative text ‖ reference board …")
     qwen_prompt = _build_qwen_prompt(
         scene=scene,
         story_summary=story_summary,
@@ -285,13 +317,16 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
         all_characters=all_characters,
         next_scene=next_scene,
     )
-    try:
-        result = call_json(qwen_prompt, temperature=0.6, timeout=120)
-    except QwenError as e:
-        log.error("[interact] Qwen failed after %.1fs: %s", time.time() - t0, e)
-        raise RuntimeError(f"故事文本生成失败：{e}") from e
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        ref_future = pool.submit(_build_ref_board, req, scene_char_names, out_dir)
+        try:
+            result = call_json(qwen_prompt, temperature=0.6, timeout=120)
+        except QwenError as e:
+            log.error("[interact] Qwen failed after %.1fs: %s", time.time() - t0, e)
+            raise RuntimeError(f"故事文本生成失败：{e}") from e
+        ref_board = ref_future.result()
     t1 = time.time()
-    log.info("[interact] step 1 done in %.1fs", t1 - t0)
+    log.info("[interact] step 1+2 done in %.1fs", t1 - t0)
 
     summary = str(result.get("summary", "")).strip() or "小朋友继续推进了故事。"
     narration = str(result.get("narration", "")).strip() or summary
@@ -305,18 +340,8 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
                 if d.get("content"):
                     dialogue.append(d)
 
-    # 2) Seedream: 4-panel comic
+    # 3) Seedream: 4-panel comic
     storyboard_text = _storyboard_from_panels(panels)
-    ref_paths = _collect_reference_paths(req, scene_char_names)
-    log.info("[interact] step 2/3: building reference board from %d images …", len(ref_paths))
-
-    node_id = f"dyn-{uuid.uuid4().hex[:10]}"
-    out_dir = OUTPUTS_ROOT / req.session_id / "dynamic" / node_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    ref_board: Path | None = None
-    if ref_paths:
-        ref_board = create_reference_board(ref_paths, out_dir / "_refboard.png", cell_size=512)
 
     pseudo_scene = {
         "event_summary": summary,
@@ -335,17 +360,18 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
     }
     seed_prompt = build_narrative_comic_prompt(pseudo_scene, storyboard_text)
     t2 = time.time()
-    log.info("[interact] step 2 done in %.1fs, prompt length=%d chars", t2 - t1, len(seed_prompt))
+    log.info("[interact] seed prompt built (%d chars)", len(seed_prompt))
 
     log.info("[interact] step 3/3: calling Seedream (model=%s, size=%s, ref_board=%s) …",
              SEEDREAM_MODEL, SEEDREAM_SIZE, "yes" if ref_board else "no")
     try:
         img_bytes = generate_image_bytes(
-            api_key=ARK_API_KEY,
+            api_key=SEEDREAM_API_KEY,
             prompt=seed_prompt,
             size=SEEDREAM_SIZE,
             model=SEEDREAM_MODEL,
             provider=SEEDREAM_PROVIDER,
+            base_url=SEEDREAM_BASE_URL,
             reference_images=[ref_board] if ref_board else None,
             timeout=SEEDREAM_TIMEOUT,
         )
@@ -359,44 +385,65 @@ def generate_dynamic_node(req: InteractRequest) -> dict[str, Any]:
     t3 = time.time()
     log.info("[interact] step 3 done in %.1fs, image size=%d bytes", t3 - t2, len(img_bytes))
 
-    # 始终先落本地 OUTPUTS_ROOT — node.json / refboard 还需要本地路径调试。
+    # Write the panel locally (needed for serving in local mode + thumb source).
     panel_path = out_dir / "panel.png"
     panel_path.write_bytes(img_bytes)
-    thumb_path = out_dir / "thumb.jpg"
-    _write_thumb(panel_path, thumb_path)
-    # 然后通过 storage backend 拿到对外可访问的 URL（MinIO 模式会另写一份到对象存储）
+
     storage = get_storage()
     panel_key = f"{req.session_id}/dynamic/{node_id}/panel.png"
     thumb_key = f"{req.session_id}/dynamic/{node_id}/thumb.jpg"
-    panel_url = storage.save_bytes(panel_key, img_bytes, content_type="image/png")
-    try:
-        thumb_url = storage.save_bytes(thumb_key, thumb_path.read_bytes(), content_type="image/jpeg")
-    except Exception:
-        thumb_url = panel_url
 
-    # cleanup refboard for tidiness
-    if ref_board and ref_board.exists():
+    is_local = isinstance(storage, LocalStorage)
+    if is_local:
+        # LocalStorage.save_bytes writes to OUTPUTS_ROOT/<key>, which is the exact
+        # path we just wrote panel_path to — calling it would only duplicate the
+        # write. Use the deterministic static URL instead.
+        panel_url = storage.url_for(panel_key)
+    else:
+        # Remote storage: the local file isn't served, so the panel must be uploaded
+        # before we can return a working URL.
+        panel_url = storage.save_bytes(panel_key, img_bytes, content_type="image/png")
+
+    # thumb_url is deterministic for both backends; the file/object is produced in
+    # the deferred finalize below (only used by history/list views, not the reveal).
+    thumb_url = storage.url_for(thumb_key)
+
+    node_meta = {
+        "node_id": node_id,
+        "summary": summary,
+        "narration": narration,
+        "dialogue": dialogue,
+        "storyboard_panels": panels,
+        "ops": [op.model_dump() for op in req.ops],
+    }
+
+    def _finalize() -> None:
+        # thumbnail (PIL re-encode) + remote thumb upload + node.json + refboard
+        # cleanup — none of these block the comic reveal, so run them off the
+        # critical path (after the response is sent when BackgroundTasks is wired).
         try:
-            ref_board.unlink()
-        except Exception:
-            pass
+            thumb_path = out_dir / "thumb.jpg"
+            _write_thumb(panel_path, thumb_path)
+            if not is_local:
+                storage.save_bytes(thumb_key, thumb_path.read_bytes(), content_type="image/jpeg")
+        except Exception as e:
+            log.warning("[interact] thumb finalize failed (node=%s): %s", node_id, e)
+        try:
+            (out_dir / "node.json").write_text(
+                json.dumps(node_meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception as e:
+            log.warning("[interact] node.json write failed (node=%s): %s", node_id, e)
+        if ref_board and ref_board.exists():
+            try:
+                ref_board.unlink()
+            except Exception:
+                pass
 
-    # Persist panels.json for possible debugging
-    (out_dir / "node.json").write_text(
-        json.dumps(
-            {
-                "node_id": node_id,
-                "summary": summary,
-                "narration": narration,
-                "dialogue": dialogue,
-                "storyboard_panels": panels,
-                "ops": [op.model_dump() for op in req.ops],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    if background is not None:
+        background.add_task(_finalize)
+    else:
+        _finalize()
 
     storyboard_lines = _build_storyboard_lines(panels, narration)
     log.info("[interact] total %.1fs — done, node_id=%s", time.time() - t0, node_id)

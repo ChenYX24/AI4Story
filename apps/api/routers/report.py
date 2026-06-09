@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..config import DASHSCOPE_API_KEY
+from ..config import LLM_API_KEY
 from ..models import ReportRequest, ReportResponse
 from ..services.report_service import build_report
 
@@ -13,8 +13,8 @@ router = APIRouter()
 
 @router.post("/report", response_model=ReportResponse)
 def report(req: ReportRequest) -> ReportResponse:
-    if not DASHSCOPE_API_KEY:
-        raise HTTPException(status_code=424, detail="服务器未配置 DASHSCOPE_API_KEY")
+    if not LLM_API_KEY:
+        raise HTTPException(status_code=424, detail="服务器未配置 LLM_API_KEY")
     try:
         payload = build_report(req)
     except FileNotFoundError:
@@ -35,8 +35,8 @@ def _sse_event(event: str, data: dict) -> str:
 
 @router.post("/report/stream")
 async def report_stream(req: ReportRequest) -> StreamingResponse:
-    if not DASHSCOPE_API_KEY:
-        raise HTTPException(status_code=424, detail="服务器未配置 DASHSCOPE_API_KEY")
+    if not LLM_API_KEY:
+        raise HTTPException(status_code=424, detail="服务器未配置 LLM_API_KEY")
 
     async def gen():
         # Stage A: analyze — 按 interactions 数量展开 per-scene 进度

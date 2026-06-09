@@ -14,7 +14,10 @@ def _format_ops(interactions: list) -> str:
             names = "、".join(p.name for p in it.custom_props)
             lines.append(f"  小朋友创造的新物品：{names}")
         for i, op in enumerate(it.ops, 1):
-            if op.subject and op.target:
+            if op.participants:
+                names = "、".join(p.name for p in op.participants)
+                lines.append(f"  {i}. 涉及「{names}」：{op.action}")
+            elif op.subject and op.target:
                 lines.append(f"  {i}. 让「{op.subject}」对「{op.target}」：{op.action}")
             elif op.subject:
                 lines.append(f"  {i}. 让「{op.subject}」：{op.action}")
@@ -31,13 +34,15 @@ def _compute_stats(interactions: list) -> dict[str, int]:
     scenes_changed = len(interactions)
     two_way_ops = sum(1 for it in interactions for op in it.ops if op.subject and op.target)
     single_ops = sum(1 for it in interactions for op in it.ops if op.subject and not op.target)
-    freeform_ops = sum(1 for it in interactions for op in it.ops if not op.subject)
+    participant_ops = sum(1 for it in interactions for op in it.ops if op.participants)
+    freeform_ops = sum(1 for it in interactions for op in it.ops if not op.subject and not op.participants)
     return {
         "total_ops": total_ops,
         "total_custom": total_custom,
         "scenes_changed": scenes_changed,
         "two_way_ops": two_way_ops,
         "single_ops": single_ops,
+        "participant_ops": participant_ops,
         "freeform_ops": freeform_ops,
     }
 

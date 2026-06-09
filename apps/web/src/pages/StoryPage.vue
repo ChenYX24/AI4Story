@@ -10,11 +10,13 @@ import { useInteractStore } from "@/stores/interact";
 import { useToastStore } from "@/stores/toast";
 import BaseModal from "@/components/BaseModal.vue";
 import { useASR } from "@/composables/useASR";
+import { useMicLevel } from "@/composables/useMicLevel";
+import AudioWaveform from "@/components/AudioWaveform.vue";
 import { useTTSPreload } from "@/composables/useTTSPreload";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
-import { postChat, postReport, fetchChatSuggestions } from "@/api/endpoints";
+import { postChat, postInteract, postReport, fetchChatSuggestions } from "@/api/endpoints";
 import { thumbUrl } from "@/api/client";
-import type { Scene, InteractResponse } from "@/api/types";
+import type { Scene, InteractRequest, InteractResponse, Operation } from "@/api/types";
 
 const props = defineProps<{ id: string }>();
 const route = useRoute();
@@ -24,6 +26,7 @@ const sess = useSessionStore();
 const interactStore = useInteractStore();
 const toast = useToastStore();
 const asr = useASR({ lang: "zh-CN" });
+const micLevel = useMicLevel();
 const tts = useTTSPreload();
 
 const loading = ref(true);
@@ -80,12 +83,14 @@ async function loadCursor(idx: number) {
         dynamicNode.value = null;
         pendingDynamicPreview.value = pending?.previewUrl || null;
         pendingDynamicError.value = pending?.error || null;
+        interactiveOps.value = [];
       } else {
         // 源 interactive 场景的 meta 仍然作为 scene.value 背景（供 summary 卡用），但 type 在模板分支里按 dynamicNode 优先
         scene.value = await store.ensureScene(node.sceneIdx).catch(() => null as any);
         dynamicNode.value = dyn.payload;
         pendingDynamicPreview.value = null;
         pendingDynamicError.value = null;
+        interactiveOps.value = [];
         store.trackComic(dyn.payload.comic_url);
         if (dyn.payload.storyboard?.length) {
           tts.preload(dyn.payload.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id, speaker_gender: l.speaker_gender })));
@@ -101,6 +106,10 @@ async function loadCursor(idx: number) {
       dynamicNode.value = null;
       pendingDynamicPreview.value = null;
       pendingDynamicError.value = null;
+      const savedInteract = sc.type === "interactive" && activeSessionId.value
+        ? interactStore.get(activeSessionId.value, sc.index)
+        : undefined;
+      interactiveOps.value = savedInteract?.ops?.map((o) => ({ ...o })) || [];
       // narrative + interactive 都可能携带 storyboard（旁白 + 0-2 句对白）
       if (sc.storyboard?.length) {
         tts.preload(sc.storyboard.map((l) => ({ text: l.text, speaker: l.speaker, tone: l.tone, story_id: props.id, speaker_gender: l.speaker_gender })));
@@ -207,6 +216,54 @@ function goReport() {
   sess.completeSession(sid, buildCurrentPlayState() || currentPlayState());
   startReportInBackground();
   router.push({ name: "report", params: { id: props.id }, query: { sid } });
+}
+
+function isLastInteractiveScene(sceneIdx: number): boolean {
+  const scenes = store.current?.scenes || [];
+  return !scenes.some((s) => s.type === "interactive" && s.index > sceneIdx);
+}
+
+function onInteractGenerate(request: InteractRequest) {
+  const sourceSceneIdx = scene.value?.index;
+  if (sourceSceneIdx === undefined) return;
+  const sourceGoal = scene.value?.interaction_goal;
+  const previewUrl = nextPreviewComicUrl.value;
+  store.recordPendingDynamic(sourceSceneIdx, {
+    previewUrl,
+    snapOps: request.ops,
+    snapProps: request.custom_props,
+    startedAt: new Date().toISOString(),
+  });
+  const insertedAt = store.insertDynamicAfter(store.cursor, sourceSceneIdx);
+  void loadCursor(insertedAt);
+
+  void postInteract(request).then((payload) => {
+    store.addInteraction({
+      scene_idx: sourceSceneIdx,
+      interaction_goal: sourceGoal,
+      ops: request.ops,
+      custom_props: request.custom_props,
+      dynamic_summary: payload.summary,
+      comic_url: payload.comic_url,
+    });
+    store.recordDynamic(sourceSceneIdx, {
+      payload,
+      snapOps: request.ops,
+      snapProps: request.custom_props,
+    });
+    sess.markGeneratedNotice(props.id);
+    toast.push("新的故事段落已经生成", "success");
+    if (isLastInteractiveScene(sourceSceneIdx)) startReportInBackground();
+    const active = store.flow[store.cursor];
+    if (active?.type === "dynamic" && active.sceneIdx === sourceSceneIdx) {
+      void loadCursor(store.cursor);
+    }
+  }).catch((e: any) => {
+    const msg = e?.message || String(e);
+    store.failPendingDynamic(sourceSceneIdx, msg);
+    pendingDynamicError.value = msg;
+    toast.push(`生成失败：${msg}`, "error");
+  });
 }
 
 async function advanceNode() {
@@ -350,7 +407,7 @@ async function startMic() {
     const t = await asr.listenOnce();
     if (t) await sendChat(t);
   } catch (e: any) {
-    toast.push(`没听清：${e.message}`, "warn");
+    toast.push(e?.message || "语音识别失败，请重试", "warn");
   }
 }
 
@@ -560,6 +617,37 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
 
 // 互动场景生成下一幕时的 loading 背景图：优先用当前互动场景自己的"原故事发展过程四格图"。
 // 老故事可能没生成这张图，回退到下一幕（旧逻辑）。
+const nextPreviewComicUrl = computed<string | undefined>(() => {
+  const storyId = store.current?.id || props.id;
+  const currentNode = store.flow[store.cursor];
+
+  if (currentNode?.type === "interactive") {
+    const cur = store.sceneCache?.get?.(`${storyId}:` + currentNode.sceneIdx);
+    if (cur?.comic_url) return thumbUrl(cur.comic_url, 700);
+    if (storyId === "little_red_riding_hood") {
+      const pad = String(currentNode.sceneIdx).padStart(3, "0");
+      return `/assets/scenes/${pad}/comic/panel.png`;
+    }
+  }
+
+  const nextIdx = store.cursor + 1;
+  if (nextIdx >= store.flow.length) return undefined;
+  const nextNode = store.flow[nextIdx];
+  const cached = store.sceneCache?.get?.(`${storyId}:` + nextNode.sceneIdx);
+  if (cached?.comic_url) return thumbUrl(cached.comic_url, 700);
+  if (cached?.background_url) return thumbUrl(cached.background_url, 800);
+  const pad = String(nextNode.sceneIdx).padStart(3, "0");
+  if (storyId && storyId !== "little_red_riding_hood") return undefined;
+  return nextNode.type === "narrative"
+    ? `/assets/scenes/${pad}/comic/panel.png`
+    : `/assets/scenes/${pad}/background/background.png`;
+});
+
+const interactiveOps = ref<Operation[]>([]);
+
+const interactiveRef = ref<{ askComplete: () => void; isGenerating: () => boolean } | null>(null);
+function callInteractiveComplete() { interactiveRef.value?.askComplete(); }
+const interactiveGenerating = computed(() => interactiveRef.value?.isGenerating?.() ?? false);
 
 // ref 拿到 InteractiveView 以调用暴露方法（完成/清空）
 </script>
@@ -699,9 +787,13 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
                 <!-- 互动 -->
                 <template v-else>
                   <InteractiveView
+                    ref="interactiveRef"
+                    v-model:ops="interactiveOps"
                     :scene="scene"
                     :story-id="props.id"
                     :session-id="currentSessionId()"
+                    :next-comic-url="nextPreviewComicUrl"
+                    @generate="onInteractGenerate"
                   />
                 </template>
               </div>
@@ -744,13 +836,28 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
                     {{ comicView === 'custom' ? '✨ 新故事' : '📖 原故事' }}
                   </BaseButton>
                 </div>
+                <!-- 语音输入实时波形 —— 居中覆盖底部栏，监听时显示，提示用户音频正在采集 -->
+                <div
+                  v-if="micLevel.active.value"
+                  class="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 z-10 pointer-events-none fade-in"
+                >
+                  <AudioWaveform :active="micLevel.active.value" />
+                </div>
                 <div class="ml-auto flex items-center gap-2">
                   <BaseButton variant="ghost" size="sm" pill @click="router.push({ name: 'retell', params: { id: props.id } })">
                     🔄 复述
                   </BaseButton>
-                  <BaseButton size="sm" pill @click="advanceNode">
+                  <BaseButton
+                    v-if="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic"
+                    size="sm"
+                    pill
+                    :disabled="interactiveOps.length === 0 || interactiveGenerating"
+                    @click="callInteractiveComplete"
+                  >
+                    {{ interactiveGenerating ? "AI 正在画…" : `✨ 完成 (${interactiveOps.length}) 并生成下一幕` }}
+                  </BaseButton>
+                  <BaseButton v-else size="sm" pill @click="advanceNode">
                     <template v-if="isLast">📊 查看报告</template>
-                    <template v-else-if="node?.type === 'interactive'">✨ 看看故事怎么发展</template>
                     <template v-else>继续 ⏭</template>
                   </BaseButton>
                 </div>
@@ -767,6 +874,10 @@ const isPendingDynamic = computed(() => node.value?.type === "dynamic" && !dynam
           <p class="text-sm text-ink-soft leading-relaxed m-0">
             {{ scene?.summary || scene?.narration || store.current?.story_summary || "" }}
           </p>
+        </BaseCard>
+
+        <BaseCard v-show="node?.type === 'interactive' && !dynamicNode && !isPendingDynamic" class="p-4">
+          <div id="interact-inputs-slot"></div>
         </BaseCard>
 
         <!-- 旁白流（narrative / dynamic / pending-dynamic 都用同一套逐句展开；

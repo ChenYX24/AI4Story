@@ -7,9 +7,10 @@ from pathlib import Path
 from PIL import Image
 
 from ..config import (
-    ARK_API_KEY,
     OUTPUTS_ROOT,
     PROJECT_ROOT,
+    SEEDREAM_API_KEY,
+    SEEDREAM_BASE_URL,
     SEEDREAM_MODEL,
     SEEDREAM_PROVIDER,
     SEEDREAM_SIZE,
@@ -115,8 +116,8 @@ def create_custom_prop(
         except Exception as e:
             raise RuntimeError(f"无法读取参考图：{e}") from e
     else:
-        if not ARK_API_KEY:
-            raise RuntimeError("ARK_API_KEY 未配置，无法生成物品")
+        if not SEEDREAM_API_KEY:
+            raise RuntimeError("SEEDREAM_API_KEY 未配置，无法生成物品")
         reference_inputs: list[str | Path] | None = None
         if reference_image_url:
             try:
@@ -124,11 +125,12 @@ def create_custom_prop(
             except Exception as e:
                 raise RuntimeError(f"无法读取参考图：{e}") from e
         raw_png = generate_image_bytes(
-            api_key=ARK_API_KEY,
+            api_key=SEEDREAM_API_KEY,
             prompt=_build_prompt(name, description, has_reference=bool(reference_image_url)),
             size=SEEDREAM_SIZE,
             model=SEEDREAM_MODEL,
             provider=SEEDREAM_PROVIDER,
+            base_url=SEEDREAM_BASE_URL,
             reference_images=reference_inputs,
             timeout=SEEDREAM_TIMEOUT,
         )
@@ -255,8 +257,8 @@ def create_custom_props_batch(
     """
     if not items:
         return []
-    if not ARK_API_KEY:
-        raise RuntimeError("ARK_API_KEY 未配置，无法生成物品")
+    if not SEEDREAM_API_KEY:
+        raise RuntimeError("SEEDREAM_API_KEY 未配置，无法生成物品")
 
     items = items[:9]
     real_count = len(items)
@@ -283,11 +285,12 @@ def create_custom_props_batch(
     )
 
     raw_png = generate_image_bytes(
-        api_key=ARK_API_KEY,
+        api_key=SEEDREAM_API_KEY,
         prompt=prompt,
         size=SEEDREAM_SIZE,
         model=SEEDREAM_MODEL,
         provider=SEEDREAM_PROVIDER,
+        base_url=SEEDREAM_BASE_URL,
         timeout=SEEDREAM_TIMEOUT,
     )
 

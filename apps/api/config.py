@@ -20,15 +20,47 @@ ARK_API_KEY = os.getenv("ARK_API_KEY", "")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 QWEN_ASR_MODEL = os.getenv("QWEN_ASR_MODEL", "qwen3-asr-flash-2026-02-10")
 
-# Chat / 文本生成 LLM —— 默认走 mikaovo.ai 的 OpenAI-compatible 通道，模型 gpt-5-4。
-# 不走 DashScope（DASHSCOPE_API_KEY 仍保留给 ASR call_asr_audio 用）。
-# 调用方读取以下三个变量；缺失 LLM_API_KEY 时回落到 DASHSCOPE_API_KEY 让旧部署不直接断。
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.mikaovo.ai/v1").rstrip("/")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5-4")
+
+def _normalize_openai_base_url(raw: str | None, default: str) -> str:
+    base = (raw or default).strip().rstrip("/")
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")]
+    if base.endswith("/images/generations"):
+        base = base[: -len("/images/generations")]
+    tail = base.rsplit("/", 1)[-1]
+    if tail.startswith("v") and tail[1:].replace(".", "").isdigit():
+        return base
+    return f"{base}/v1"
+
+
+# Chat / text LLM. DASHSCOPE_API_KEY is kept for ASR only.
+LLM_BASE_URL = _normalize_openai_base_url(
+    os.getenv("LLM_BASE_URL") or os.getenv("API_ENDPOINT"),
+    "https://api.mikaovo.ai",
+)
+LLM_MODEL = os.getenv("LLM_MODEL", "grok-4.3")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip() or DASHSCOPE_API_KEY
 
 SEEDREAM_MODEL = os.getenv("SEEDREAM_MODEL", "doubao-seedream-5-0-lite-260128")
-SEEDREAM_PROVIDER = os.getenv("SEEDREAM_PROVIDER", "ark")
+SEEDREAM_API_KEY = (
+    os.getenv("SEEDREAM_API_KEY", "").strip()
+    or os.getenv("ARK_API_KEY", "").strip()
+    or LLM_API_KEY
+)
+SEEDREAM_BASE_URL = _normalize_openai_base_url(
+    os.getenv("SEEDREAM_BASE_URL") or os.getenv("API_ENDPOINT") or os.getenv("LLM_BASE_URL"),
+    "https://api.mikaovo.ai",
+)
+SEEDREAM_PROVIDER = os.getenv("SEEDREAM_PROVIDER") or (
+    "ark"
+    if (
+        os.getenv("ARK_API_KEY")
+        and not os.getenv("SEEDREAM_API_KEY")
+        and not os.getenv("API_ENDPOINT")
+        and not os.getenv("SEEDREAM_BASE_URL")
+    )
+    else "openai"
+)
 SEEDREAM_SIZE = os.getenv("SEEDREAM_SIZE", "1920x1920")
 SEEDREAM_TIMEOUT = int(os.getenv("SEEDREAM_TIMEOUT", "180"))
 

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -9,10 +10,14 @@ from tqdm import tqdm
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.http_retry import post_with_retry  # noqa: E402
 # Chat / 文本生成默认走 mikaovo.ai 的 OpenAI-compatible 通道；脚本端可用 --base-url / --model 覆盖。
 # 同时支持 LLM_BASE_URL / LLM_MODEL 环境变量（与 apps/api/config.py 保持一致）。
 DEFAULT_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.mikaovo.ai/v1").rstrip("/")
-DEFAULT_MODEL = os.getenv("LLM_MODEL", "gpt-5-4")
+DEFAULT_MODEL = os.getenv("LLM_MODEL", "grok-4.3")
 NARRATIVE_SCENE = "叙事场景"
 INTERACTIVE_SCENE = "交互场景"
 
@@ -746,7 +751,7 @@ def post_chat(api_key: str, base_url: str, payload: dict[str, Any], timeout: int
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    response = post_with_retry(url, retries=2, headers=headers, json=payload, timeout=timeout)
     if response.status_code >= 400:
         raise RuntimeError(
             f"Request failed with HTTP {response.status_code} at {url}\n"
@@ -906,7 +911,7 @@ def main() -> None:
     parser.add_argument("--output", default=str(PROJECT_ROOT / "outputs" / "story_scenes" / "story_scenes.json"), help="Path to save the parsed scene JSON.")
     parser.add_argument("--raw-output", default=str(PROJECT_ROOT / "outputs" / "story_scenes" / "story_scenes_raw.json"), help="Path to save the raw API response.")
     parser.add_argument("--raw-text-output", default=str(PROJECT_ROOT / "outputs" / "story_scenes" / "story_scenes_raw_text.txt"), help="Path to save the raw model text before JSON parsing.")
-    parser.add_argument("--api-key", default=None, help="Bailian API key. Defaults to DASHSCOPE_API_KEY env var.")
+    parser.add_argument("--api-key", default=None, help="LLM API key. Defaults to LLM_API_KEY, then DASHSCOPE_API_KEY.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Bailian OpenAI-compatible base URL.")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Model name to call.")
     parser.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature.")
@@ -916,9 +921,9 @@ def main() -> None:
     parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress display.")
     args = parser.parse_args()
 
-    api_key = args.api_key or os.getenv("DASHSCOPE_API_KEY")
+    api_key = args.api_key or os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
-        raise ValueError("Missing API key. Set DASHSCOPE_API_KEY or pass --api-key.")
+        raise ValueError("Missing API key. Set LLM_API_KEY or pass --api-key.")
 
     parsed, raw, raw_text = call_bailian_chat(
         api_key=api_key,

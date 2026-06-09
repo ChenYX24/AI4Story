@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from ..config import ARK_API_KEY, DASHSCOPE_API_KEY
+from ..config import DASHSCOPE_API_KEY, SEEDREAM_API_KEY
 from ..story_registry import create_custom_story_record, custom_story_workspace, update_custom_story_record
 from .custom_story_service import schedule_custom_story_build
 from .qwen_service import QwenError, call_asr_audio, call_json
@@ -38,8 +38,8 @@ _BILIBILI_HEADERS = {
 
 def submit_video_story(url: str, title: str = "", owner_user_id: str | None = None) -> dict[str, Any]:
     clean_url = _validate_bilibili_url(url)
-    if not ARK_API_KEY:
-        raise RuntimeError("服务器未配置 ARK_API_KEY，暂时不能生成视频故事。")
+    if not SEEDREAM_API_KEY:
+        raise RuntimeError("服务器未配置 SEEDREAM_API_KEY，暂时不能生成视频故事。")
     if not DASHSCOPE_API_KEY:
         raise RuntimeError("服务器未配置 DASHSCOPE_API_KEY，暂时不能识别视频音频。")
 

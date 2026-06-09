@@ -3,9 +3,10 @@ from pathlib import Path
 
 from ..asset_resolver import path_for, resolve_interactive_asset
 from ..config import (
-    ARK_API_KEY,
     OUTPUTS_ROOT,
     PROJECT_ROOT,
+    SEEDREAM_API_KEY,
+    SEEDREAM_BASE_URL,
     SEEDREAM_MODEL,
     SEEDREAM_PROVIDER,
     SEEDREAM_SIZE,
@@ -77,11 +78,12 @@ def run_interaction(req: InteractRequest) -> InteractResponse:
 
     try:
         img_bytes = generate_image_bytes(
-            api_key=ARK_API_KEY,
+            api_key=SEEDREAM_API_KEY,
             prompt=prompt,
             size=SEEDREAM_SIZE,
             model=SEEDREAM_MODEL,
             provider=SEEDREAM_PROVIDER,
+            base_url=SEEDREAM_BASE_URL,
             reference_images=[board_path],
             timeout=SEEDREAM_TIMEOUT,
         )

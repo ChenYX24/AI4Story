@@ -15,8 +15,9 @@ cd /path/to/AI4Story
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate ai4story
 pip install -r requirements.txt
 
-export ARK_API_KEY=sk-...            # 必须：Seedream
-export DASHSCOPE_API_KEY=sk-...      # 可选：叙事聊天用 Qwen
+export SEEDREAM_API_KEY=sk-...       # 必须：Seedream
+export LLM_API_KEY=sk-...            # 必须：叙事/聊天/报告
+export LLM_MODEL=grok-4.3
 
 uvicorn apps.api.main:app --reload --port 8000
 open http://localhost:8000           # 推荐 Chrome / Edge（语音识别支持）

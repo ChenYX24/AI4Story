@@ -8,15 +8,29 @@ import { useInteractStore } from "@/stores/interact";
 import { useStoryStore } from "@/stores/story";
 import { fetchPlacements, createProp, uploadImage } from "@/api/endpoints";
 import { thumbUrl } from "@/api/client";
-import type { Scene, SceneCharacter, SceneProp, CustomProp } from "@/api/types";
+import type { Scene, SceneCharacter, SceneProp, Transform, Operation, CustomProp } from "@/api/types";
+import BaseButton from "./BaseButton.vue";
 import SketchPadModal from "./SketchPadModal.vue";
 import CustomPropCreateModal from "./CustomPropCreateModal.vue";
 import MyAssetsModal from "./MyAssetsModal.vue";
+import { useASR } from "@/composables/useASR";
 
-const props = defineProps<{ scene: Scene; storyId: string; sessionId: string }>();
+const props = defineProps<{ scene: Scene; storyId: string; sessionId: string; nextComicUrl?: string }>();
+const emit = defineEmits<{
+  (e: "generate", request: {
+    story_id: string;
+    session_id: string;
+    scene_idx: number;
+    placements: Transform[];
+    ops: Operation[];
+    custom_props: CustomProp[];
+  }): void;
+}>();
+const ops = defineModel<Operation[]>("ops", { default: () => [] });
 
 const toast = useToastStore();
 const sessions = useSessionStore();
+const asr = useASR({ lang: "zh-CN" });
 const assetShelf = useAssetShelfStore();
 const interactStore = useInteractStore();
 const storyStore = useStoryStore();
@@ -43,6 +57,8 @@ interface PlacedItem {
 
 const placed = ref<PlacedItem[]>([]);
 const customProps = ref<CustomProp[]>([]);
+const generating = ref(false);
+const confirmingComplete = ref(false);
 
 interface PendingProp {
   tempId: string;
@@ -52,9 +68,29 @@ interface PendingProp {
 const pendingProps = ref<PendingProp[]>([]);
 
 const selectedId = ref<string | null>(null);
+const participantIds = ref<Set<string>>(new Set());
+const actionText = ref("");
 const newPropName = ref("");
 const latestDropId = ref<string | null>(null);
 const sessionId = computed(() => props.sessionId);
+
+async function micRecognize(): Promise<string | null> {
+  if (!asr.supported) {
+    toast.push("当前浏览器不支持语音输入，建议使用 Chrome", "warn");
+    return null;
+  }
+  if (asr.listening.value) return null;
+  try {
+    return (await asr.listenOnce()).trim() || null;
+  } catch (e: any) {
+    toast.push(e?.message || "语音识别失败，请重试", "warn");
+    return null;
+  }
+}
+async function micFillAction() {
+  const t = await micRecognize();
+  if (t) actionText.value = t;
+}
 
 // ---- 渐进式引导 ----
 const hasDragged = ref(false);
@@ -131,8 +167,9 @@ async function loadInitialPlacements() {
 
 onMounted(() => {
   const saved = interactStore.get(sessionId.value, props.scene.index);
-  if (saved && saved.placed.length) {
+  if (saved && (saved.placed.length || saved.ops?.length || saved.customProps.length)) {
     placed.value = saved.placed.map((p) => ({ ...p }));
+    ops.value = (saved.ops || []).map((o) => ({ ...o }));
     customProps.value = [...(saved.customProps || [])];
     hasDragged.value = true;
   } else {
@@ -152,10 +189,11 @@ onBeforeUnmount(() => {
 });
 
 watch(
-  [placed, customProps],
+  [placed, ops, customProps],
   () => {
     interactStore.save(sessionId.value, props.scene.index, {
       placed: placed.value,
+      ops: ops.value,
       customProps: customProps.value,
     });
   },
@@ -165,6 +203,7 @@ watch(
 function persistSceneState() {
   interactStore.save(sessionId.value, props.scene.index, {
     placed: placed.value,
+    ops: ops.value,
     customProps: customProps.value,
   });
 }
@@ -430,11 +469,11 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-// ---- Select / Delete ----
+// ---- Select / participants / Delete ----
 function toggleSelect(item: PlacedItem) {
-  const wasSelected = selectedId.value === item.id;
-  selectedId.value = wasSelected ? null : item.id;
-  if (!wasSelected) onItemInteraction("select");
+  selectedId.value = item.id;
+  toggleParticipant(item.id);
+  onItemInteraction("select");
 }
 
 function onStageBackgroundClick() {
@@ -448,6 +487,11 @@ function removePlaced(id: string) {
     customProps.value = customProps.value.filter((c) => c.url !== item.custom_url);
   }
   if (selectedId.value === id) selectedId.value = null;
+  if (participantIds.value.has(id)) {
+    const next = new Set(participantIds.value);
+    next.delete(id);
+    participantIds.value = next;
+  }
 }
 
 function onStageKey(e: KeyboardEvent) {
@@ -459,6 +503,126 @@ function onStageKey(e: KeyboardEvent) {
       e.preventDefault();
     }
   }
+}
+
+const selectedParticipants = computed(() => (
+  placed.value.filter((p) => participantIds.value.has(p.id))
+));
+
+function isParticipant(id: string) {
+  return participantIds.value.has(id);
+}
+
+function toggleParticipant(id: string) {
+  const next = new Set(participantIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  participantIds.value = next;
+}
+
+function clearParticipants() {
+  participantIds.value = new Set();
+}
+
+function opParticipantLabel(op: Operation) {
+  if (op.participants?.length) return op.participants.map((p) => p.name).join("、");
+  const legacy = [op.subject, op.target].filter(Boolean);
+  return legacy.length ? legacy.join("、") : "未指定对象";
+}
+
+// 自动识别：用户没手动选「涉及对象」时，从输入文字里精确命中三类已有实体——
+// ① 已在舞台上的人物/道具 ② 故事预设的场景人物/道具 ③ 账户素材库里的道具/角色。
+// text.includes 精确子串匹配；按名字长度降序 + 按名字去重，同名优先级：舞台 > 场景预设 > 账户。
+type MatchCand = {
+  name: string;
+  kind: "character" | "object";
+  source: "stage" | "scene" | "account";
+  url?: string;
+};
+
+function collectActionMatches(text: string): MatchCand[] {
+  const cands: MatchCand[] = [];
+  for (const p of placed.value) cands.push({ name: p.name, kind: p.kind, source: "stage" });
+  for (const c of (props.scene.characters || [])) cands.push({ name: c.name, kind: "character", source: "scene", url: c.url });
+  for (const o of (props.scene.props || [])) cands.push({ name: o.name, kind: "object", source: "scene", url: o.url });
+  for (const a of assetShelf.myAssets) cands.push({ name: a.name, kind: a.kind, source: "account", url: a.url });
+
+  const seen = new Set<string>();
+  const matched: MatchCand[] = [];
+  // 长名字优先入选，避免「帽子」抢在「红帽子」前面；同名只取优先级最高的那一个来源。
+  for (const c of cands.filter((x) => x.name && text.includes(x.name)).sort((a, b) => b.name.length - a.name.length)) {
+    if (seen.has(c.name)) continue;
+    seen.add(c.name);
+    matched.push(c);
+  }
+  return matched;
+}
+
+// 把命中的实体放到舞台上（已在舞台上的跳过，保证每个道具只放一次 → 参考图不重复）。
+// 账户素材带 custom_url 作为参考图并登记到 customProps；场景预设用自带 url（后端按名字识别）。
+function placeActionMatches(matched: MatchCand[]) {
+  let spread = 0;
+  for (const c of matched) {
+    if (c.source === "stage") continue;                       // 已经在舞台上
+    if (placed.value.some((p) => p.name === c.name)) continue; // 双保险：同名不重复放
+    const off = spread * 0.08;
+    spread++;
+    const fromAccount = c.source === "account";
+    placed.value.push({
+      id: `${c.kind}-${c.name}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      name: c.name,
+      kind: c.kind,
+      url: c.url,
+      custom_url: fromAccount ? c.url : undefined,
+      isCustom: fromAccount,
+      x: Math.min(0.85, 0.5 + off),
+      y: Math.min(0.8, 0.55 + off),
+      scale: 1,
+      rotation: 0,
+    });
+    if (fromAccount && c.url && !customProps.value.some((x) => x.url === c.url)) {
+      customProps.value = [...customProps.value, { name: c.name, url: c.url }];
+    }
+  }
+}
+
+function addActionOp() {
+  const text = actionText.value.trim();
+  if (!text) {
+    toast.push("先说说你想让故事发生什么", "warn");
+    return;
+  }
+  // 涉及对象优先「文字说了算」：先用输入文字精确命中已有实体（舞台/场景预设/账户），
+  // 命中就把未上台的自动放到舞台（账户素材作为参考图），并以这批命中作为本条动作的涉及。
+  // 这样可避免上一条动作遗留的手动勾选（如拖动道具时误触选中）串到下一条里。
+  // 只有当文字没点到任何实体时，才回退到手动勾选的「涉及对象」（点物体 + 泛泛描述的场景）。
+  let participants: { name: string; kind: "character" | "object" }[] = [];
+  const matched = collectActionMatches(text);
+  if (matched.length) {
+    placeActionMatches(matched);
+    participants = matched.map((c) => ({ name: c.name, kind: c.kind }));
+    onItemInteraction("drag");
+    toast.push(`已识别涉及：${matched.map((c) => c.name).join("、")}`, "success");
+  } else {
+    participants = selectedParticipants.value.map((p) => ({ name: p.name, kind: p.kind }));
+  }
+  const subject = participants[0];
+  const target = participants[1];
+  ops.value.push({
+    subject: subject?.name,
+    subject_kind: subject?.kind,
+    target: target?.name,
+    target_kind: target?.kind,
+    participants,
+    action: text,
+  });
+  actionText.value = "";
+  selectedId.value = null;
+  clearParticipants();
+}
+
+function removeActionOp(index: number) {
+  ops.value = ops.value.filter((_, i) => i !== index);
 }
 
 // ---- Create custom prop ----
@@ -652,6 +816,42 @@ const sidebarProps = computed(() => props.scene.props || []);
 
 const showDragHint = computed(() => !hasDragged.value && !dragHintDismissed.value && placed.value.length === 0);
 const showCreateHighlight = computed(() => hasDragged.value && customProps.value.length === 0);
+
+function askComplete() {
+  if (!ops.value.length) {
+    toast.push("先安排至少一个动作", "warn");
+    return;
+  }
+  confirmingComplete.value = true;
+}
+
+function doComplete() {
+  confirmingComplete.value = false;
+  generating.value = true;
+  const transforms: Transform[] = placed.value.map((p) => ({
+    name: p.name,
+    kind: p.kind,
+    x: p.x,
+    y: p.y,
+    scale: p.scale,
+    rotation: p.rotation,
+    custom_url: p.custom_url,
+  }));
+  emit("generate", {
+    story_id: props.storyId,
+    session_id: sessionId.value,
+    scene_idx: props.scene.index,
+    placements: transforms,
+    ops: ops.value.map((o) => ({ ...o })),
+    custom_props: customProps.value.map((c) => ({ ...c })),
+  });
+}
+
+defineExpose({
+  askComplete,
+  clearOps: () => { ops.value = []; },
+  isGenerating: () => generating.value,
+});
 </script>
 
 <template>
@@ -723,7 +923,11 @@ const showCreateHighlight = computed(() => hasDragged.value && customProps.value
           v-for="item in placed"
           :key="item.id"
           class="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing transition-shadow"
-          :class="[selectedId === item.id && 'z-10', latestDropId === item.id && 'animate-item-drop']"
+          :class="[
+            selectedId === item.id && 'z-10',
+            isParticipant(item.id) && 'z-[9]',
+            latestDropId === item.id && 'animate-item-drop',
+          ]"
           :style="{
             left: `${item.x * 100}%`,
             top: `${item.y * 100}%`,
@@ -741,6 +945,10 @@ const showCreateHighlight = computed(() => hasDragged.value && customProps.value
               拖拽移动 · 双指缩放 · Delete 删除
             </div>
           </div>
+          <div
+            v-if="isParticipant(item.id)"
+            class="absolute -inset-3 rounded-2xl pointer-events-none ring-[3px] ring-gold shadow-[0_0_18px_rgba(245,166,35,0.45)]"
+          ></div>
 
           <div :style="{ transform: `rotate(${item.rotation}deg)` }" class="relative">
             <img
@@ -926,6 +1134,109 @@ const showCreateHighlight = computed(() => hasDragged.value && customProps.value
         </div>
       </aside>
     </div>
+
+    <Teleport to="#interact-inputs-slot" defer>
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs font-semibold text-ink-soft mb-1.5">💬 说说你想让故事发生什么</div>
+          <div class="text-[11px] text-ink-mute mb-2">
+            点击舞台上的人物或道具可多选为“涉及对象”；不选也可以自由描述整个场景。
+          </div>
+          <div class="min-h-[30px] mb-2 flex items-center gap-1.5 flex-wrap">
+            <template v-if="selectedParticipants.length">
+              <span class="text-[11px] text-ink-mute shrink-0">涉及：</span>
+              <button
+                v-for="item in selectedParticipants"
+                :key="item.id"
+                class="px-2 py-1 rounded-full bg-gold/20 border border-gold/40 text-[11px] text-ink hover:bg-gold/30 transition"
+                @click="toggleParticipant(item.id)"
+              >
+                {{ item.name }} ×
+              </button>
+              <button class="text-[11px] text-ink-mute underline hover:text-ink" @click="clearParticipants">
+                清空
+              </button>
+            </template>
+            <span v-else class="text-[11px] text-ink-mute bg-paper-deep rounded-full px-2 py-1">
+              未指定对象，将作为场景事件理解
+            </span>
+          </div>
+          <div class="flex gap-2">
+            <input
+              v-model="actionText"
+              type="text"
+              placeholder="例如：小红帽把鲜花送给大灰狼，让它不要再骗人"
+              class="flex-1 px-3 py-2 text-sm rounded-lg border border-paper-edge bg-white focus:outline-none focus:border-accent-soft"
+              @keydown.enter="addActionOp"
+            />
+            <button
+              :disabled="!asr.supported || asr.listening.value"
+              class="w-9 h-9 rounded-full bg-paper-deep hover:bg-gold-mute text-ink-soft grid place-items-center disabled:opacity-40 transition shrink-0"
+              :class="asr.listening.value && 'bg-warn/30'"
+              :title="asr.supported ? '语音输入' : '当前浏览器不支持语音'"
+              @click="micFillAction"
+            >🎤</button>
+            <button
+              class="px-3 py-2 text-sm rounded-lg bg-paper-deep hover:bg-gold-mute disabled:opacity-50"
+              :disabled="!actionText.trim()"
+              @click="addActionOp"
+            >＋</button>
+          </div>
+        </div>
+        <div v-if="ops.length" class="bg-paper rounded-lg p-2 text-[11px] space-y-1.5">
+          <div class="text-[11px] text-ink-mute font-semibold">动作记录</div>
+          <div v-for="(o, i) in ops" :key="i" class="flex gap-1.5 items-start">
+            <span class="text-accent-deep font-semibold shrink-0">{{ i + 1 }}.</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-ink leading-snug break-words">{{ o.action }}</div>
+              <div class="text-[10px] text-ink-mute leading-snug">涉及：{{ opParticipantLabel(o) }}</div>
+            </div>
+            <button
+              class="w-5 h-5 rounded-full bg-white/70 text-warn hover:bg-warn/10 hover:text-warn/80 shrink-0 grid place-items-center transition"
+              title="删除这条动作"
+              aria-label="删除这条动作"
+              @click="removeActionOp(i)"
+            >×</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="modal">
+        <div
+          v-if="confirmingComplete"
+          class="fixed inset-0 z-[70] bg-cinema/70 backdrop-blur-sm grid place-items-center p-4"
+          @click.self="confirmingComplete = false"
+        >
+          <div class="bg-white rounded-2xl p-6 max-w-[440px] w-full shadow-[var(--shadow-card-lg)] fade-in">
+            <div class="flex items-start gap-3">
+              <div class="text-4xl">✨</div>
+              <div class="flex-1">
+                <h3 class="font-display font-bold text-lg m-0 mb-1">确认推进到下一幕？</h3>
+                <p class="text-sm text-ink-soft m-0">
+                  当前的 <span class="text-accent-deep font-semibold">{{ ops.length }}</span> 个动作
+                  和所有道具摆放将被锁定，交给 AI 作画。稍后不能再修改这一幕。
+                </p>
+              </div>
+            </div>
+            <div v-if="ops.length" class="mt-3 max-h-36 overflow-y-auto no-scrollbar bg-paper rounded-lg p-2 text-[11px] space-y-1">
+              <div v-for="(o, i) in ops" :key="i" class="flex gap-1.5">
+                <span class="text-accent-deep font-semibold shrink-0">{{ i + 1 }}.</span>
+                <div class="min-w-0">
+                  <div class="text-ink leading-snug break-words">{{ o.action }}</div>
+                  <div class="text-[10px] text-ink-mute leading-snug">涉及：{{ opParticipantLabel(o) }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="mt-5 flex justify-end gap-2">
+              <BaseButton variant="soft" size="sm" pill @click="confirmingComplete = false">再想想</BaseButton>
+              <BaseButton size="sm" pill @click="doComplete">✨ 确认生成</BaseButton>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 摄像头 modal -->
     <Teleport to="body">

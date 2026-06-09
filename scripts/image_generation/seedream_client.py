@@ -1,18 +1,26 @@
 import base64
 import logging
 import mimetypes
+import os
 from pathlib import Path
 from typing import Any
 
 import requests
 
+from scripts.http_retry import post_with_retry
+
 log = logging.getLogger(__name__)
+
+# Module-level session: reuse connections (keep-alive + TLS reuse) across the
+# repeated image-generation calls to the same gateway, saving handshake overhead.
+_session = requests.Session()
 
 
 ARK_API_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
 LAS_API_URL = "https://operator.las.cn-beijing.volces.com/api/v1/online/images/generations"
 LAS_API_URL_FALLBACK = "https://operator.las.cn-beijing.volces.com/api/v1/images/generations"
 DEFAULT_MODEL = "doubao-seedream-5-0-lite-260128"
+DEFAULT_OPENAI_BASE_URL = "https://api.mikaovo.ai/v1"
 
 
 def build_grid_prompt(
@@ -59,12 +67,29 @@ def normalize_reference_images(reference_images: list[str | Path] | None) -> lis
     return normalized
 
 
-def resolve_provider_url(provider: str) -> tuple[str, str | None]:
+def _normalize_openai_base_url(raw: str | None) -> str:
+    base = (raw or DEFAULT_OPENAI_BASE_URL).strip().rstrip("/")
+    if base.endswith("/images/generations"):
+        return base[: -len("/images/generations")]
+    if base.endswith("/chat/completions"):
+        return base[: -len("/chat/completions")]
+    tail = base.rsplit("/", 1)[-1]
+    if tail.startswith("v") and tail[1:].replace(".", "").isdigit():
+        return base
+    return f"{base}/v1"
+
+
+def resolve_provider_url(provider: str, base_url: str | None = None) -> tuple[str, str | None]:
+    if provider in {"openai", "mikaovo", "custom"}:
+        root = _normalize_openai_base_url(
+            base_url or os.getenv("SEEDREAM_BASE_URL") or os.getenv("LLM_BASE_URL")
+        )
+        return f"{root}/images/generations", None
     if provider == "ark":
         return ARK_API_URL, None
     if provider == "las":
         return LAS_API_URL, LAS_API_URL_FALLBACK
-    raise ValueError("provider must be 'ark' or 'las'.")
+    raise ValueError("provider must be 'openai', 'mikaovo', 'custom', 'ark', or 'las'.")
 
 
 def generate_image_bytes(
@@ -73,11 +98,12 @@ def generate_image_bytes(
     size: str,
     model: str = DEFAULT_MODEL,
     provider: str = "ark",
+    base_url: str | None = None,
     reference_images: list[str | Path] | None = None,
     extra_payload: dict[str, Any] | None = None,
-    timeout: int = 300,
+    timeout: int = 480,
 ) -> bytes:
-    url, fallback_url = resolve_provider_url(provider)
+    url, fallback_url = resolve_provider_url(provider, base_url=base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -107,10 +133,14 @@ def generate_image_bytes(
     log.info("[seedream] POST %s  model=%s size=%s refs=%d ref_data≈%.0fKB timeout=%ds",
              url, model, size, len(normalized_refs), ref_size_kb, timeout)
 
-    response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    response = post_with_retry(
+        url, session=_session, retries=2, headers=headers, json=payload, timeout=timeout
+    )
     if response.status_code == 404 and fallback_url:
         log.info("[seedream] got 404, retrying with fallback URL")
-        response = requests.post(fallback_url, headers=headers, json=payload, timeout=timeout)
+        response = post_with_retry(
+            fallback_url, session=_session, retries=2, headers=headers, json=payload, timeout=timeout
+        )
     if response.status_code >= 400:
         print(f"[seedream] HTTP {response.status_code} — {response.text[:1000]}", flush=True)
         raise RuntimeError(
@@ -132,9 +162,10 @@ def generate_image_to_path(
     output_path: str | Path,
     model: str = DEFAULT_MODEL,
     provider: str = "ark",
+    base_url: str | None = None,
     reference_images: list[str | Path] | None = None,
     extra_payload: dict[str, Any] | None = None,
-    timeout: int = 300,
+    timeout: int = 480,
 ) -> Path:
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +176,7 @@ def generate_image_to_path(
             size=size,
             model=model,
             provider=provider,
+            base_url=base_url,
             reference_images=reference_images,
             extra_payload=extra_payload,
             timeout=timeout,

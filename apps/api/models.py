@@ -18,11 +18,17 @@ class CustomProp(BaseModel):
     url: str
 
 
+class OperationParticipant(BaseModel):
+    name: str
+    kind: Literal["character", "object"]
+
+
 class Operation(BaseModel):
     subject: str | None = None
     subject_kind: Literal["character", "object"] | None = None
     target: str | None = None
     target_kind: Literal["character", "object"] | None = None
+    participants: list[OperationParticipant] = Field(default_factory=list)
     action: str
 
 

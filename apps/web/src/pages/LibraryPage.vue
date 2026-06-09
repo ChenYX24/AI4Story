@@ -11,7 +11,7 @@ import { useStoryStore } from "@/stores/story";
 import { thumbUrl } from "@/api/client";
 import { useShelfStore } from "@/stores/shelf";
 import { useToastStore } from "@/stores/toast";
-import { deleteCustomStory, patchCustomStory } from "@/api/endpoints";
+import { deleteCustomStory, patchCustomStory, retryCustomStory } from "@/api/endpoints";
 import type { StoryCard } from "@/api/types";
 
 const router = useRouter();
@@ -109,6 +109,26 @@ async function onDelete(id: string, e: MouseEvent) {
     toast.push("已删除", "success");
   } catch (e: any) {
     toast.push(`删除失败：${e.message}`, "error");
+  }
+}
+
+const retrying = ref<Set<string>>(new Set());
+async function onRetry(id: string, e: MouseEvent) {
+  e.stopPropagation();
+  if (retrying.value.has(id)) return;
+  retrying.value = new Set(retrying.value).add(id);
+  try {
+    // 续跑：后端会接着已生成的资源继续，卡片回到「生成中」并由轮询刷新进度
+    const card = await retryCustomStory(id);
+    const target = store.list.find((s) => s.id === id);
+    if (target) Object.assign(target, card);
+    toast.push("已重新开始生成，接着上次的进度继续～", "success");
+  } catch (e: any) {
+    toast.push(`重试失败：${e?.message || e}`, "error");
+  } finally {
+    const next = new Set(retrying.value);
+    next.delete(id);
+    retrying.value = next;
   }
 }
 </script>
@@ -215,14 +235,14 @@ async function onDelete(id: string, e: MouseEvent) {
             <!-- 删除按钮（仅失败的自定义故事） -->
             <button
               v-if="story.status === 'failed' && story.is_custom"
-              class="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/90 text-warn opacity-0 group-hover:opacity-100 transition grid place-items-center"
+              class="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/90 text-warn text-sm leading-none opacity-0 group-hover:opacity-100 transition grid place-items-center"
               @click="(e) => onDelete(story.id, e)"
             >✕</button>
 
             <!-- 编辑标题按钮（仅自定义且可用） -->
             <button
               v-if="story.is_custom && story.available"
-              class="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/90 text-ink-soft opacity-0 group-hover:opacity-100 transition grid place-items-center hover:bg-gold-mute"
+              class="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/90 text-ink-soft text-sm leading-none opacity-0 group-hover:opacity-100 transition grid place-items-center hover:bg-gold-mute"
               title="修改标题"
               @click="(e) => openEdit(story, e)"
             >✏️</button>
@@ -266,6 +286,18 @@ async function onDelete(id: string, e: MouseEvent) {
                 <div class="h-full bg-gradient-to-r from-accent-soft to-accent-deep transition-all" :style="{ width: `${story.progress || 0}%` }"></div>
               </div>
               <div class="text-[11px] text-ink-mute mt-1">{{ story.progress_label || "生成中" }}</div>
+            </div>
+            <!-- 生成失败：错误提示 + 重试（续跑已生成的资源） -->
+            <div v-if="story.status === 'failed' && story.is_custom" class="mt-2">
+              <div class="text-[11px] text-warn line-clamp-2">{{ story.error_message || "生成失败了" }}</div>
+              <BaseButton
+                variant="soft"
+                size="sm"
+                pill
+                class="mt-1.5"
+                :disabled="retrying.has(story.id)"
+                @click="(e: MouseEvent) => onRetry(story.id, e)"
+              >{{ retrying.has(story.id) ? "重试中…" : "🔁 重试" }}</BaseButton>
             </div>
           </div>
         </BaseCard>

@@ -80,6 +80,7 @@ export interface StoryDetail {
 export interface OpItem {
   subject?: string;
   target?: string;
+  participants?: OperationParticipant[];
   action: string;
 }
 export interface CustomProp {
@@ -165,7 +166,12 @@ export interface Operation {
   subject_kind?: "character" | "object";
   target?: string;
   target_kind?: "character" | "object";
+  participants?: OperationParticipant[];
   action: string;
+}
+export interface OperationParticipant {
+  name: string;
+  kind: "character" | "object";
 }
 export interface InteractRequest {
   story_id?: string;

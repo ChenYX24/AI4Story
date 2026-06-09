@@ -6,13 +6,13 @@ from threading import Lock
 
 from ..asset_resolver import url_for
 from ..config import (
-    ARK_API_KEY,
     CUSTOM_STORIES_ROOT,
-    DASHSCOPE_API_KEY,
     LLM_API_KEY,
     LLM_BASE_URL,
     LLM_MODEL,
     PROJECT_ROOT,
+    SEEDREAM_API_KEY,
+    SEEDREAM_BASE_URL,
     SEEDREAM_MODEL,
     SEEDREAM_PROVIDER,
     SEEDREAM_SIZE,
@@ -21,6 +21,7 @@ from ..scene_loader import clear_story_cache, load_story
 from ..story_registry import (
     create_custom_story_record,
     custom_story_workspace,
+    get_custom_story_record,
     story_root,
     update_custom_story_record,
 )
@@ -33,7 +34,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.story.story_scene_splitter import DEFAULT_BASE_URL
 from scripts.workflow.story_asset_workflow import DEFAULT_MAX_WORKERS, DEFAULT_QWEN_MODEL, run_workflow
 
-_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="custom-story")
+def _new_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=2, thread_name_prefix="custom-story")
+
+
+_EXECUTOR = _new_executor()
 _FUTURES: dict[str, Future] = {}
 _FUTURES_LOCK = Lock()
 
@@ -42,8 +47,8 @@ def submit_custom_story(text: str, title: str = "", owner_user_id: str | None = 
     clean = (text or "").strip()
     if not clean:
         raise ValueError("请先输入故事内容。")
-    if not ARK_API_KEY:
-        raise RuntimeError("服务器未配置 ARK_API_KEY，暂时不能生成自定义故事。")
+    if not SEEDREAM_API_KEY:
+        raise RuntimeError("服务器未配置 SEEDREAM_API_KEY，暂时不能生成自定义故事。")
     if not LLM_API_KEY:
         raise RuntimeError("服务器未配置 LLM_API_KEY（或 DASHSCOPE_API_KEY），暂时不能生成自定义故事。")
 
@@ -52,48 +57,117 @@ def submit_custom_story(text: str, title: str = "", owner_user_id: str | None = 
     return record
 
 
-def schedule_custom_story_build(story_id: str, text: str) -> None:
+def schedule_custom_story_build(story_id: str, text: str, *, resume: bool = False) -> None:
+    global _EXECUTOR
     clean = (text or "").strip()
     if not clean:
         raise ValueError("请先输入故事内容。")
-    future = _EXECUTOR.submit(_build_story_assets, story_id, clean)
+    # The module-level thread pool can be left shut down after a dev-server (--reload)
+    # restart — submit() then raises "cannot schedule new futures after …". Recreate
+    # the pool once and retry; if it still fails the interpreter is genuinely tearing
+    # down, so mark the record failed (don't leave it stuck "generating") and surface
+    # a clear, retryable message instead of a 500.
+    try:
+        future = _EXECUTOR.submit(_build_story_assets, story_id, clean, resume)
+    except RuntimeError:
+        _EXECUTOR = _new_executor()
+        try:
+            future = _EXECUTOR.submit(_build_story_assets, story_id, clean, resume)
+        except RuntimeError as exc:
+            update_custom_story_record(
+                story_id,
+                status="failed",
+                error_message="服务正在重启，请稍后再点重试。",
+                progress=0,
+                progress_label="",
+            )
+            raise RuntimeError("服务正在重启，请稍后再点重试。") from exc
     with _FUTURES_LOCK:
         _FUTURES[story_id] = future
     future.add_done_callback(lambda _: _forget_future(story_id))
+
+
+def retry_custom_story(story_id: str) -> dict:
+    """Resume a failed custom-story build using its stored original text.
+
+    Re-runs the asset workflow in *resume* mode: scenes / global assets / per-scene
+    assets that already exist on disk are skipped, so generation continues from
+    where it left off instead of starting over.
+    """
+    record = get_custom_story_record(story_id)
+    if not record:
+        raise ValueError("故事不存在。")
+    text = (record.get("input_text") or "").strip()
+    if not text:
+        raise ValueError("缺少原始故事文本，无法续跑，请重新创建这个故事。")
+    if not SEEDREAM_API_KEY:
+        raise RuntimeError("服务器未配置 SEEDREAM_API_KEY，暂时不能生成自定义故事。")
+    if not LLM_API_KEY:
+        raise RuntimeError("服务器未配置 LLM_API_KEY（或 DASHSCOPE_API_KEY），暂时不能生成自定义故事。")
+
+    with _FUTURES_LOCK:
+        active = _FUTURES.get(story_id)
+        if active is not None and not active.done():
+            raise ValueError("该故事正在生成中，请稍候。")
+
+    update_custom_story_record(
+        story_id,
+        status="generating",
+        error_message=None,
+        progress=max(int(record.get("progress") or 0), 5),
+        progress_label="继续生成中",
+    )
+    schedule_custom_story_build(story_id, text, resume=True)
+    return get_custom_story_record(story_id) or record
 
 
 def _set_progress(story_id: str, progress: int, label: str) -> None:
     update_custom_story_record(story_id, progress=progress, progress_label=label)
 
 
-def _build_story_assets(story_id: str, text: str) -> None:
+def _build_story_assets(story_id: str, text: str, resume: bool = False) -> None:
     workspace = custom_story_workspace(story_id)
     output_root = story_root(story_id)
-    if workspace.exists():
-        shutil.rmtree(workspace)
+    if resume:
+        # Resume: keep whatever was already generated and only fill the gaps.
+        # Reuse the split scenes / global assets when present so the workflow jumps
+        # straight to the per-scene assets it hasn't produced yet (it skips files
+        # that already exist on disk).
+        scenes_done = (output_root / "story_scenes.json").exists()
+        global_done = (output_root / "global" / "manifest.json").exists()
+    else:
+        if workspace.exists():
+            shutil.rmtree(workspace)
+        scenes_done = False
+        global_done = False
     CUSTOM_STORIES_ROOT.mkdir(parents=True, exist_ok=True)
 
     try:
-        _set_progress(story_id, 5, "拆分场景中")
+        _set_progress(story_id, 5, "继续生成中" if resume else "拆分场景中")
         args = Namespace(
             text=text,
             input_file=None,
             output_root=str(output_root),
             scenes_json=str(output_root / "story_scenes.json"),
-            use_existing_scenes=False,
-            use_existing_global=False,
+            use_existing_scenes=scenes_done,
+            use_existing_global=global_done,
             interactive_only=False,
             narrative_only=False,
             # workflow 里的 "dashscope_api_key" 字段名是历史命名，实际是 chat LLM 的 key —
             # 这里传 LLM_API_KEY（默认走 mikaovo.ai）；ASR 在 qwen_service 里另外用 DASHSCOPE_API_KEY。
             dashscope_api_key=LLM_API_KEY,
-            ark_api_key=ARK_API_KEY,
+            ark_api_key=SEEDREAM_API_KEY,
             qwen_model=LLM_MODEL,
             seedream_model=SEEDREAM_MODEL,
+            seedream_base_url=SEEDREAM_BASE_URL,
             base_url=LLM_BASE_URL,
             provider=SEEDREAM_PROVIDER,
             temperature=0.2,
-            timeout=300,
+            # Moderate per-call timeout: long enough for a slow-but-healthy gateway
+            # response, short enough that a stalled call fails and *retries* (see
+            # post_with_retry) instead of appearing frozen for many minutes. The
+            # substantive resilience comes from the 2x retry on timeouts + 429/5xx.
+            timeout=360,
             asset_size=SEEDREAM_SIZE,
             background_size=SEEDREAM_SIZE,
             target_total_scenes=0,

@@ -18,7 +18,7 @@ mkdir -p /root/hackthron && cd /root/hackthron
 git clone https://github.com/ChenYX24/AI4Story.git
 cd AI4Story
 
-# 复制 .env 模板，填真实 secret（MinIO Key、ARK_API_KEY、DASHSCOPE_API_KEY、TTS Key、AUTH_SALT）
+# 复制 .env 模板，填真实 secret（MinIO Key、SEEDREAM_API_KEY、LLM_API_KEY、DASHSCOPE_API_KEY、TTS Key、AUTH_SALT）
 cp deploy/.env.example .env
 nano .env
 
